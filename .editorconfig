@@ -1,0 +1,61 @@
+# .editorconfig — Google Java Style (closest possible for IntelliJ on-type behavior)
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# Show the Google line-length guide (formatting at 100 is enforced by GJF when you run format)
+ij_visual_guides = 100
+
+[*.xml]
+indent_style = space
+indent_size = 2
+
+[*.java]
+indent_style = space
+indent_size = 2
+tab_width = 2
+ij_continuation_indent_size = 4
+
+# Switch/case indentation (Google: cases indented inside switch)
+ij_java_indent_case_from_switch = true
+
+# Import rules (Google: no wildcard imports; normal imports, blank line, then static imports)
+ij_java_class_count_to_use_import_on_demand = 9999
+ij_java_names_count_to_use_import_on_demand = 9999
+ij_java_imports_layout = import all other; blank_line; import static all other
+
+# Blank lines (Google: generally single blank lines)
+ij_java_blank_lines_after_package = 1
+ij_java_blank_lines_before_imports = 1
+ij_java_blank_lines_after_imports = 1
+ij_java_blank_lines_around_class = 1
+ij_java_blank_lines_around_field = 0
+ij_java_blank_lines_around_method = 1
+ij_java_keep_blank_lines_in_declarations = 1
+ij_java_keep_blank_lines_in_code = 1
+ij_java_keep_blank_lines_before_right_brace = 0
+
+# Brace placement (end of line, K&R-style)
+ij_java_class_brace_style = end_of_line
+ij_java_method_brace_style = end_of_line
+ij_java_block_brace_style = end_of_line
+ij_java_lambda_brace_style = end_of_line
+
+# Spaces (keep these minimal—google-java-format will finalize everything on format)
+ij_java_space_after_comma = true
+ij_java_space_before_comma = false
+ij_java_spaces_within_parentheses = false
+ij_java_spaces_within_method_call_parentheses = false
+ij_java_spaces_within_method_parentheses = false
+ij_java_space_before_method_parentheses = false
+ij_java_spaces_around_assignment_operators = true
+ij_java_spaces_around_lambda_arrow = true
+ij_java_space_before_array_initializer_left_brace = true
+ij_java_spaces_within_array_initializer_braces = false
+
+# Prevent IntelliJ from re-wrapping while typing; let GJF decide on format runs
+ij_wrap_on_typing = false

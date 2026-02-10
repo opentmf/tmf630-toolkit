@@ -1,0 +1,31 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.opentmf.query</groupId>
+    <artifactId>tmf630-toolkit</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <relativePath>../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>tmf630-toolkit-all</artifactId>
+  <name>tmf630-toolkit-all</name>
+  <description>Convenience aggregator: paging + filtering autoconfigure modules</description>
+  <packaging>jar</packaging>
+  <properties>
+    <jacoco.skip>true</jacoco.skip>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.opentmf.query</groupId>
+      <artifactId>tmf630-toolkit-paging-sorting-autoconfigure</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.opentmf.query</groupId>
+      <artifactId>tmf630-toolkit-attribute-filtering-autoconfigure</artifactId>
+    </dependency>
+  </dependencies>
+</project>

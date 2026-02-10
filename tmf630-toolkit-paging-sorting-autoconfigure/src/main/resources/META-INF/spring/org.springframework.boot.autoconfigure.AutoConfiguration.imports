@@ -1,0 +1,2 @@
+org.opentmf.query.tmf630.config.Tmf630WebMvcConfigurer
+org.opentmf.query.tmf630.config.Tmf630ExceptionHandlingAutoConfiguration
