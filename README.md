@@ -16,13 +16,13 @@ For developers: this document is a practical handbook, from setup to advanced Qu
 
 ## Module layout
 
-| Module | Description |
-|--------|-------------|
-| `tmf630-toolkit-paging-sorting-core` | Paging, sorting, field selection (no Boot dependency) |
-| `tmf630-toolkit-paging-sorting-autoconfigure` | Spring Boot auto-configuration for paging/sorting |
-| `tmf630-toolkit-attribute-filtering-core` | Attribute filtering to QueryDSL `Predicate` (no Boot dependency) |
-| `tmf630-toolkit-attribute-filtering-autoconfigure` | Spring Boot auto-configuration for filtering |
-| `tmf630-toolkit-all` | Convenience artifact depending on both autoconfigure modules |
+| Module                                             | Description                                                      |
+|----------------------------------------------------|------------------------------------------------------------------|
+| `tmf630-toolkit-paging-sorting-core`               | Paging, sorting, field selection (no Boot dependency)            |
+| `tmf630-toolkit-paging-sorting-autoconfigure`      | Spring Boot auto-configuration for paging/sorting                |
+| `tmf630-toolkit-attribute-filtering-core`          | Attribute filtering to QueryDSL `Predicate` (no Boot dependency) |
+| `tmf630-toolkit-attribute-filtering-autoconfigure` | Spring Boot auto-configuration for filtering                     |
+| `tmf630-toolkit-all`                               | Convenience artifact depending on both autoconfigure modules     |
 
 ## Choose your dependency
 
@@ -74,9 +74,9 @@ Dependency versions are aligned via Spring Boot BOM `3.5.10`.
 
 ## Configuration prefixes
 
-| Prefix | Purpose |
-|--------|---------|
-| `opentmf.tmf630.paging` | Paging/sorting behavior |
+| Prefix                               | Purpose                        |
+|--------------------------------------|--------------------------------|
+| `opentmf.tmf630.paging`              | Paging/sorting behavior        |
 | `opentmf.tmf630.attribute-filtering` | Query filter parsing and rules |
 
 ### Common paging properties
@@ -188,31 +188,31 @@ Query parameter format: `field.operator=value`
 
 If `implicit-eq-enabled=true`, `field=value` is also supported and treated as `field.eq=value`.
 
-| Operator suffix | Meaning | Example |
-|-----------------|---------|---------|
-| `eq` | equals | `name.eq=Alice` |
-| `ne` | not equals | `surname.ne=Smith` |
-| `eqi` | equals ignore case | `name.eqi=alice` |
-| `nei` | not equals ignore case | `surname.nei=smith` |
-| `gt` | greater than | `birthdate.gt=1990-01-01` |
-| `gte` | greater than or equal | `birthdate.gte=1990-01-01` |
-| `lt` | less than | `birthdate.lt=2000-01-01` |
-| `lte` | less than or equal | `birthdate.lte=2000-01-01` |
-| `between` | value range (2 values) | `birthdate.between=1990-01-01&birthdate.between=1999-12-31` |
-| `in` | in set (multi-value) | `surname.in=Doe&surname.in=Brown` |
-| `nin` | not in set (multi-value) | `surname.nin=Smith&surname.nin=Jones` |
-| `isnull` | is null (no value) | `name.isnull` |
-| `isnotnull` | is not null (no value) | `surname.isnotnull` |
-| `like` | SQL like | `name.like=A%` |
-| `likei` | SQL like ignore case | `name.likei=a%` |
-| `contains` | contains substring | `surname.contains=ow` |
-| `containsi` | contains substring ignore case | `surname.containsi=OW` |
-| `startswith` | starts with | `name.startswith=Da` |
-| `startswithi` | starts with ignore case | `name.startswithi=da` |
-| `endswith` | ends with | `surname.endswith=oe` |
-| `endswithi` | ends with ignore case | `surname.endswithi=OE` |
-| `regex` | regular expression match | `name.regex=^A.*` |
-| `regexi` | regex match ignore case | `name.regexi=^a.*` |
+| Operator suffix | Meaning                        | Example                                                     |
+|-----------------|--------------------------------|-------------------------------------------------------------|
+| `eq`            | equals                         | `name.eq=Alice`                                             |
+| `ne`            | not equals                     | `surname.ne=Smith`                                          |
+| `eqi`           | equals ignore case             | `name.eqi=alice`                                            |
+| `nei`           | not equals ignore case         | `surname.nei=smith`                                         |
+| `gt`            | greater than                   | `birthdate.gt=1990-01-01`                                   |
+| `gte`           | greater than or equal          | `birthdate.gte=1990-01-01`                                  |
+| `lt`            | less than                      | `birthdate.lt=2000-01-01`                                   |
+| `lte`           | less than or equal             | `birthdate.lte=2000-01-01`                                  |
+| `between`       | value range (2 values)         | `birthdate.between=1990-01-01&birthdate.between=1999-12-31` |
+| `in`            | in set (multi-value)           | `surname.in=Doe&surname.in=Brown`                           |
+| `nin`           | not in set (multi-value)       | `surname.nin=Smith&surname.nin=Jones`                       |
+| `isnull`        | is null (no value)             | `name.isnull`                                               |
+| `isnotnull`     | is not null (no value)         | `surname.isnotnull`                                         |
+| `like`          | SQL like                       | `name.like=A%`                                              |
+| `likei`         | SQL like ignore case           | `name.likei=a%`                                             |
+| `contains`      | contains substring             | `surname.contains=ow`                                       |
+| `containsi`     | contains substring ignore case | `surname.containsi=OW`                                      |
+| `startswith`    | starts with                    | `name.startswith=Da`                                        |
+| `startswithi`   | starts with ignore case        | `name.startswithi=da`                                       |
+| `endswith`      | ends with                      | `surname.endswith=oe`                                       |
+| `endswithi`     | ends with ignore case          | `surname.endswithi=OE`                                      |
+| `regex`         | regular expression match       | `name.regex=^A.*`                                           |
+| `regexi`        | regex match ignore case        | `name.regexi=^a.*`                                          |
 
 Notes:
 
