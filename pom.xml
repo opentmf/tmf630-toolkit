@@ -350,6 +350,6 @@
     <url>https://github.com/opentmf/tmf630-toolkit</url>
     <connection>scm:git:https://github.com/opentmf/tmf630-toolkit.git</connection>
     <developerConnection>scm:git:git@github.com:opentmf/tmf630-toolkit.git</developerConnection>
-    <tag>${project.scm.tag}</tag>
+    <tag>HEAD</tag>
   </scm>
 </project>
