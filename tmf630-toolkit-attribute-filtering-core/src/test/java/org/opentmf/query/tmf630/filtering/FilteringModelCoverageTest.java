@@ -43,12 +43,16 @@ class FilteringModelCoverageTest {
             limits,
             AllowlistMode.DENY_ALL,
             UnknownParamBehavior.REJECT,
-            UnknownParamBehavior.IGNORE);
+            UnknownParamBehavior.IGNORE,
+            true,
+            1234);
 
     assertEquals(10, settings.limits().maxClauses());
     assertEquals(3, settings.limits().maxValuesPerKey());
     assertEquals(64, settings.limits().maxRegexLength());
     assertEquals(AllowlistMode.DENY_ALL, settings.allowlistMode());
+    assertTrue(settings.jsonPathFilterEnabled());
+    assertEquals(1234, settings.jsonPathMaxLength());
   }
 
   @Test

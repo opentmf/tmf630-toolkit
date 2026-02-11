@@ -18,6 +18,7 @@ public class Tmf630AttributeFilteringProperties {
   private CombineMode combineRepeatedValues = CombineMode.OR;
   private boolean allowNestedPaths = false;
   private Regex regex = new Regex();
+  private JsonPathFilter jsonPathFilter = new JsonPathFilter();
   private Limits limits = new Limits();
   private Allowlist allowlist = new Allowlist();
   private UnknownParamBehavior onUnknownField = UnknownParamBehavior.REJECT;
@@ -32,7 +33,9 @@ public class Tmf630AttributeFilteringProperties {
         new PredicateLimits(limits.maxClauses, limits.maxValuesPerKey, regex.maxLength),
         allowlist.mode,
         onUnknownField,
-        onUnknownOperator);
+        onUnknownOperator,
+        jsonPathFilter.enabled,
+        jsonPathFilter.maxLength);
   }
 
   public boolean isEnabled() {
@@ -81,6 +84,14 @@ public class Tmf630AttributeFilteringProperties {
 
   public void setLimits(Limits limits) {
     this.limits = limits;
+  }
+
+  public JsonPathFilter getJsonPathFilter() {
+    return jsonPathFilter;
+  }
+
+  public void setJsonPathFilter(JsonPathFilter jsonPathFilter) {
+    this.jsonPathFilter = jsonPathFilter;
   }
 
   public Allowlist getAllowlist() {
@@ -146,6 +157,27 @@ public class Tmf630AttributeFilteringProperties {
 
     public void setMaxValuesPerKey(int maxValuesPerKey) {
       this.maxValuesPerKey = maxValuesPerKey;
+    }
+  }
+
+  public static class JsonPathFilter {
+    private boolean enabled = true;
+    private int maxLength = 2048;
+
+    public boolean isEnabled() {
+      return enabled;
+    }
+
+    public void setEnabled(boolean enabled) {
+      this.enabled = enabled;
+    }
+
+    public int getMaxLength() {
+      return maxLength;
+    }
+
+    public void setMaxLength(int maxLength) {
+      this.maxLength = maxLength;
     }
   }
 

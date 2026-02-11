@@ -70,6 +70,8 @@
     <maven.gpg.plugin.version>3.2.8</maven.gpg.plugin.version>
     <maven.release.plugin.version>3.3.1</maven.release.plugin.version>
     <central.publishing.maven.plugin.version>0.10.0</central.publishing.maven.plugin.version>
+    <failsafe.includes.pattern>**/*IT.java</failsafe.includes.pattern>
+    <tmf630.sql.it.datasource.url>jdbc:tc:postgresql:18.1-alpine:///db</tmf630.sql.it.datasource.url>
   </properties>
 
   <dependencyManagement>
@@ -201,7 +203,7 @@
         <configuration>
           <argLine>${jacocoArgLine}</argLine>
           <includes>
-            <include>**/*IT.java</include>
+            <include>${failsafe.includes.pattern}</include>
           </includes>
         </configuration>
         <executions>
@@ -284,6 +286,36 @@
   </build>
 
   <profiles>
+    <profile>
+      <id>it-postgresql</id>
+      <properties>
+        <tmf630.sql.it.datasource.url>jdbc:tc:postgresql:18.1-alpine:///db</tmf630.sql.it.datasource.url>
+      </properties>
+    </profile>
+    <profile>
+      <id>it-oracle</id>
+      <properties>
+        <tmf630.sql.it.datasource.url>jdbc:tc:oracle:21-slim-faststart:///db</tmf630.sql.it.datasource.url>
+      </properties>
+    </profile>
+    <profile>
+      <id>it-mariadb</id>
+      <properties>
+        <tmf630.sql.it.datasource.url>jdbc:tc:mariadb:11.4.4:///db</tmf630.sql.it.datasource.url>
+      </properties>
+    </profile>
+    <profile>
+      <id>it-mssql</id>
+      <properties>
+        <tmf630.sql.it.datasource.url>jdbc:tc:sqlserver:2022-CU14-ubuntu-22.04:///db</tmf630.sql.it.datasource.url>
+      </properties>
+    </profile>
+    <profile>
+      <id>it-db2</id>
+      <properties>
+        <tmf630.sql.it.datasource.url>jdbc:tc:db2:11.5.0.0a:///db</tmf630.sql.it.datasource.url>
+      </properties>
+    </profile>
     <profile>
       <id>release</id>
       <build>

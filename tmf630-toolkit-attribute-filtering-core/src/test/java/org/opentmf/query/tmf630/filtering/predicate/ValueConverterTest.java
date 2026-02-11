@@ -31,6 +31,7 @@ class ValueConverterTest {
     ValueConverter converter = new ValueConverter(new DefaultFormattingConversionService());
     assertThrows(TmfFilteringException.class, () -> converter.convert("x", NoConverter.class));
     assertThrows(TmfFilteringException.class, () -> converter.convert("x", Integer.class));
+    assertThrows(TmfFilteringException.class, () -> converter.convert("x", void.class));
   }
 
   static class NoConverter {}

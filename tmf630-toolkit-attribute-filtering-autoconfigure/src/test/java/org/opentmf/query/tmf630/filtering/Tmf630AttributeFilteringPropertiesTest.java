@@ -33,6 +33,12 @@ class Tmf630AttributeFilteringPropertiesTest {
     limits.setMaxValuesPerKey(4);
     properties.setLimits(limits);
 
+    Tmf630AttributeFilteringProperties.JsonPathFilter jsonPathFilter =
+        new Tmf630AttributeFilteringProperties.JsonPathFilter();
+    jsonPathFilter.setEnabled(true);
+    jsonPathFilter.setMaxLength(999);
+    properties.setJsonPathFilter(jsonPathFilter);
+
     Tmf630AttributeFilteringProperties.Allowlist allowlist =
         new Tmf630AttributeFilteringProperties.Allowlist();
     allowlist.setMode(AllowlistMode.ALLOW_ALL);
@@ -51,6 +57,8 @@ class Tmf630AttributeFilteringPropertiesTest {
     assertEquals(99, properties.getRegex().getMaxLength());
     assertEquals(12, properties.getLimits().getMaxClauses());
     assertEquals(4, properties.getLimits().getMaxValuesPerKey());
+    assertTrue(properties.getJsonPathFilter().isEnabled());
+    assertEquals(999, properties.getJsonPathFilter().getMaxLength());
     assertEquals(AllowlistMode.ALLOW_ALL, properties.getAllowlist().getMode());
     assertEquals(Map.of("Entity", List.of("name")), properties.getAllowlist().getEntities());
     assertFalse(settings.implicitEqEnabled());
@@ -63,5 +71,7 @@ class Tmf630AttributeFilteringPropertiesTest {
     assertEquals(AllowlistMode.ALLOW_ALL, settings.allowlistMode());
     assertEquals(UnknownParamBehavior.IGNORE, settings.onUnknownField());
     assertEquals(UnknownParamBehavior.IGNORE, settings.onUnknownOperator());
+    assertTrue(settings.jsonPathFilterEnabled());
+    assertEquals(999, settings.jsonPathMaxLength());
   }
 }

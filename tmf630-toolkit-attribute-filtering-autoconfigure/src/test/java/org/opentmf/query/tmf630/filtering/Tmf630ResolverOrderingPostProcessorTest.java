@@ -88,13 +88,19 @@ class Tmf630ResolverOrderingPostProcessorTest {
             new PredicateLimits(10, 3, 64),
             AllowlistMode.ALLOW_ALL,
             UnknownParamBehavior.IGNORE,
-            UnknownParamBehavior.IGNORE);
+            UnknownParamBehavior.IGNORE,
+            true,
+            2048);
     return new Tmf630PredicateArgumentResolver(
         new ParamKeyParser(new OperatorRegistry(), true),
         settings,
         rootEntity -> Set.of(),
         new FieldPathResolver(),
         new ValueConverter(new DefaultFormattingConversionService()),
-        new PredicateFactory(false, 64));
+        new PredicateFactory(false, 64),
+        new JsonPathFilterPredicateBuilder(
+            new FieldPathResolver(),
+            new ValueConverter(new DefaultFormattingConversionService()),
+            new PredicateFactory(false, 64)));
   }
 }

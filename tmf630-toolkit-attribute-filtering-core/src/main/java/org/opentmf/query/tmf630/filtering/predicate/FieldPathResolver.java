@@ -5,6 +5,9 @@ import org.opentmf.query.tmf630.filtering.TmfFilteringException;
 
 import java.beans.Introspector;
 import java.lang.reflect.Field;
+import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.Type;
+import java.util.Collection;
 
 public class FieldPathResolver {
 
@@ -26,7 +29,7 @@ public class FieldPathResolver {
       if (field == null) {
         throw new TmfFilteringException("Unknown field path: " + fieldPath);
       }
-      current = field.getType();
+      current = resolveFieldType(field);
     }
 
     return new ResolvedField(fieldPath, current);
@@ -42,5 +45,20 @@ public class FieldPathResolver {
       }
     }
     return null;
+  }
+
+  private Class<?> resolveFieldType(Field field) {
+    Class<?> fieldType = field.getType();
+    if (!Collection.class.isAssignableFrom(fieldType)) {
+      return fieldType;
+    }
+    Type genericType = field.getGenericType();
+    if (genericType instanceof ParameterizedType parameterizedType) {
+      Type[] args = parameterizedType.getActualTypeArguments();
+      if (args.length == 1 && args[0] instanceof Class<?> elementType) {
+        return elementType;
+      }
+    }
+    return Object.class;
   }
 }

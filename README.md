@@ -1,17 +1,22 @@
 # tmf630-toolkit
 
-`tmf630-toolkit` helps API teams offer rich searching in a simple URL style.
-Clients can request "only records 51-100", "sort by surname descending", or "find people born after 1990 whose surname starts with D" without custom query parsing in each service.
+`tmf630-toolkit` is the adaptation of TMF-630 REST API Design Guidelines for Spring Web MVC.
 
-For non-technical readers: this library gives your API users better filtering and pagination behavior out of the box.
-For developers: this document is a practical handbook, from setup to advanced QueryDSL operators, with examples and expected response shapes.
+When a Spring Boot based microservice references this library, it automatically gains TMF630-style paging/sorting and advanced filtering capabilities through configuration, without writing custom query parsing logic. Using the library from other Spring-based projects is also possible but requires explicit bean wiring.
+
+Clients can request "only records 51-100", "sort by surname descending", or "find people born after 1990 whose surname starts with D" using standard query parameters.
+In addition to the query parameters, clients can also use a JsonPath in the optional `filter=` parameter to express richer grouped conditions (parentheses, AND/OR, comparison operators) in a single query expression. When the backend is a document database (like MongoDB), this filter further allows array correlation.
+
+Release notes and version history are available in [`CHANGELOG.md`](./CHANGELOG.md).
 
 ## What you get
 
 - TMF630-style paging and sorting (`offset`, `limit`, `sort`)
 - Attribute filtering mapped to QueryDSL `Predicate`
-- Range-aware response helpers (`Content-Range`, `X-Total-Count`)
-- Field selection utility for response shaping
+- JsonPath-based `filter=` support merged into the same QueryDSL predicate pipeline
+- Strict same-element array correlation for document backends (Mongo `$elemMatch` translation)
+- Range-aware response helpers (`Content-Range`, `X-Total-Count`, `X-Result-Count`)
+- Field selection utility (`fields=` support) for response shaping
 - Works in both Spring Boot and plain Spring projects
 
 ## Module layout
@@ -24,7 +29,25 @@ For developers: this document is a practical handbook, from setup to advanced Qu
 | `tmf630-toolkit-attribute-filtering-autoconfigure` | Spring Boot auto-configuration for filtering                     |
 | `tmf630-toolkit-all`                               | Convenience artifact depending on both autoconfigure modules     |
 
-## Choose your dependency
+## Dependency management
+
+### First: import opentmf dependency versions
+This will manage the dependencies of the opentmf libraries to use their latest compatible version.
+```xml
+<dependencyManagement>
+  <dependencies>
+    <dependency>
+      <groupId>org.opentmf</groupId>
+      <artifactId>opentmf-versions</artifactId>
+      <version>RELEASE</version>
+      <type>pom</type>
+      <scope>import</scope>
+    </dependency>
+  </dependencies>
+</dependencyManagement>
+```
+
+## Then choose your dependencies
 
 ### Spring Boot (recommended one-liner)
 
@@ -32,7 +55,6 @@ For developers: this document is a practical handbook, from setup to advanced Qu
 <dependency>
   <groupId>org.opentmf.query</groupId>
   <artifactId>tmf630-toolkit-all</artifactId>
-  <version>1.0.0-SNAPSHOT</version>
 </dependency>
 ```
 
@@ -43,14 +65,12 @@ For developers: this document is a practical handbook, from setup to advanced Qu
 <dependency>
   <groupId>org.opentmf.query</groupId>
   <artifactId>tmf630-toolkit-paging-sorting-autoconfigure</artifactId>
-  <version>1.0.0-SNAPSHOT</version>
 </dependency>
 
 <!-- QueryDSL filtering -->
 <dependency>
   <groupId>org.opentmf.query</groupId>
   <artifactId>tmf630-toolkit-attribute-filtering-autoconfigure</artifactId>
-  <version>1.0.0-SNAPSHOT</version>
 </dependency>
 ```
 
@@ -60,17 +80,34 @@ For developers: this document is a practical handbook, from setup to advanced Qu
 <dependency>
   <groupId>org.opentmf.query</groupId>
   <artifactId>tmf630-toolkit-paging-sorting-core</artifactId>
-  <version>1.0.0-SNAPSHOT</version>
 </dependency>
 
 <dependency>
   <groupId>org.opentmf.query</groupId>
   <artifactId>tmf630-toolkit-attribute-filtering-core</artifactId>
-  <version>1.0.0-SNAPSHOT</version>
 </dependency>
 ```
 
 Dependency versions are aligned via Spring Boot BOM `3.5.10`.
+
+## POC databases used
+
+The current proof-of-concept and integration coverage has been verified with these databases:
+
+- PostgreSQL `18.1-alpine` (via Testcontainers `jdbc:tc:postgresql:18.1-alpine:///db`) for JPA/SQL predicate and SQL reflection tests
+- H2 (in-memory) for lightweight JPA-based integration scenarios
+- MongoDB `8.0.5` (via Testcontainers `mongo:8.0.5`) for document-oriented filtering, including JsonPath array-correlation behavior
+- MariaDB `11.4.4` (via Testcontainers profile `it-mariadb`) for SQL/JPA compatibility validation
+- Microsoft SQL Server `2022-CU14-ubuntu-22.04` (via Testcontainers profile `it-mssql`) for SQL/JPA compatibility validation
+- Oracle XE `21-slim-faststart` (via Testcontainers profile `it-oracle`) for dedicated SQL/JPA validation
+- IBM DB2 `11.5.0.0a` (via Testcontainers profile `it-db2`) for dedicated SQL/JPA validation
+
+Notes:
+
+- JsonPath array-correlation in `filter=` is supported for Mongo/document backends.
+- The same array-correlation pattern is intentionally rejected for JPA backends (HTTP `400`).
+- MariaDB coverage is used as a practical compatibility indicator for the MySQL family due to shared lineage and behavior.
+- Microsoft SQL Server coverage is used as a practical compatibility indicator for Sybase-family behavior due to shared historical lineage.
 
 ## Configuration prefixes
 
@@ -102,6 +139,8 @@ Dependency versions are aligned via Spring Boot BOM `3.5.10`.
 - `opentmf.tmf630.attribute-filtering.allowlist.entities.<EntityName>=...`
 - `opentmf.tmf630.attribute-filtering.on-unknown-field` (`REJECT` or `IGNORE`)
 - `opentmf.tmf630.attribute-filtering.on-unknown-operator` (`REJECT` or `IGNORE`)
+- `opentmf.tmf630.attribute-filtering.json-path-filter.enabled` (default: `true`)
+- `opentmf.tmf630.attribute-filtering.json-path-filter.max-length` (default: `2048`)
 
 ## Developer handbook
 
@@ -249,6 +288,142 @@ X-Result-Count: 2
 ```http
 GET /api/persons?surname.in=Doe&surname.in=Brown&name.isnotnull&offset=0&limit=5
 ```
+
+#### Example C: combining attribute filtering with `filter=` JsonPath
+
+```http
+GET /api/persons?name.eq=gokhan&filter=$[?(@.surname == 'Demir' || @.birthdate >= '1990-01-01')]
+```
+
+Rules for `filter=`:
+
+- must be a JsonPath **filter expression** (`$[?(...)]`)
+- restricted subset is supported: `&&`, `||`, parentheses, and comparison operators (`==`, `!=`, `>`, `>=`, `<`, `<=`)
+- array correlation syntax is supported: `@.arrayField[?(...)]`
+- array correlation uses strict **same-element** semantics
+- for Mongo/document backends, array correlation is translated to explicit Mongo `$elemMatch`
+- for JPA backends, array correlation inside `filter=` is intentionally rejected with `400 Bad Request`
+- invalid or unsupported expression returns `400 Bad Request`
+- attribute params and `filter` are combined by `AND` by default
+- merge override can be sent per request using `filter.combineWithAttributes=AND|OR`
+
+Merge examples:
+
+Default merge (`AND`):
+
+```http
+GET /api/persons?name.eq=gokhan&birthdate.gt=2025-01-01&filter=$[?(@.sex == 'female')]
+```
+
+Effective logic:
+
+`(name == gokhan AND birthdate > 2025-01-01) AND (filter-expression)`
+
+Request-level `OR` override:
+
+```http
+GET /api/persons?name.eq=gokhan&birthdate.gt=2025-01-01&filter=$[?(@.sex == 'female')]&filter.combineWithAttributes=OR
+```
+
+Effective logic:
+
+`(name == gokhan AND birthdate > 2025-01-01) OR (filter-expression)`
+
+#### Example D: strict same-element array correlation (Mongo/document backends)
+
+Given document data similar to:
+
+```json
+{
+  "externalReference": [
+    { "name": "MARKET_ACCOUNT_ID", "id": "OPCO-ID-012" },
+    { "name": "ORDER_REFERENCE", "id": "OPCO-ORDER-012" }
+  ]
+}
+```
+
+Positive (same array item matches both conditions):
+
+```http
+GET /api/orders?filter=$[?(@.externalReference[?(@.name == 'ORDER_REFERENCE' && @.id == 'OPCO-ORDER-012')])]
+```
+
+Negative (cross-element mismatch does **not** match):
+
+```http
+GET /api/orders?filter=$[?(@.externalReference[?(@.name == 'MARKET_ACCOUNT_ID' && @.id == 'OPCO-ORDER-012')])]
+```
+
+Behavior summary:
+
+- Mongo/document: translated to `$elemMatch` and evaluated with same-element semantics
+- JPA: this array-correlation pattern is rejected with `400` (by design)
+
+#### Mongo `filter=` support scope (current state)
+
+Supported subset (Mongo/document backends):
+
+- wrapper form: `$[?(...)]`
+- logical operators: `&&`, `||`
+- grouping with parentheses
+- comparisons: `==`, `!=`, `>`, `>=`, `<`, `<=`
+- literals: string, number, boolean, `null`
+- field paths: `@.field`, `@.nested.field`
+- array correlation: `@.arrayField[?(...)]` with strict same-element semantics via `$elemMatch`
+- merge with attribute filtering in the same request:
+  - default: `AND`
+  - override: `filter.combineWithAttributes=OR`
+
+Not supported yet:
+
+- full JsonPath language/functions (only restricted subset above)
+- nested array filters inside array filters in a single expression
+- broader wildcard/function/script-style JsonPath constructs
+
+Maturity note:
+
+- the supported subset is intended for production use
+- behavior is intentionally constrained for predictable parsing and backend translation
+
+#### JPA `filter=` support scope (current state)
+
+Key capability:
+
+- JPA clients can express complex grouped where-conditions using `filter=` with parentheses, `&&`, and `||` for non-array-correlation scenarios.
+
+Supported subset (JPA backends):
+
+- wrapper form: `$[?(...)]`
+- logical operators: `&&`, `||`
+- grouping with parentheses
+- comparisons: `==`, `!=`, `>`, `>=`, `<`, `<=`
+- literals: string, number, boolean, `null`
+- field paths: `@.field`, `@.nested.field` (subject to allowlist and nested-path configuration)
+- merge with attribute filtering in the same request:
+  - default: `AND`
+  - override: `filter.combineWithAttributes=OR`
+
+Not supported in JPA:
+
+- array-correlation patterns such as `@.arrayField[?(...)]`
+- these are intentionally rejected with `400 Bad Request`
+
+#### When `filter=` throws `400 Bad Request`
+
+The library throws a filtering exception (mapped to HTTP `400`) for unsupported or invalid `filter=` usage, including:
+
+- expression is not a filter wrapper (must be `$[?(...)]`)
+- expression has invalid JsonPath syntax
+- unsupported operators/tokens are used
+- unsupported literal forms are used
+- null is used with unsupported operators (for example `> null`)
+- more than one `filter` parameter is sent
+- `filter.combineWithAttributes` has invalid value (must be `AND` or `OR`) or appears multiple times
+- unknown/disallowed field paths when unknown-field behavior is `REJECT`
+- nested path usage when nested paths are disabled
+- array-correlation usage on JPA backends
+- `filter=` exceeds configured max length
+- JsonPath filter feature is disabled by configuration
 
 ### 6) Field selection utility (optional helper)
 

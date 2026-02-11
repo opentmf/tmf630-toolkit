@@ -29,6 +29,8 @@ import static org.springframework.http.HttpStatus.BAD_REQUEST;
 public class Tmf630PredicateArgumentResolver implements HandlerMethodArgumentResolver {
 
   private static final Set<String> RESERVED_PARAMS = Set.of("page", "size", "sort");
+  private static final String FILTER_PARAM = "filter";
+  private static final String FILTER_COMBINE_PARAM = "filter.combineWithAttributes";
 
   private final ParamKeyParser keyParser;
   private final Tmf630FilterSettings settings;
@@ -36,6 +38,7 @@ public class Tmf630PredicateArgumentResolver implements HandlerMethodArgumentRes
   private final FieldPathResolver pathResolver;
   private final ValueConverter valueConverter;
   private final PredicateFactory predicateFactory;
+  private final JsonPathFilterPredicateBuilder jsonPathFilterPredicateBuilder;
 
   public Tmf630PredicateArgumentResolver(
       ParamKeyParser keyParser,
@@ -43,13 +46,15 @@ public class Tmf630PredicateArgumentResolver implements HandlerMethodArgumentRes
       FieldAllowlistProvider allowlistProvider,
       FieldPathResolver pathResolver,
       ValueConverter valueConverter,
-      PredicateFactory predicateFactory) {
+      PredicateFactory predicateFactory,
+      JsonPathFilterPredicateBuilder jsonPathFilterPredicateBuilder) {
     this.keyParser = keyParser;
     this.settings = settings;
     this.allowlistProvider = allowlistProvider;
     this.pathResolver = pathResolver;
     this.valueConverter = valueConverter;
     this.predicateFactory = predicateFactory;
+    this.jsonPathFilterPredicateBuilder = jsonPathFilterPredicateBuilder;
   }
 
   @Override
@@ -77,14 +82,47 @@ public class Tmf630PredicateArgumentResolver implements HandlerMethodArgumentRes
   }
 
   private Predicate buildPredicate(Class<?> rootEntity, Map<String, String[]> parameterMap) {
-    BooleanBuilder result = new BooleanBuilder();
     PathBuilder<?> rootPath = pathResolver.createRootPath(rootEntity);
     Set<String> allowed = allowlistProvider.allowedFields(rootEntity);
+
+    BooleanBuilder attributePredicate = buildAttributePredicate(rootEntity, parameterMap, rootPath, allowed);
+    Predicate jsonPathPredicate = buildJsonPathPredicate(rootEntity, parameterMap, rootPath, allowed);
+
+    boolean hasAttribute = attributePredicate.hasValue();
+    boolean hasJsonPath = jsonPathPredicate != null;
+    if (!hasAttribute && !hasJsonPath) {
+      return new BooleanBuilder();
+    }
+    if (!hasJsonPath) {
+      return attributePredicate;
+    }
+    if (!hasAttribute) {
+      return jsonPathPredicate;
+    }
+
+    CombineMode combineMode = resolveFilterCombineMode(parameterMap);
+    BooleanBuilder merged = new BooleanBuilder();
+    if (combineMode == CombineMode.OR) {
+      merged.or(attributePredicate).or(jsonPathPredicate);
+    } else {
+      merged.and(attributePredicate).and(jsonPathPredicate);
+    }
+    return merged;
+  }
+
+  private BooleanBuilder buildAttributePredicate(
+      Class<?> rootEntity,
+      Map<String, String[]> parameterMap,
+      PathBuilder<?> rootPath,
+      Set<String> allowed) {
+    BooleanBuilder result = new BooleanBuilder();
     int clauseCount = 0;
 
     for (Map.Entry<String, String[]> entry : parameterMap.entrySet()) {
       String rawKey = entry.getKey();
-      if (RESERVED_PARAMS.contains(rawKey)) {
+      if (RESERVED_PARAMS.contains(rawKey)
+          || FILTER_PARAM.equals(rawKey)
+          || FILTER_COMBINE_PARAM.equals(rawKey)) {
         continue;
       }
 
@@ -152,8 +190,41 @@ public class Tmf630PredicateArgumentResolver implements HandlerMethodArgumentRes
       }
       result.and(perKey);
     }
-
     return result;
+  }
+
+  private Predicate buildJsonPathPredicate(
+      Class<?> rootEntity,
+      Map<String, String[]> parameterMap,
+      PathBuilder<?> rootPath,
+      Set<String> allowed) {
+    String[] filters = parameterMap.get(FILTER_PARAM);
+    if (filters == null || filters.length == 0) {
+      return null;
+    }
+    if (filters.length > 1) {
+      throw new TmfFilteringException("Only one filter parameter is supported.");
+    }
+    return jsonPathFilterPredicateBuilder.build(rootEntity, rootPath, filters[0], allowed, settings);
+  }
+
+  private CombineMode resolveFilterCombineMode(Map<String, String[]> parameterMap) {
+    String[] values = parameterMap.get(FILTER_COMBINE_PARAM);
+    if (values == null || values.length == 0 || values[0] == null || values[0].isBlank()) {
+      return CombineMode.AND;
+    }
+    if (values.length > 1) {
+      throw new TmfFilteringException("Only one filter.combineWithAttributes value is supported.");
+    }
+    String normalized = values[0].trim().toUpperCase();
+    if ("AND".equals(normalized)) {
+      return CombineMode.AND;
+    }
+    if ("OR".equals(normalized)) {
+      return CombineMode.OR;
+    }
+    throw new TmfFilteringException(
+        "Invalid filter.combineWithAttributes value. Supported values: AND, OR.");
   }
 
   private int incrementClauseCount(int clauseCount) {

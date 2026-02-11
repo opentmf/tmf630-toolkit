@@ -61,6 +61,15 @@ public class Tmf630AttributeFilteringAutoConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
+  public JsonPathFilterPredicateBuilder tmf630JsonPathFilterPredicateBuilder(
+      FieldPathResolver pathResolver,
+      ValueConverter valueConverter,
+      PredicateFactory predicateFactory) {
+    return new JsonPathFilterPredicateBuilder(pathResolver, valueConverter, predicateFactory);
+  }
+
+  @Bean
+  @ConditionalOnMissingBean
   public FieldAllowlistProvider tmf630FieldAllowlistProvider(
       Tmf630AttributeFilteringProperties properties) {
     return new PropertyFieldAllowlistProvider(properties.getAllowlist().getEntities());
@@ -74,14 +83,16 @@ public class Tmf630AttributeFilteringAutoConfiguration {
       FieldAllowlistProvider allowlistProvider,
       FieldPathResolver pathResolver,
       ValueConverter valueConverter,
-      PredicateFactory predicateFactory) {
+      PredicateFactory predicateFactory,
+      JsonPathFilterPredicateBuilder jsonPathFilterPredicateBuilder) {
     return new Tmf630PredicateArgumentResolver(
         keyParser,
         properties.toSettings(),
         allowlistProvider,
         pathResolver,
         valueConverter,
-        predicateFactory);
+        predicateFactory,
+        jsonPathFilterPredicateBuilder);
   }
 
   @Bean

@@ -25,7 +25,7 @@ import org.springframework.test.web.servlet.MockMvc;
     properties = {
       "spring.jpa.hibernate.ddl-auto=create-drop",
       "spring.jpa.show-sql=false",
-      "spring.datasource.url=jdbc:tc:postgresql:18.1-alpine:///db",
+      "spring.datasource.url=${tmf630.sql.it.datasource.url:jdbc:tc:postgresql:18.1-alpine:///db}",
       "spring.datasource.driver-class-name=org.testcontainers.jdbc.ContainerDatabaseDriver",
       "spring.jpa.properties.hibernate.session_factory.statement_inspector=org.opentmf.query.tmf630.filtering.SqlCaptureInspector",
       "opentmf.tmf630.attribute-filtering.allowlist.mode=DENY_ALL",
@@ -160,6 +160,33 @@ class Tmf630PredicateSqlIT {
     assertThat(sql).contains(" in ");
     assertThat(sql).contains(" is null");
     assertThat(sql).contains(" like ");
+  }
+
+  @Test
+  @DisplayName("jsonPath filter is reflected in generated SQL")
+  void jsonPathFilterIsReflectedInSql() throws Exception {
+    mockMvc
+        .perform(
+            get("/sql-search")
+                .param("filter", "$[?(@.status == 'NEW' && @.priority >= 1)]")
+                .contentType(MediaType.APPLICATION_JSON))
+        .andExpect(status().isOk());
+
+    String sql = firstSelectSql();
+    assertThat(sql).contains("status");
+    assertThat(sql).contains("priority");
+    assertThat(sql).contains(" where ");
+  }
+
+  @Test
+  @DisplayName("invalid jsonPath filter returns bad request")
+  void invalidJsonPathFilterReturnsBadRequest() throws Exception {
+    mockMvc
+        .perform(
+            get("/sql-search")
+                .param("filter", "$.status")
+                .contentType(MediaType.APPLICATION_JSON))
+        .andExpect(status().isBadRequest());
   }
 
   private static SqlSearchEntity entity(

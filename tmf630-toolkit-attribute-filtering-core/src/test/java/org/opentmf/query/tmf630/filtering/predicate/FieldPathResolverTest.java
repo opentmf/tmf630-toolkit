@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.time.Instant;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.opentmf.query.tmf630.filtering.TmfFilteringException;
 
@@ -40,6 +41,20 @@ class FieldPathResolverTest {
     assertEquals(Instant.class, inherited.javaType());
   }
 
+  @Test
+  void resolvesNestedCollectionElementFieldType() {
+    FieldPathResolver resolver = new FieldPathResolver();
+    ResolvedField field = resolver.resolve(CollectionEntity.class, "refs.name", true);
+    assertEquals(String.class, field.javaType());
+  }
+
+  @Test
+  void fallsBackToObjectForRawCollectionElementType() {
+    FieldPathResolver resolver = new FieldPathResolver();
+    ResolvedField field = resolver.resolve(RawCollectionEntity.class, "refs", true);
+    assertEquals(Object.class, field.javaType());
+  }
+
   static class SampleEntity {
     private Instant createdOn;
   }
@@ -57,4 +72,17 @@ class FieldPathResolverTest {
   }
 
   static class ChildEntity extends BaseEntity {}
+
+  static class CollectionEntity {
+    private List<Ref> refs;
+  }
+
+  static class Ref {
+    private String name;
+  }
+
+  @SuppressWarnings("rawtypes")
+  static class RawCollectionEntity {
+    private List refs;
+  }
 }

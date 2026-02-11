@@ -8,4 +8,6 @@ public record Tmf630FilterSettings(
     PredicateLimits limits,
     AllowlistMode allowlistMode,
     UnknownParamBehavior onUnknownField,
-    UnknownParamBehavior onUnknownOperator) {}
+    UnknownParamBehavior onUnknownOperator,
+    boolean jsonPathFilterEnabled,
+    int jsonPathMaxLength) {}

@@ -81,6 +81,25 @@ class Tmf630PredicateArgumentResolverIT {
         .andExpect(content().string(Matchers.containsString("status")));
   }
 
+  @Test
+  void supportsRestrictedJsonPathFilterAndCombinesWithAttributeFilters() throws Exception {
+    mockMvc
+        .perform(
+            get("/search")
+                .param("transformationId.eq", "abc")
+                .param("filter", "$[?(@.status == 'NEW')]"))
+        .andExpect(status().isOk())
+        .andExpect(content().string(Matchers.containsString("transformationId")))
+        .andExpect(content().string(Matchers.containsString("status")));
+  }
+
+  @Test
+  void rejectsInvalidJsonPathFilterExpression() throws Exception {
+    mockMvc
+        .perform(get("/search").param("filter", "$.status"))
+        .andExpect(status().isBadRequest());
+  }
+
   @SpringBootApplication
   @Import(TestController.class)
   static class TestApp {}

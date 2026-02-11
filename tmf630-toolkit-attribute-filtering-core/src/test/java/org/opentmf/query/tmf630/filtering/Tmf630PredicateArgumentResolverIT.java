@@ -32,7 +32,9 @@ class Tmf630PredicateArgumentResolverIT {
             new PredicateLimits(50, 10, 128),
             AllowlistMode.DENY_ALL,
             UnknownParamBehavior.REJECT,
-            UnknownParamBehavior.REJECT);
+            UnknownParamBehavior.REJECT,
+            true,
+            2048);
 
     FieldAllowlistProvider allowlist = rootEntity -> Set.of("name", "age");
 
@@ -43,7 +45,11 @@ class Tmf630PredicateArgumentResolverIT {
             allowlist,
             new FieldPathResolver(),
             new ValueConverter(new DefaultFormattingConversionService()),
-            new PredicateFactory(false, 128));
+            new PredicateFactory(false, 128),
+            new JsonPathFilterPredicateBuilder(
+                new FieldPathResolver(),
+                new ValueConverter(new DefaultFormattingConversionService()),
+                new PredicateFactory(false, 128)));
 
     MockHttpServletRequest request = new MockHttpServletRequest();
     request.setParameter("name.eq", "john");

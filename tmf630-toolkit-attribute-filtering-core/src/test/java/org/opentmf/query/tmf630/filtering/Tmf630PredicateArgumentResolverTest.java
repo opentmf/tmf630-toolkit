@@ -91,7 +91,9 @@ class Tmf630PredicateArgumentResolverTest {
             new PredicateLimits(20, 5, 128),
             AllowlistMode.DENY_ALL,
             UnknownParamBehavior.REJECT,
-            UnknownParamBehavior.REJECT);
+            UnknownParamBehavior.REJECT,
+            true,
+            2048);
     Tmf630PredicateArgumentResolver resolver =
         new Tmf630PredicateArgumentResolver(
             new ParamKeyParser(new OperatorRegistry(), true),
@@ -99,7 +101,11 @@ class Tmf630PredicateArgumentResolverTest {
             rootEntity -> Set.of("name", "age"),
             new FieldPathResolver(),
             new ValueConverter(new DefaultFormattingConversionService()),
-            new PredicateFactory(false, 128));
+            new PredicateFactory(false, 128),
+            new JsonPathFilterPredicateBuilder(
+                new FieldPathResolver(),
+                new ValueConverter(new DefaultFormattingConversionService()),
+                new PredicateFactory(false, 128)));
     MockHttpServletRequest request = new MockHttpServletRequest();
     request.setParameter("name.isnull", "");
     request.setParameter("name.in", "a", "b");
@@ -126,7 +132,9 @@ class Tmf630PredicateArgumentResolverTest {
             new PredicateLimits(20, 5, 128),
             AllowlistMode.DENY_ALL,
             UnknownParamBehavior.IGNORE,
-            UnknownParamBehavior.IGNORE);
+            UnknownParamBehavior.IGNORE,
+            true,
+            2048);
 
     Tmf630PredicateArgumentResolver resolver =
         new Tmf630PredicateArgumentResolver(
@@ -135,7 +143,11 @@ class Tmf630PredicateArgumentResolverTest {
             rootEntity -> Set.of("name"),
             new FieldPathResolver(),
             new ValueConverter(new DefaultFormattingConversionService()),
-            new PredicateFactory(false, 128));
+            new PredicateFactory(false, 128),
+            new JsonPathFilterPredicateBuilder(
+                new FieldPathResolver(),
+                new ValueConverter(new DefaultFormattingConversionService()),
+                new PredicateFactory(false, 128)));
 
     MockHttpServletRequest request = new MockHttpServletRequest();
     request.setParameter("name.badop", "x");
@@ -161,7 +173,9 @@ class Tmf630PredicateArgumentResolverTest {
             new PredicateLimits(1, 1, 128),
             AllowlistMode.DENY_ALL,
             UnknownParamBehavior.REJECT,
-            UnknownParamBehavior.REJECT);
+            UnknownParamBehavior.REJECT,
+            true,
+            2048);
 
     Tmf630PredicateArgumentResolver resolver =
         new Tmf630PredicateArgumentResolver(
@@ -170,10 +184,185 @@ class Tmf630PredicateArgumentResolverTest {
             rootEntity -> Set.of("name"),
             new FieldPathResolver(),
             new ValueConverter(new DefaultFormattingConversionService()),
-            new PredicateFactory(false, 128));
+            new PredicateFactory(false, 128),
+            new JsonPathFilterPredicateBuilder(
+                new FieldPathResolver(),
+                new ValueConverter(new DefaultFormattingConversionService()),
+                new PredicateFactory(false, 128)));
 
     MockHttpServletRequest request = new MockHttpServletRequest();
     request.setParameter("name.eq", "a", "b");
+
+    assertThrows(
+        ResponseStatusException.class,
+        () ->
+            resolver.resolveArgument(
+                predicateParameter(),
+                null,
+                new ServletWebRequest(request),
+                null));
+  }
+
+  @Test
+  void supportsJsonPathFilterExpression() throws Exception {
+    Tmf630PredicateArgumentResolver resolver = newResolver(AllowlistMode.ALLOW_ALL);
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setParameter("filter", "$[?(@.name == 'abc' && @.age >= 18)]");
+
+    Object predicate =
+        resolver.resolveArgument(
+            predicateParameter(),
+            null,
+            new ServletWebRequest(request),
+            null);
+
+    assertNotNull(predicate);
+  }
+
+  @Test
+  void rejectsNonFilterJsonPathExpression() throws Exception {
+    Tmf630PredicateArgumentResolver resolver = newResolver(AllowlistMode.ALLOW_ALL);
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setParameter("filter", "$.name");
+
+    assertThrows(
+        ResponseStatusException.class,
+        () ->
+            resolver.resolveArgument(
+                predicateParameter(),
+                null,
+                new ServletWebRequest(request),
+                null));
+  }
+
+  @Test
+  void combinesAttributesAndJsonPathUsingConfiguredOrMode() throws Exception {
+    Tmf630FilterSettings settings =
+        new Tmf630FilterSettings(
+            true,
+            CombineMode.OR,
+            false,
+            false,
+            new PredicateLimits(20, 5, 128),
+            AllowlistMode.DENY_ALL,
+            UnknownParamBehavior.REJECT,
+            UnknownParamBehavior.REJECT,
+            true,
+            2048);
+    FieldPathResolver pathResolver = new FieldPathResolver();
+    ValueConverter valueConverter = new ValueConverter(new DefaultFormattingConversionService());
+    PredicateFactory predicateFactory = new PredicateFactory(false, 128);
+    Tmf630PredicateArgumentResolver resolver =
+        new Tmf630PredicateArgumentResolver(
+            new ParamKeyParser(new OperatorRegistry(), true),
+            settings,
+            rootEntity -> Set.of("name"),
+            pathResolver,
+            valueConverter,
+            predicateFactory,
+            new JsonPathFilterPredicateBuilder(pathResolver, valueConverter, predicateFactory));
+
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setParameter("name.eq", "abc");
+    request.setParameter("filter", "$[?(@.name == 'xyz')]");
+    request.setParameter("filter.combineWithAttributes", "OR");
+
+    Object predicate =
+        resolver.resolveArgument(
+            predicateParameter(),
+            null,
+            new ServletWebRequest(request),
+            null);
+    assertNotNull(predicate);
+  }
+
+  @Test
+  void combinesMultiClauseAttributeBlockWithMultiConditionJsonPathUsingOr() throws Exception {
+    Tmf630FilterSettings settings =
+        new Tmf630FilterSettings(
+            true,
+            CombineMode.OR,
+            false,
+            false,
+            new PredicateLimits(20, 5, 128),
+            AllowlistMode.DENY_ALL,
+            UnknownParamBehavior.REJECT,
+            UnknownParamBehavior.REJECT,
+            true,
+            2048);
+    FieldPathResolver pathResolver = new FieldPathResolver();
+    ValueConverter valueConverter = new ValueConverter(new DefaultFormattingConversionService());
+    PredicateFactory predicateFactory = new PredicateFactory(false, 128);
+    Tmf630PredicateArgumentResolver resolver =
+        new Tmf630PredicateArgumentResolver(
+            new ParamKeyParser(new OperatorRegistry(), true),
+            settings,
+            rootEntity -> Set.of("name", "age"),
+            pathResolver,
+            valueConverter,
+            predicateFactory,
+            new JsonPathFilterPredicateBuilder(pathResolver, valueConverter, predicateFactory));
+
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setParameter("name.eq", "abc");
+    request.setParameter("age.gte", "18");
+    request.setParameter("filter", "$[?(@.name == 'xyz' && @.age >= 30)]");
+    request.setParameter("filter.combineWithAttributes", "OR");
+
+    Object predicate =
+        resolver.resolveArgument(
+            predicateParameter(),
+            null,
+            new ServletWebRequest(request),
+            null);
+    assertNotNull(predicate);
+  }
+
+  @Test
+  void rejectsWhenMultipleFilterParametersProvided() throws Exception {
+    Tmf630PredicateArgumentResolver resolver = newResolver(AllowlistMode.ALLOW_ALL);
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.addParameter("filter", "$[?(@.name == 'a')]");
+    request.addParameter("filter", "$[?(@.name == 'b')]");
+
+    assertThrows(
+        ResponseStatusException.class,
+        () ->
+            resolver.resolveArgument(
+                predicateParameter(),
+                null,
+                new ServletWebRequest(request),
+                null));
+  }
+
+  @Test
+  void rejectsWhenJsonPathFilterIsDisabled() throws Exception {
+    Tmf630FilterSettings settings =
+        new Tmf630FilterSettings(
+            true,
+            CombineMode.OR,
+            false,
+            false,
+            new PredicateLimits(20, 5, 128),
+            AllowlistMode.ALLOW_ALL,
+            UnknownParamBehavior.REJECT,
+            UnknownParamBehavior.REJECT,
+            false,
+            2048);
+    FieldPathResolver pathResolver = new FieldPathResolver();
+    ValueConverter valueConverter = new ValueConverter(new DefaultFormattingConversionService());
+    PredicateFactory predicateFactory = new PredicateFactory(false, 128);
+    Tmf630PredicateArgumentResolver resolver =
+        new Tmf630PredicateArgumentResolver(
+            new ParamKeyParser(new OperatorRegistry(), true),
+            settings,
+            rootEntity -> Set.of(),
+            pathResolver,
+            valueConverter,
+            predicateFactory,
+            new JsonPathFilterPredicateBuilder(pathResolver, valueConverter, predicateFactory));
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setParameter("filter", "$[?(@.name == 'x')]");
 
     assertThrows(
         ResponseStatusException.class,
@@ -195,7 +384,9 @@ class Tmf630PredicateArgumentResolverTest {
             new PredicateLimits(20, 5, 128),
             mode,
             UnknownParamBehavior.REJECT,
-            UnknownParamBehavior.REJECT);
+            UnknownParamBehavior.REJECT,
+            true,
+            2048);
 
     FieldAllowlistProvider allowlistProvider =
         rootEntity -> mode == AllowlistMode.ALLOW_ALL ? Set.of() : Set.of("name");
@@ -206,7 +397,11 @@ class Tmf630PredicateArgumentResolverTest {
         allowlistProvider,
         new FieldPathResolver(),
         new ValueConverter(new DefaultFormattingConversionService()),
-        new PredicateFactory(false, 128));
+        new PredicateFactory(false, 128),
+        new JsonPathFilterPredicateBuilder(
+            new FieldPathResolver(),
+            new ValueConverter(new DefaultFormattingConversionService()),
+            new PredicateFactory(false, 128)));
   }
 
   private static MethodParameter predicateParameter() throws Exception {
