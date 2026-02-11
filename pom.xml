@@ -3,7 +3,7 @@
 
   <groupId>org.opentmf.query</groupId>
   <artifactId>tmf630-toolkit</artifactId>
-  <version>1.0.1</version>
+  <version>1.0.2-SNAPSHOT</version>
   <packaging>pom</packaging>
   <name>tmf630-toolkit</name>
   <description>Toolkit for TMF630-compliant query utilities</description>
@@ -380,6 +380,6 @@
     <url>https://github.com/opentmf/tmf630-toolkit</url>
     <connection>scm:git:https://github.com/opentmf/tmf630-toolkit.git</connection>
     <developerConnection>scm:git:git@github.com:opentmf/tmf630-toolkit.git</developerConnection>
-    <tag>tmf630-toolkit-1.0.1</tag>
+    <tag>HEAD</tag>
   </scm>
 </project>
