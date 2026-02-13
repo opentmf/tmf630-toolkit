@@ -40,6 +40,7 @@ class FilteringModelCoverageTest {
             CombineMode.AND,
             true,
             true,
+            true,
             limits,
             AllowlistMode.DENY_ALL,
             UnknownParamBehavior.REJECT,
@@ -51,6 +52,8 @@ class FilteringModelCoverageTest {
     assertEquals(3, settings.limits().maxValuesPerKey());
     assertEquals(64, settings.limits().maxRegexLength());
     assertEquals(AllowlistMode.DENY_ALL, settings.allowlistMode());
+    assertTrue(settings.allowNestedPathsJpa());
+    assertTrue(settings.allowNestedPathsDocdb());
     assertTrue(settings.jsonPathFilterEnabled());
     assertEquals(1234, settings.jsonPathMaxLength());
   }

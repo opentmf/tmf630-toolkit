@@ -179,7 +179,8 @@ class JsonPathFilterPredicateBuilderTest {
         new Tmf630FilterSettings(
             settings.implicitEqEnabled(),
             settings.combineRepeatedValues(),
-            settings.allowNestedPaths(),
+            settings.allowNestedPathsJpa(),
+            settings.allowNestedPathsDocdb(),
             settings.regexEnabled(),
             settings.limits(),
             settings.allowlistMode(),
@@ -463,6 +464,7 @@ class JsonPathFilterPredicateBuilderTest {
     return new Tmf630FilterSettings(
         true,
         CombineMode.OR,
+        allowNestedPaths,
         allowNestedPaths,
         false,
         new PredicateLimits(50, 10, 128),

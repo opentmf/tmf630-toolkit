@@ -16,7 +16,8 @@ public class Tmf630AttributeFilteringProperties {
   private boolean enabled = true;
   private boolean implicitEqEnabled = true;
   private CombineMode combineRepeatedValues = CombineMode.OR;
-  private boolean allowNestedPaths = false;
+  private boolean allowNestedPathsJpa = false;
+  private boolean allowNestedPathsDocdb = true;
   private Regex regex = new Regex();
   private JsonPathFilter jsonPathFilter = new JsonPathFilter();
   private Limits limits = new Limits();
@@ -28,7 +29,8 @@ public class Tmf630AttributeFilteringProperties {
     return new Tmf630FilterSettings(
         implicitEqEnabled,
         combineRepeatedValues,
-        allowNestedPaths,
+        allowNestedPathsJpa,
+        allowNestedPathsDocdb,
         regex.enabled,
         new PredicateLimits(limits.maxClauses, limits.maxValuesPerKey, regex.maxLength),
         allowlist.mode,
@@ -62,12 +64,20 @@ public class Tmf630AttributeFilteringProperties {
     this.combineRepeatedValues = combineRepeatedValues;
   }
 
-  public boolean isAllowNestedPaths() {
-    return allowNestedPaths;
+  public boolean isAllowNestedPathsJpa() {
+    return allowNestedPathsJpa;
   }
 
-  public void setAllowNestedPaths(boolean allowNestedPaths) {
-    this.allowNestedPaths = allowNestedPaths;
+  public void setAllowNestedPathsJpa(boolean allowNestedPathsJpa) {
+    this.allowNestedPathsJpa = allowNestedPathsJpa;
+  }
+
+  public boolean isAllowNestedPathsDocdb() {
+    return allowNestedPathsDocdb;
+  }
+
+  public void setAllowNestedPathsDocdb(boolean allowNestedPathsDocdb) {
+    this.allowNestedPathsDocdb = allowNestedPathsDocdb;
   }
 
   public Regex getRegex() {
@@ -182,7 +192,7 @@ public class Tmf630AttributeFilteringProperties {
   }
 
   public static class Allowlist {
-    private AllowlistMode mode = AllowlistMode.DENY_ALL;
+    private AllowlistMode mode = AllowlistMode.ALLOW_ALL;
     private Map<String, List<String>> entities = new HashMap<>();
 
     public AllowlistMode getMode() {
