@@ -130,17 +130,150 @@ Notes:
 - `opentmf.tmf630.attribute-filtering.enabled` (default: `true`)
 - `opentmf.tmf630.attribute-filtering.implicit-eq-enabled` (default: `true`)
 - `opentmf.tmf630.attribute-filtering.combine-repeated-values` (`OR` or `AND`)
-- `opentmf.tmf630.attribute-filtering.allow-nested-paths` (default: `false`)
+- `opentmf.tmf630.attribute-filtering.allow-nested-paths-jpa` (default: `false`)
+- `opentmf.tmf630.attribute-filtering.allow-nested-paths-docdb` (default: `true`)
 - `opentmf.tmf630.attribute-filtering.regex.enabled` (default: `false`)
 - `opentmf.tmf630.attribute-filtering.regex.max-length` (default: `256`)
 - `opentmf.tmf630.attribute-filtering.limits.max-clauses` (default: `50`)
 - `opentmf.tmf630.attribute-filtering.limits.max-values-per-key` (default: `20`)
-- `opentmf.tmf630.attribute-filtering.allowlist.mode` (default: `DENY_ALL`)
+- `opentmf.tmf630.attribute-filtering.allowlist.mode` (default: `ALLOW_ALL`)
 - `opentmf.tmf630.attribute-filtering.allowlist.entities.<EntityName>=...`
 - `opentmf.tmf630.attribute-filtering.on-unknown-field` (`REJECT` or `IGNORE`)
 - `opentmf.tmf630.attribute-filtering.on-unknown-operator` (`REJECT` or `IGNORE`)
 - `opentmf.tmf630.attribute-filtering.json-path-filter.enabled` (default: `true`)
 - `opentmf.tmf630.attribute-filtering.json-path-filter.max-length` (default: `2048`)
+
+### Configuration scenario 1: default behavior (no custom config)
+
+If you add the autoconfigure modules and do not provide any `opentmf.tmf630.*` properties, the toolkit starts with safe defaults:
+
+- Paging/sorting is enabled with `default-limit=50`, `max-limit=500`, strict range checks, and unrestricted sort fields.
+- Attribute filtering is enabled with implicit `eq` support (for example, `name=alice`).
+- Repeated values are combined with `OR`.
+- Nested paths are disabled by default for JPA entities and enabled by default for document-style entities.
+- Allowlist mode defaults to `ALLOW_ALL` (fields are not blocked by default).
+- Unknown fields/operators are rejected (`400 Bad Request`).
+- JsonPath `filter=` support is enabled with a max length of `2048`.
+
+In plain terms: a service gets TMF630 paging/sorting and filtering automatically with minimal setup, while still protecting itself from unknown or malformed query keys.
+
+### Configuration scenario 2: minimal override (change only a few items)
+
+```yaml
+opentmf:
+  tmf630:
+    paging:
+      max-limit: 200
+    attribute-filtering:
+      allow-nested-paths-docdb: true
+      on-unknown-operator: IGNORE
+```
+
+How this behaves:
+
+- Clients still get all default TMF630 capabilities.
+- Page size is capped at `200` instead of `500`.
+- Nested field paths are explicitly enabled for document-style entities.
+- Unknown operators are ignored instead of rejected, which is more tolerant for mixed client traffic.
+
+### Configuration scenario 3: full non-default example
+
+```yaml
+opentmf:
+  tmf630:
+    paging:
+      enabled: true
+      default-limit: 25
+      max-limit: 100
+      strict-mode: false
+      allow-nested-sort-properties: true
+      sort-allowlist:
+        - id
+        - name
+        - birthdate
+    attribute-filtering:
+      enabled: true
+      implicit-eq-enabled: false
+      combine-repeated-values: AND
+      allow-nested-paths-jpa: false
+      allow-nested-paths-docdb: true
+      regex:
+        enabled: true
+        max-length: 128
+      limits:
+        max-clauses: 30
+        max-values-per-key: 10
+      allowlist:
+        mode: DENY_ALL
+        entities:
+          Person:
+            - id
+            - name
+            - surname
+            - birthdate
+            - sex
+      on-unknown-field: IGNORE
+      on-unknown-operator: IGNORE
+      json-path-filter:
+        enabled: true
+        max-length: 1024
+```
+
+How this behaves:
+
+- Query parsing is strict about explicit operators (`implicit-eq-enabled=false`), so clients should send `field.eq=value`.
+- Repeated values are treated as `AND` constraints, making filtering narrower.
+- Nested-path behavior is backend-aware (`false` for JPA, `true` for document-style entities).
+- Regex operators are enabled with tighter safety limits.
+- Filtering and sorting are constrained to explicit allowlists to protect exposed query surface.
+- Unknown fields/operators are ignored to avoid hard failures when older/newer clients send extra parameters.
+- JsonPath filtering remains available but with a tighter max expression length.
+
+Note: merge mode between attribute filters and `filter=` is controlled per request via `filter.combineWithAttributes=AND|OR` (query parameter), not via YAML configuration.
+
+For safer production posture, switch allowlist mode to `DENY_ALL` and explicitly configure permitted fields per entity:
+
+```yaml
+opentmf:
+  tmf630:
+    attribute-filtering:
+      allowlist:
+        mode: DENY_ALL
+        entities:
+          Person:
+            - id
+            - name
+            - surname
+            - birthdate
+            - sex
+```
+
+### Backend-specific nested-path guidance (JPA vs Mongo)
+
+Recommended operational policy:
+
+- For JPA-backed services, keep `allow-nested-paths-jpa` disabled.
+- For Mongo/document-backed services, enable `allow-nested-paths-docdb`.
+
+Minimal examples:
+
+```yaml
+# JPA-oriented service
+opentmf:
+  tmf630:
+    attribute-filtering:
+      allow-nested-paths-jpa: false
+```
+
+```yaml
+# Mongo-oriented service
+opentmf:
+  tmf630:
+    attribute-filtering:
+      allow-nested-paths-docdb: true
+```
+
+How this works in practice: nested-path policy is backend-aware through separate properties (`allow-nested-paths-jpa` and `allow-nested-paths-docdb`). In mixed JPA+Mongo applications, use explicit allowlists for tighter control.
 
 ## Developer handbook
 

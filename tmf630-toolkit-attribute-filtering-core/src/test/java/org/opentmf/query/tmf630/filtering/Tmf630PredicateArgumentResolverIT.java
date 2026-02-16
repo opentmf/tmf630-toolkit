@@ -29,6 +29,7 @@ class Tmf630PredicateArgumentResolverIT {
             CombineMode.OR,
             false,
             false,
+            false,
             new PredicateLimits(50, 10, 128),
             AllowlistMode.DENY_ALL,
             UnknownParamBehavior.REJECT,

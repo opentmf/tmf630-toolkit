@@ -64,6 +64,22 @@ public class JsonPathFilterPredicateBuilder {
       String expression,
       Set<String> allowlist,
       Tmf630FilterSettings settings) {
+    return build(
+        rootEntity,
+        rootPath,
+        expression,
+        allowlist,
+        settings,
+        settings.allowNestedPathsFor(rootEntity));
+  }
+
+  public Predicate build(
+      Class<?> rootEntity,
+      PathBuilder<?> rootPath,
+      String expression,
+      Set<String> allowlist,
+      Tmf630FilterSettings settings,
+      boolean allowNestedPaths) {
     if (!settings.jsonPathFilterEnabled()) {
       throw new TmfFilteringException("jsonPath filter parameter is disabled.");
     }
@@ -81,7 +97,8 @@ public class JsonPathFilterPredicateBuilder {
     Node rootNode = parser.parseExpression();
     parser.ensureEnd();
 
-    return toPredicate(rootNode, rootEntity, rootPath, allowlist, settings, "").orElse(null);
+    return toPredicate(rootNode, rootEntity, rootPath, allowlist, settings, "", allowNestedPaths)
+        .orElse(null);
   }
 
   private void validateAsJsonPath(String expression) {
@@ -106,12 +123,27 @@ public class JsonPathFilterPredicateBuilder {
       PathBuilder<?> rootPath,
       Set<String> allowlist,
       Tmf630FilterSettings settings,
-      String allowlistPrefix) {
+      String allowlistPrefix,
+      boolean allowNestedPaths) {
     if (node instanceof LogicalNode logical) {
       Optional<Predicate> left =
-          toPredicate(logical.left(), rootEntity, rootPath, allowlist, settings, allowlistPrefix);
+          toPredicate(
+              logical.left(),
+              rootEntity,
+              rootPath,
+              allowlist,
+              settings,
+              allowlistPrefix,
+              allowNestedPaths);
       Optional<Predicate> right =
-          toPredicate(logical.right(), rootEntity, rootPath, allowlist, settings, allowlistPrefix);
+          toPredicate(
+              logical.right(),
+              rootEntity,
+              rootPath,
+              allowlist,
+              settings,
+              allowlistPrefix,
+              allowNestedPaths);
       if (left.isEmpty()) {
         return right;
       }
@@ -134,7 +166,7 @@ public class JsonPathFilterPredicateBuilder {
             "Array correlation in jsonPath filter is supported only for document databases.");
       }
       ResolvedArrayPath resolvedArrayPath =
-          resolveArrayPath(rootEntity, rootPath, arrayMatchNode.arrayPath(), settings.allowNestedPaths());
+          resolveArrayPath(rootEntity, rootPath, arrayMatchNode.arrayPath(), allowNestedPaths);
       String nestedAllowlistPrefix =
           allowlistPrefix + normalizeArrayPathForAllowlist(arrayMatchNode.arrayPath()) + ".";
       PathBuilder<?> elementRootPath = pathResolver.createRootPath(resolvedArrayPath.elementType());
@@ -145,7 +177,8 @@ public class JsonPathFilterPredicateBuilder {
               elementRootPath,
               allowlist,
               settings,
-              nestedAllowlistPrefix);
+              nestedAllowlistPrefix,
+              allowNestedPaths);
       if (nested.isEmpty()) {
         return Optional.empty();
       }
@@ -166,7 +199,7 @@ public class JsonPathFilterPredicateBuilder {
 
     final ResolvedField resolvedField;
     try {
-      resolvedField = pathResolver.resolve(rootEntity, comparison.fieldPath(), settings.allowNestedPaths());
+      resolvedField = pathResolver.resolve(rootEntity, comparison.fieldPath(), allowNestedPaths);
     } catch (TmfFilteringException ex) {
       if (settings.onUnknownField() == UnknownParamBehavior.REJECT) {
         throw ex;

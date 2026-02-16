@@ -45,6 +45,28 @@ class ParamKeyParserTest {
     ParamKeyParser parser = new ParamKeyParser(new OperatorRegistry(), true);
     assertTrue(parser.parse(null).isEmpty());
     assertTrue(parser.parse(" ").isEmpty());
-    assertTrue(parser.parse("createdOn.unknown").isEmpty());
+  }
+
+  @Test
+  void fallsBackToImplicitEqForUnknownSuffixWhenEnabled() {
+    ParamKeyParser parser = new ParamKeyParser(new OperatorRegistry(), true);
+    ParsedParamKey parsed = parser.parse("createdOn.unknown").orElseThrow();
+
+    assertEquals("createdOn.unknown", parsed.fieldPath());
+    assertEquals(TmfOperator.EQ, parsed.operator());
+  }
+
+  @Test
+  void fallsBackToImplicitEqForDeepDottedFieldPath() {
+    ParamKeyParser parser = new ParamKeyParser(new OperatorRegistry(), true);
+    ParsedParamKey parsed =
+        parser
+            .parse("relatedPartyValue.partyRole.engagedParty.organization.organizationIdentification.identificationId")
+            .orElseThrow();
+
+    assertEquals(
+        "relatedPartyValue.partyRole.engagedParty.organization.organizationIdentification.identificationId",
+        parsed.fieldPath());
+    assertEquals(TmfOperator.EQ, parsed.operator());
   }
 }

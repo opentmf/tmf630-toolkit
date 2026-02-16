@@ -15,6 +15,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.StreamSupport;
 import org.bson.Document;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -22,11 +23,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
+import org.springframework.data.querydsl.binding.QuerydslPredicate;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RestController;
 import org.testcontainers.containers.MongoDBContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -36,7 +39,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
     properties = {
       "opentmf.tmf630.attribute-filtering.allowlist.mode=DENY_ALL",
       "opentmf.tmf630.attribute-filtering.allowlist.entities.MongoSearchEntity=id,href,category,externalId,requestedStartDate,state,externalReference.id,externalReference.name",
-      "opentmf.tmf630.attribute-filtering.allowNestedPaths=true",
+      "opentmf.tmf630.attribute-filtering.allowNestedPathsDocdb=true",
       "opentmf.tmf630.attribute-filtering.onUnknownField=REJECT",
       "opentmf.tmf630.attribute-filtering.onUnknownOperator=REJECT"
     })
@@ -164,8 +167,25 @@ class Tmf630PredicateMongoIT {
   }
 
   @SpringBootApplication
-  @Import(MongoSearchController.class)
   static class TestApp {}
+
+  @RestController
+  static class TestMongoSearchController {
+
+    private final MongoSearchRepository repository;
+
+    TestMongoSearchController(MongoSearchRepository repository) {
+      this.repository = repository;
+    }
+
+    @GetMapping("/mongo-search")
+    List<MongoSearchEntity> search(@QuerydslPredicate(root = MongoSearchEntity.class) Predicate predicate) {
+      if (predicate == null) {
+        return repository.findAll();
+      }
+      return StreamSupport.stream(repository.findAll(predicate).spliterator(), false).toList();
+    }
+  }
 
   private long countDocumentsByFilter(String filterExpression) {
     Predicate predicate =

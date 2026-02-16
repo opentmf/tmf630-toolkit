@@ -84,9 +84,12 @@ public class Tmf630PredicateArgumentResolver implements HandlerMethodArgumentRes
   private Predicate buildPredicate(Class<?> rootEntity, Map<String, String[]> parameterMap) {
     PathBuilder<?> rootPath = pathResolver.createRootPath(rootEntity);
     Set<String> allowed = allowlistProvider.allowedFields(rootEntity);
+    boolean allowNestedPaths = settings.allowNestedPathsFor(rootEntity);
 
-    BooleanBuilder attributePredicate = buildAttributePredicate(rootEntity, parameterMap, rootPath, allowed);
-    Predicate jsonPathPredicate = buildJsonPathPredicate(rootEntity, parameterMap, rootPath, allowed);
+    BooleanBuilder attributePredicate =
+        buildAttributePredicate(rootEntity, parameterMap, rootPath, allowed, allowNestedPaths);
+    Predicate jsonPathPredicate =
+        buildJsonPathPredicate(rootEntity, parameterMap, rootPath, allowed, allowNestedPaths);
 
     boolean hasAttribute = attributePredicate.hasValue();
     boolean hasJsonPath = jsonPathPredicate != null;
@@ -114,7 +117,8 @@ public class Tmf630PredicateArgumentResolver implements HandlerMethodArgumentRes
       Class<?> rootEntity,
       Map<String, String[]> parameterMap,
       PathBuilder<?> rootPath,
-      Set<String> allowed) {
+      Set<String> allowed,
+      boolean allowNestedPaths) {
     BooleanBuilder result = new BooleanBuilder();
     int clauseCount = 0;
 
@@ -141,8 +145,7 @@ public class Tmf630PredicateArgumentResolver implements HandlerMethodArgumentRes
 
       ResolvedField resolvedField;
       try {
-        resolvedField =
-            pathResolver.resolve(rootEntity, fieldPath, settings.allowNestedPaths());
+        resolvedField = pathResolver.resolve(rootEntity, fieldPath, allowNestedPaths);
       } catch (TmfFilteringException ex) {
         handleUnknownField(fieldPath);
         continue;
@@ -197,7 +200,8 @@ public class Tmf630PredicateArgumentResolver implements HandlerMethodArgumentRes
       Class<?> rootEntity,
       Map<String, String[]> parameterMap,
       PathBuilder<?> rootPath,
-      Set<String> allowed) {
+      Set<String> allowed,
+      boolean allowNestedPaths) {
     String[] filters = parameterMap.get(FILTER_PARAM);
     if (filters == null || filters.length == 0) {
       return null;
@@ -205,7 +209,8 @@ public class Tmf630PredicateArgumentResolver implements HandlerMethodArgumentRes
     if (filters.length > 1) {
       throw new TmfFilteringException("Only one filter parameter is supported.");
     }
-    return jsonPathFilterPredicateBuilder.build(rootEntity, rootPath, filters[0], allowed, settings);
+    return jsonPathFilterPredicateBuilder.build(
+        rootEntity, rootPath, filters[0], allowed, settings, allowNestedPaths);
   }
 
   private CombineMode resolveFilterCombineMode(Map<String, String[]> parameterMap) {

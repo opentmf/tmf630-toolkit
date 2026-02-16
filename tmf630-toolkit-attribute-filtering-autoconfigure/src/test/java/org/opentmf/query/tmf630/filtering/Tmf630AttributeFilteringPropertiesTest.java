@@ -19,7 +19,8 @@ class Tmf630AttributeFilteringPropertiesTest {
     properties.setEnabled(true);
     properties.setImplicitEqEnabled(false);
     properties.setCombineRepeatedValues(CombineMode.AND);
-    properties.setAllowNestedPaths(true);
+    properties.setAllowNestedPathsJpa(false);
+    properties.setAllowNestedPathsDocdb(true);
     properties.setOnUnknownField(UnknownParamBehavior.IGNORE);
     properties.setOnUnknownOperator(UnknownParamBehavior.IGNORE);
 
@@ -50,7 +51,8 @@ class Tmf630AttributeFilteringPropertiesTest {
     assertTrue(properties.isEnabled());
     assertFalse(properties.isImplicitEqEnabled());
     assertEquals(CombineMode.AND, properties.getCombineRepeatedValues());
-    assertTrue(properties.isAllowNestedPaths());
+    assertFalse(properties.isAllowNestedPathsJpa());
+    assertTrue(properties.isAllowNestedPathsDocdb());
     assertEquals(UnknownParamBehavior.IGNORE, properties.getOnUnknownField());
     assertEquals(UnknownParamBehavior.IGNORE, properties.getOnUnknownOperator());
     assertTrue(properties.getRegex().isEnabled());
@@ -63,7 +65,8 @@ class Tmf630AttributeFilteringPropertiesTest {
     assertEquals(Map.of("Entity", List.of("name")), properties.getAllowlist().getEntities());
     assertFalse(settings.implicitEqEnabled());
     assertEquals(CombineMode.AND, settings.combineRepeatedValues());
-    assertTrue(settings.allowNestedPaths());
+    assertFalse(settings.allowNestedPathsJpa());
+    assertTrue(settings.allowNestedPathsDocdb());
     assertTrue(settings.regexEnabled());
     assertEquals(99, settings.limits().maxRegexLength());
     assertEquals(12, settings.limits().maxClauses());
@@ -74,4 +77,5 @@ class Tmf630AttributeFilteringPropertiesTest {
     assertTrue(settings.jsonPathFilterEnabled());
     assertEquals(999, settings.jsonPathMaxLength());
   }
+
 }

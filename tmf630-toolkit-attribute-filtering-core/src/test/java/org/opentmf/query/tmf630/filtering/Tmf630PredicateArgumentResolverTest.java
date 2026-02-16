@@ -42,7 +42,7 @@ class Tmf630PredicateArgumentResolverTest {
   }
 
   @Test
-  void rejectsUnsupportedParameterWithoutQuerydslRoot() throws Exception {
+  void rejectsUnsupportedParameterWithoutQuerydslRoot() {
     Tmf630PredicateArgumentResolver resolver = newResolver(AllowlistMode.ALLOW_ALL);
     MockHttpServletRequest request = new MockHttpServletRequest();
     request.setParameter("name.eq", "abc");
@@ -58,7 +58,7 @@ class Tmf630PredicateArgumentResolverTest {
   }
 
   @Test
-  void rejectsDisallowedFieldWhenAllowlistIsStrict() throws Exception {
+  void rejectsDisallowedFieldWhenAllowlistIsStrict() {
     Tmf630PredicateArgumentResolver resolver = newResolver(AllowlistMode.DENY_ALL);
     MockHttpServletRequest request = new MockHttpServletRequest();
     request.setParameter("forbidden.eq", "abc");
@@ -86,6 +86,7 @@ class Tmf630PredicateArgumentResolverTest {
         new Tmf630FilterSettings(
             true,
             CombineMode.OR,
+            false,
             false,
             false,
             new PredicateLimits(20, 5, 128),
@@ -129,6 +130,7 @@ class Tmf630PredicateArgumentResolverTest {
             CombineMode.OR,
             false,
             false,
+            false,
             new PredicateLimits(20, 5, 128),
             AllowlistMode.DENY_ALL,
             UnknownParamBehavior.IGNORE,
@@ -163,11 +165,12 @@ class Tmf630PredicateArgumentResolverTest {
   }
 
   @Test
-  void rejectsWhenPredicateLimitsExceeded() throws Exception {
+  void rejectsWhenPredicateLimitsExceeded() {
     Tmf630FilterSettings settings =
         new Tmf630FilterSettings(
             true,
             CombineMode.AND,
+            false,
             false,
             false,
             new PredicateLimits(1, 1, 128),
@@ -220,7 +223,7 @@ class Tmf630PredicateArgumentResolverTest {
   }
 
   @Test
-  void rejectsNonFilterJsonPathExpression() throws Exception {
+  void rejectsNonFilterJsonPathExpression() {
     Tmf630PredicateArgumentResolver resolver = newResolver(AllowlistMode.ALLOW_ALL);
     MockHttpServletRequest request = new MockHttpServletRequest();
     request.setParameter("filter", "$.name");
@@ -241,6 +244,7 @@ class Tmf630PredicateArgumentResolverTest {
         new Tmf630FilterSettings(
             true,
             CombineMode.OR,
+            false,
             false,
             false,
             new PredicateLimits(20, 5, 128),
@@ -284,6 +288,7 @@ class Tmf630PredicateArgumentResolverTest {
             CombineMode.OR,
             false,
             false,
+            false,
             new PredicateLimits(20, 5, 128),
             AllowlistMode.DENY_ALL,
             UnknownParamBehavior.REJECT,
@@ -319,7 +324,7 @@ class Tmf630PredicateArgumentResolverTest {
   }
 
   @Test
-  void rejectsWhenMultipleFilterParametersProvided() throws Exception {
+  void rejectsWhenMultipleFilterParametersProvided() {
     Tmf630PredicateArgumentResolver resolver = newResolver(AllowlistMode.ALLOW_ALL);
     MockHttpServletRequest request = new MockHttpServletRequest();
     request.addParameter("filter", "$[?(@.name == 'a')]");
@@ -336,11 +341,12 @@ class Tmf630PredicateArgumentResolverTest {
   }
 
   @Test
-  void rejectsWhenJsonPathFilterIsDisabled() throws Exception {
+  void rejectsWhenJsonPathFilterIsDisabled() {
     Tmf630FilterSettings settings =
         new Tmf630FilterSettings(
             true,
             CombineMode.OR,
+            false,
             false,
             false,
             new PredicateLimits(20, 5, 128),
@@ -379,6 +385,7 @@ class Tmf630PredicateArgumentResolverTest {
         new Tmf630FilterSettings(
             true,
             CombineMode.OR,
+            false,
             false,
             false,
             new PredicateLimits(20, 5, 128),

@@ -21,7 +21,16 @@ public class ParamKeyParser {
     if (separatorIndex > 0 && separatorIndex < rawKey.length() - 1) {
       String fieldPath = rawKey.substring(0, separatorIndex);
       String suffix = rawKey.substring(separatorIndex + 1);
-      return operatorRegistry.resolveSuffix(suffix).map(op -> new ParsedParamKey(fieldPath, op));
+      Optional<TmfOperator> resolvedOperator = operatorRegistry.resolveSuffix(suffix);
+      if (resolvedOperator.isPresent()) {
+        return Optional.of(new ParsedParamKey(fieldPath, resolvedOperator.get()));
+      }
+      if (!implicitEqEnabled) {
+        return Optional.empty();
+      }
+      // For dotted keys without an explicit known operator suffix, fallback to implicit EQ
+      // and treat the complete key as the field path.
+      return Optional.of(new ParsedParamKey(rawKey, TmfOperator.EQ));
     }
 
     if (!implicitEqEnabled) {

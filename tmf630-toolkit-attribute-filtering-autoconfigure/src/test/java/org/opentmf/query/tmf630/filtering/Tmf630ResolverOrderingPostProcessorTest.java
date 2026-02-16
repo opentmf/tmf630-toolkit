@@ -1,6 +1,7 @@
 package org.opentmf.query.tmf630.filtering;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -74,7 +75,7 @@ class Tmf630ResolverOrderingPostProcessorTest {
 
     bpp.postProcessAfterInitialization(adapter, "adapter");
 
-    assertTrue(adapter.getArgumentResolvers().get(0) instanceof Tmf630PredicateArgumentResolver);
+    assertInstanceOf(Tmf630PredicateArgumentResolver.class, adapter.getArgumentResolvers().get(0));
     assertEquals(2, adapter.getArgumentResolvers().size());
   }
 
@@ -83,6 +84,7 @@ class Tmf630ResolverOrderingPostProcessorTest {
         new Tmf630FilterSettings(
             true,
             CombineMode.OR,
+            false,
             false,
             false,
             new PredicateLimits(10, 3, 64),
