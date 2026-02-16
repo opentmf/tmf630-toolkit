@@ -123,25 +123,35 @@
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-compiler-plugin</artifactId>
-        <configuration>
-          <annotationProcessorPaths>
-            <path>
-              <groupId>com.querydsl</groupId>
-              <artifactId>querydsl-apt</artifactId>
-              <version>5.1.0</version>
-              <classifier>jakarta</classifier>
-            </path>
-            <path>
-              <groupId>jakarta.persistence</groupId>
-              <artifactId>jakarta.persistence-api</artifactId>
-            </path>
-          </annotationProcessorPaths>
-          <compilerArgs>
-            <arg>-processor</arg>
-            <arg>com.querydsl.apt.jpa.JPAAnnotationProcessor,com.querydsl.apt.QuerydslAnnotationProcessor</arg>
-          </compilerArgs>
-        </configuration>
+        <executions>
+          <execution>
+            <id>querydsl-test-apt</id>
+            <phase>test-compile</phase>
+            <goals>
+              <goal>testCompile</goal>
+            </goals>
+            <configuration>
+              <annotationProcessorPaths>
+                <path>
+                  <groupId>com.querydsl</groupId>
+                  <artifactId>querydsl-apt</artifactId>
+                  <version>5.1.0</version>
+                  <classifier>jakarta</classifier>
+                </path>
+                <path>
+                  <groupId>jakarta.persistence</groupId>
+                  <artifactId>jakarta.persistence-api</artifactId>
+                </path>
+              </annotationProcessorPaths>
+              <compilerArgs>
+                <arg>-processor</arg>
+                <arg>com.querydsl.apt.jpa.JPAAnnotationProcessor,com.querydsl.apt.QuerydslAnnotationProcessor</arg>
+              </compilerArgs>
+            </configuration>
+          </execution>
+        </executions>
       </plugin>
     </plugins>
   </build>
+
 </project>
