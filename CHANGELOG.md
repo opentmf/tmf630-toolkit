@@ -4,25 +4,18 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 
 ## [1.0.3] - 2026-02-17
 
-- Fix sorting behavior for signed TMF sort tokens and strengthen integration coverage.
-  - ensure signed sort values are parsed in both resolver paths:
-    - `Pageable` arguments (including requests that only send `sort` without `offset`/`limit`)
-    - `Sort` arguments via a dedicated TMF sort argument resolver
-  - normalize plus-prefixed ascending sort values even when `+` is URL-decoded as whitespace
-    (for example `sort=+transformationId` becoming `sort= transformationId`)
-  - prevent Spring Data property lookup errors such as:
-    - `No property '-createdOn' found for type ...`
-    - `No property ' transformationId' found for type ...`
-  - add focused tests to lock behavior:
-    - unit test for `TmfSortHandlerMethodArgumentResolver`
-    - resolver test for sort-only pageable fallback parsing
-    - parser test for whitespace/plus handling
-    - controller-level auto-configuration ITs for signed sort requests without TMF paging params
+### Fixed
+- Parse signed TMF sort values consistently for both `Pageable` and `Sort` arguments.
+- Handle plus-prefixed ascending sort when `+` is URL-decoded as whitespace (for example `sort=+transformationId` -> `sort= transformationId`).
+- Prevent Spring Data property lookup errors for signed/whitespace sort tokens (for example `-createdOn` and ` transformationId` being treated as raw property names).
+- Restore QueryDSL-generated Mongo test Q-types (for example `QMongoSearchEntity`) to prevent integration-test context startup failures.
 
-- Restore stable QueryDSL test model generation for attribute-filtering autoconfigure tests.
-  - add a test-compile QueryDSL annotation-processor execution to generate missing Mongo Q-types (for example `QMongoSearchEntity`)
-  - keep Spring configuration metadata generation intact while restoring QueryDSL test class generation
-  - fix integration test context startup failures caused by missing generated Q classes
+### Tests
+- Add unit test coverage for `TmfSortHandlerMethodArgumentResolver`.
+- Add resolver test coverage for sort-only pageable requests (without `offset`/`limit`).
+- Add parser test coverage for whitespace/plus sort normalization.
+- Add controller-level auto-configuration integration tests for signed sort requests without TMF paging parameters.
+- Add test-compile QueryDSL annotation processing path to keep generated test Q-classes stable.
 
 
 ## [1.0.2] - 2026-02-13
