@@ -2,9 +2,12 @@ package org.opentmf.query.tmf630.config;
 
 import java.util.List;
 import org.opentmf.query.tmf630.paging.TmfPageableHandlerMethodArgumentResolver;
+import org.opentmf.query.tmf630.paging.TmfSortHandlerMethodArgumentResolver;
+import org.opentmf.query.tmf630.paging.TmfSortParser;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.lang.NonNull;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.web.method.support.HandlerMethodArgumentResolver;
@@ -27,7 +30,11 @@ public class Tmf630WebMvcConfigurer implements WebMvcConfigurer {
   }
 
   @Override
-  public void addArgumentResolvers(List<HandlerMethodArgumentResolver> resolvers) {
-    resolvers.add(0, new TmfPageableHandlerMethodArgumentResolver(properties.toSettings()));
+  public void addArgumentResolvers(@NonNull List<HandlerMethodArgumentResolver> resolvers) {
+    TmfSortParser sortParser =
+        new TmfSortParser(
+            properties.getSortAllowlist(), properties.isAllowNestedSortProperties());
+    resolvers.add(0, new TmfSortHandlerMethodArgumentResolver(sortParser));
+    resolvers.add(1, new TmfPageableHandlerMethodArgumentResolver(properties.toSettings()));
   }
 }

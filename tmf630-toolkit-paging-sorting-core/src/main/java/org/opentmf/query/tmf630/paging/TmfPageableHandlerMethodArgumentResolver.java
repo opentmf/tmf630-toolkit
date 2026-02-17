@@ -3,6 +3,7 @@ package org.opentmf.query.tmf630.paging;
 import java.util.List;
 import org.opentmf.query.tmf630.paging.config.Tmf630PagingSettings;
 import org.springframework.core.MethodParameter;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableHandlerMethodArgumentResolver;
@@ -41,9 +42,16 @@ public class TmfPageableHandlerMethodArgumentResolver extends PageableHandlerMet
       @Nullable WebDataBinderFactory binderFactory) {
     String offsetRaw = webRequest.getParameter(OFFSET);
     String limitRaw = webRequest.getParameter(LIMIT);
+    String[] sortArray = webRequest.getParameterValues(SORT);
+    List<String> sortParams = sortArray == null ? List.of() : List.of(sortArray);
+    Sort parsedSort = sortParser.parse(sortParams);
 
     if (!isTmfMode(offsetRaw, limitRaw)) {
-      return super.resolveArgument(parameter, mavContainer, webRequest, binderFactory);
+      Pageable fallback = super.resolveArgument(parameter, mavContainer, webRequest, binderFactory);
+      if (parsedSort.isUnsorted()) {
+        return fallback;
+      }
+      return PageRequest.of(fallback.getPageNumber(), fallback.getPageSize(), parsedSort);
     }
 
     long offset = parseLong(offsetRaw, 0L, OFFSET);
@@ -53,11 +61,7 @@ public class TmfPageableHandlerMethodArgumentResolver extends PageableHandlerMet
       throw new IllegalArgumentException("limit must be > 0");
     }
 
-    String[] sortArray = webRequest.getParameterValues(SORT);
-    List<String> sortParams = sortArray == null ? List.of() : List.of(sortArray);
-    Sort sort = sortParser.parse(sortParams);
-
-    return new OffsetLimitPageRequest(offset, limit, sort);
+    return new OffsetLimitPageRequest(offset, limit, parsedSort);
   }
 
   private boolean isTmfMode(String offsetRaw, String limitRaw) {

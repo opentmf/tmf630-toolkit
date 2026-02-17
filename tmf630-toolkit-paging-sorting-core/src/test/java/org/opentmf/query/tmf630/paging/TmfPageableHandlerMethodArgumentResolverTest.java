@@ -72,7 +72,29 @@ class TmfPageableHandlerMethodArgumentResolverTest {
   }
 
   @Test
-  void strictModeRejectsInvalidNumericInput() throws Exception {
+  void appliesCustomSortParsingWhenOnlySortIsProvided() throws Exception {
+    Tmf630PagingSettings settings =
+        new Tmf630PagingSettings(true, 50, 500, true, false, java.util.List.of());
+    TmfPageableHandlerMethodArgumentResolver resolver =
+        new TmfPageableHandlerMethodArgumentResolver(settings);
+
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setParameter("sort", " transformationId");
+
+    Pageable pageable =
+        resolver.resolveArgument(
+            pageableParameter(),
+            new ModelAndViewContainer(),
+            new ServletWebRequest(request),
+            null);
+
+    assertEquals(0, pageable.getPageNumber());
+    assertEquals(20, pageable.getPageSize());
+    assertEquals("transformationId", pageable.getSort().toList().get(0).getProperty());
+  }
+
+  @Test
+  void strictModeRejectsInvalidNumericInput() {
     Tmf630PagingSettings settings =
         new Tmf630PagingSettings(true, 50, 500, true, false, java.util.List.of());
     TmfPageableHandlerMethodArgumentResolver resolver =
@@ -114,7 +136,7 @@ class TmfPageableHandlerMethodArgumentResolverTest {
   }
 
   @Test
-  void rejectsNegativeOffsetAndNonPositiveLimit() throws Exception {
+  void rejectsNegativeOffsetAndNonPositiveLimit() {
     Tmf630PagingSettings settings =
         new Tmf630PagingSettings(true, 50, 500, true, false, java.util.List.of());
     TmfPageableHandlerMethodArgumentResolver resolver =

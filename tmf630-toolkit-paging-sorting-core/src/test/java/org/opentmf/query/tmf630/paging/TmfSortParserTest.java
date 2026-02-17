@@ -57,4 +57,12 @@ class TmfSortParserTest {
     TmfSortParser parser = new TmfSortParser(List.of(), true);
     assertEquals(Sort.unsorted(), parser.parse(null));
   }
+
+  @Test
+  void parseTreatsLeadingWhitespaceAsAscendingDirection() {
+    TmfSortParser parser = new TmfSortParser(List.of(), true);
+    Sort sort = parser.parse(List.of(" transformationId"));
+    assertEquals("transformationId", sort.toList().get(0).getProperty());
+    assertEquals(Sort.Direction.ASC, sort.toList().get(0).getDirection());
+  }
 }
