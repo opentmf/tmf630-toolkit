@@ -90,6 +90,84 @@ This will manage the dependencies of the opentmf libraries to use their latest c
 
 Dependency versions are aligned via Spring Boot BOM `3.5.10`.
 
+## Prerequisites for attribute filtering
+
+The toolkit provides query-string-to-predicate translation but does **not** ship a specific persistence backend. Your service must add the QueryDSL binding for the backend it uses, plus a compile-time annotation processor to generate Q-classes from your entity models.
+
+### JPA backend
+
+```xml
+<!-- QueryDSL JPA binding (runtime) -->
+<dependency>
+  <groupId>com.querydsl</groupId>
+  <artifactId>querydsl-jpa</artifactId>
+  <classifier>jakarta</classifier>
+</dependency>
+
+<!-- Q-class generation (compile-time only) -->
+<dependency>
+  <groupId>com.querydsl</groupId>
+  <artifactId>querydsl-apt</artifactId>
+  <classifier>jakarta</classifier>
+  <scope>provided</scope>
+</dependency>
+```
+
+Your repository must extend `QuerydslPredicateExecutor`:
+
+```java
+public interface PersonRepository
+    extends JpaRepository<Person, Long>, QuerydslPredicateExecutor<Person> {}
+```
+
+### MongoDB backend
+
+```xml
+<!-- QueryDSL MongoDB binding (runtime) -->
+<dependency>
+  <groupId>com.querydsl</groupId>
+  <artifactId>querydsl-mongodb</artifactId>
+</dependency>
+
+<!-- Q-class generation (compile-time only) -->
+<dependency>
+  <groupId>com.querydsl</groupId>
+  <artifactId>querydsl-apt</artifactId>
+  <classifier>jakarta</classifier>
+  <scope>provided</scope>
+</dependency>
+```
+
+Mongo entities must be annotated with `@QueryEntity` (from `com.querydsl.core.annotations`) in addition to `@Document`:
+
+```java
+@QueryEntity
+@Document("persons")
+public class Person { ... }
+```
+
+Your repository must extend `QuerydslPredicateExecutor`:
+
+```java
+public interface PersonRepository
+    extends MongoRepository<Person, String>, QuerydslPredicateExecutor<Person> {}
+```
+
+### Spring Data starter
+
+Whichever backend you use, the corresponding Spring Data starter must be on the classpath:
+
+- **JPA**: `spring-boot-starter-data-jpa`
+- **MongoDB**: `spring-boot-starter-data-mongodb`
+
+These are typically already present in your service. The toolkit does not pull them transitively because it is backend-agnostic.
+
+### What the toolkit provides transitively (no action needed)
+
+- `querydsl-core` — the predicate API used internally
+- `spring-data-commons` — shared Spring Data types (`Pageable`, `Page`, `Sort`, `QuerydslPredicateExecutor`)
+- `json-path` — used for `filter=` JsonPath parsing
+
 ## POC databases used
 
 The current proof-of-concept and integration coverage has been verified with these databases:
@@ -325,7 +403,44 @@ class PersonController {
 }
 ```
 
-### 3) Paging and sorting examples
+### 3) Combining predicates with path variables
+
+The toolkit builds a `Predicate` exclusively from query parameters. Path variables (like `{id}`) are not included — combining them with the generated predicate is the developer's responsibility.
+
+This is common for sub-resource endpoints such as `GET /master/{id}/children`, where the result must be scoped to a specific parent entity.
+
+```java
+@RestController
+@RequestMapping("/api/masters/{masterId}/children")
+class ChildController {
+
+  private final ChildRepository repository;
+
+  ChildController(ChildRepository repository) {
+    this.repository = repository;
+  }
+
+  @GetMapping
+  ResponseEntity<List<Child>> search(
+      @PathVariable Long masterId,
+      @QuerydslPredicate(root = Child.class) Predicate predicate,
+      Pageable pageable) {
+    Predicate combined = QChild.child.master.id.eq(masterId).and(predicate);
+    Page<Child> page = repository.findAll(combined, pageable);
+    return Tmf630Util.tmfPage(page);
+  }
+}
+```
+
+In this example:
+
+- `predicate` contains everything parsed from query parameters (attribute filters, `filter=`, etc.).
+- The developer wraps it with the parent-scoping condition using standard QueryDSL.
+- The two are combined with `.and(...)`, so the final query is: `master.id = :masterId AND (query-param filters)`.
+
+This separation is intentional — the library stays focused on query string parsing and does not make assumptions about URL structure or entity relationships.
+
+### 4) Paging and sorting examples
 
 - `GET /api/persons?offset=0&limit=2`
 - `GET /api/persons?offset=2&limit=2`
@@ -354,7 +469,7 @@ Content-Type: application/json
 ]
 ```
 
-### 4) Full QueryDSL operator reference
+### 5) Full QueryDSL operator reference
 
 Query parameter format: `field.operator=value`
 
@@ -392,7 +507,75 @@ Notes:
 - `between`, `in`, `nin` are multi-value operators and should be sent as repeated query params.
 - unknown fields/operators are validated by `on-unknown-field` and `on-unknown-operator`.
 
-### 5) Combined query examples
+### 6) Enum field resolution
+
+When a query parameter targets an enum field, the library resolves the string value to an enum constant using this chain:
+
+1. **Custom factory methods** — the library scans the enum class for `public static` methods that accept a single `String` parameter and return the enum type itself (excluding `valueOf`). If any such method returns a non-null result, that value is used. Exceptions thrown by factory methods are silently ignored.
+2. **Standard `Enum.valueOf`** — if no factory method succeeds, the library falls back to `Enum.valueOf(EnumType.class, rawValue)`, which is exact and case-sensitive.
+3. **Error** — if all attempts fail, a `400 Bad Request` is returned.
+
+This means: if your enum has no custom factory methods, the current behavior (exact-match via `valueOf`) applies with no changes. If you add a factory method, the library picks it up automatically.
+
+#### Example: plain enum (no factory method)
+
+```java
+public enum Status {
+  NEW, DONE, FAILED
+}
+```
+
+| Query | Result |
+|---|---|
+| `status=NEW` | matches `Status.NEW` |
+| `status=new` | `400 Bad Request` (case-sensitive) |
+| `status.in=NEW&status.in=DONE` | matches `Status.NEW` or `Status.DONE` |
+
+#### Example: enum with a case-insensitive factory
+
+```java
+public enum Status {
+  NEW, DONE, FAILED;
+
+  public static Status initFrom(String value) {
+    return valueOf(value.toUpperCase());
+  }
+}
+```
+
+| Query | Result |
+|---|---|
+| `status=new` | matches `Status.NEW` via `initFrom` |
+| `status=Done` | matches `Status.DONE` via `initFrom` |
+| `status=FAILED` | matches `Status.FAILED` via `initFrom` (or via `valueOf` fallback) |
+
+#### Example: enum with multiple factory methods
+
+```java
+public enum Status {
+  NEW, DONE, FAILED;
+
+  public static Status fromAlias(String value) {
+    if ("nuevo".equalsIgnoreCase(value)) return NEW;
+    throw new IllegalArgumentException("Unknown alias: " + value);
+  }
+
+  public static Status fromLower(String value) {
+    return valueOf(value.toUpperCase());
+  }
+}
+```
+
+| Query | Result |
+|---|---|
+| `status=nuevo` | matches `Status.NEW` via `fromAlias` |
+| `status=done` | matches `Status.DONE` via `fromLower` |
+| `status=FAILED` | matches `Status.FAILED` via `fromLower` or `valueOf` fallback |
+| `status=bogus` | `400 Bad Request` (all methods and `valueOf` fail) |
+
+Factory methods are discovered once per enum type and cached for the lifetime of the application.
+
+### 7) Combined query examples
 
 #### Example A: multiple operators in one request
 
@@ -558,7 +741,7 @@ The library throws a filtering exception (mapped to HTTP `400`) for unsupported 
 - `filter=` exceeds configured max length
 - JsonPath filter feature is disabled by configuration
 
-### 6) Field selection utility (optional helper)
+### 8) Field selection utility (optional helper)
 
 `FieldSelectionUtil` can map objects into filtered `Map<String, Object>` views, useful when clients request specific fields.
 
@@ -615,7 +798,7 @@ Response example:
 }
 ```
 
-### 7) Full combined scenario (filter + paging + sorting + field selection + range statuses)
+### 9) Full combined scenario (filter + paging + sorting + field selection + range statuses)
 
 This section combines all major capabilities in one flow.
 

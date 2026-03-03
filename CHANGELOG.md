@@ -2,6 +2,26 @@
 
 All notable changes to `tmf630-toolkit` are documented in this file.
 
+## [1.0.4] - 2026-03-03
+
+### Added
+- Enum-aware value conversion with automatic factory method discovery.
+  - Before falling back to `Enum.valueOf`, the converter scans for `public static` methods that accept a single `String` and return the enum type.
+  - Multiple factory methods are tried in order; exceptions are silently ignored.
+  - Factory methods are discovered once per enum type and cached.
+
+### Changed
+- Bump Spring Boot BOM from `3.5.10` to `3.5.11`.
+- Bump Maven Surefire and Failsafe plugins from `3.5.4` to `3.5.5`.
+
+### Documentation
+- Add "Prerequisites for attribute filtering" section covering required peer dependencies (QueryDSL JPA/MongoDB bindings, `querydsl-apt`, Spring Data starters) and what the toolkit provides transitively.
+- Add "Combining predicates with path variables" section with a controller example for sub-resource endpoints (`GET /master/{id}/children`).
+- Add "Enum field resolution" section explaining the factory method discovery chain with plain, case-insensitive, and multi-factory examples.
+
+### Tests
+- Add unit tests for enum conversion: plain enum, single factory, null-returning factory, multiple factories, and full-chain failure.
+
 ## [1.0.3] - 2026-02-17
 
 ### Fixed
