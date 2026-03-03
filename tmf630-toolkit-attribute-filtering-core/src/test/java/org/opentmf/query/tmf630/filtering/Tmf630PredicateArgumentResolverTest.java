@@ -42,6 +42,27 @@ class Tmf630PredicateArgumentResolverTest {
   }
 
   @Test
+  void ignoresOffsetLimitAndFieldsAsReservedParams() throws Exception {
+    Tmf630PredicateArgumentResolver resolver = newResolver(AllowlistMode.ALLOW_ALL);
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setParameter("name.eq", "abc");
+    request.setParameter("offset", "0");
+    request.setParameter("limit", "10");
+    request.setParameter("fields", "name,age");
+    request.setParameter("sort", "-name");
+
+    Object predicate =
+        resolver.resolveArgument(
+            predicateParameter(),
+            null,
+            new ServletWebRequest(request),
+            null);
+
+    assertNotNull(predicate);
+    assertTrue(predicate.toString().contains("name"));
+  }
+
+  @Test
   void rejectsUnsupportedParameterWithoutQuerydslRoot() {
     Tmf630PredicateArgumentResolver resolver = newResolver(AllowlistMode.ALLOW_ALL);
     MockHttpServletRequest request = new MockHttpServletRequest();

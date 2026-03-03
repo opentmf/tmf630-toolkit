@@ -28,7 +28,8 @@ import static org.springframework.http.HttpStatus.BAD_REQUEST;
 
 public class Tmf630PredicateArgumentResolver implements HandlerMethodArgumentResolver {
 
-  private static final Set<String> RESERVED_PARAMS = Set.of("page", "size", "sort");
+  private static final Set<String> RESERVED_PARAMS =
+      Set.of("page", "size", "sort", "offset", "limit", "fields");
   private static final String FILTER_PARAM = "filter";
   private static final String FILTER_COMBINE_PARAM = "filter.combineWithAttributes";
 

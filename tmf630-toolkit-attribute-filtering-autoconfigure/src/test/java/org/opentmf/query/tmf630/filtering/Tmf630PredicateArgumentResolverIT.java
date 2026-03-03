@@ -48,6 +48,23 @@ class Tmf630PredicateArgumentResolverIT {
   }
 
   @Test
+  void ignoresOffsetLimitAndFieldsAlongsideAttributeFiltering() throws Exception {
+    mockMvc
+        .perform(
+            get("/search")
+                .param("transformationId.eq", "abc")
+                .param("offset", "0")
+                .param("limit", "2")
+                .param("fields", "transformationId,status")
+                .param("sort", "-createdOn"))
+        .andExpect(status().isOk())
+        .andExpect(content().string(Matchers.containsString("transformationId")))
+        .andExpect(content().string(Matchers.not(Matchers.containsString("offset"))))
+        .andExpect(content().string(Matchers.not(Matchers.containsString("limit"))))
+        .andExpect(content().string(Matchers.not(Matchers.containsString("fields"))));
+  }
+
+  @Test
   void rejectsUnknownFieldWhenAllowlistDenied() throws Exception {
     mockMvc
         .perform(get("/search").param("forbidden.eq", "x"))

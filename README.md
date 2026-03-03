@@ -507,6 +507,22 @@ Notes:
 - `between`, `in`, `nin` are multi-value operators and should be sent as repeated query params.
 - unknown fields/operators are validated by `on-unknown-field` and `on-unknown-operator`.
 
+#### Reserved parameter names
+
+The following query parameter names are reserved for paging, sorting, field selection, and filter control. The attribute filtering engine skips them automatically — they are never treated as entity field filters:
+
+`page`, `size`, `sort`, `offset`, `limit`, `fields`, `filter`, `filter.combineWithAttributes`
+
+If your entity happens to have a field with one of these names (for example, a column called `offset`), you can still filter by it using the explicit operator suffix form:
+
+| Query | Behavior |
+|---|---|
+| `offset=5` | Reserved — interpreted as TMF630 pagination offset, **not** as a filter |
+| `offset.eq=5` | Attribute filter — matches records where the `offset` field equals `5` |
+| `offset.gte=3` | Attribute filter — matches records where `offset >= 3` |
+
+The bare form (`field=value`) is ambiguous for reserved names, and the library resolves it in favor of the framework parameter. The explicit operator form (`field.op=value`) always bypasses the reservation.
+
 ### 6) Enum field resolution
 
 When a query parameter targets an enum field, the library resolves the string value to an enum constant using this chain:

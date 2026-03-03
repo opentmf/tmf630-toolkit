@@ -2,6 +2,20 @@
 
 All notable changes to `tmf630-toolkit` are documented in this file.
 
+## [1.0.5] - 2026-03-03
+
+### Fixed
+- Add `offset`, `limit`, and `fields` to the reserved parameter set in `Tmf630PredicateArgumentResolver`.
+  - Previously only `page`, `size`, and `sort` were reserved, causing TMF630 paging and field-selection parameters to be misinterpreted as attribute filter fields.
+  - With `onUnknownField=REJECT` (default), requests combining attribute filtering with `offset`/`limit` would fail with `400 Bad Request`.
+
+### Documentation
+- Add "Reserved parameter names" section to the README explaining which query parameter names are skipped by attribute filtering, and how to filter by entity fields that share a reserved name using explicit operator suffixes (e.g., `offset.eq=5`).
+
+### Tests
+- Add unit test verifying `offset`, `limit`, `fields`, and `sort` are ignored by the predicate resolver.
+- Add controller-level integration test combining attribute filtering with `offset`, `limit`, `fields`, and `sort` to prevent regression.
+
 ## [1.0.4] - 2026-03-03
 
 ### Added
