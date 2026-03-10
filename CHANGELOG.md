@@ -2,6 +2,32 @@
 
 All notable changes to `tmf630-toolkit` are documented in this file.
 
+## [1.0.6-SNAPSHOT]
+
+### Added
+- Java record support in `FieldSelectionUtil`.
+  - Records are detected via `clazz.isRecord()` and their components discovered through `RecordComponent` API.
+  - Both property discovery and value reading bypass `Introspector` for records, since Java 17's `Introspector` does not reliably recognize record accessor methods (`name()` vs `getName()`).
+  - Flat records, nested records, record-inside-bean, and bean-inside-record combinations are all supported.
+- New public overloads for depth-aware field selection with explicit field lists:
+  - `fieldsToMap(Object obj, String fields, int depth)`
+  - `fieldsToMapList(List<?> objects, String fields, int depth)`
+  - The `depth` parameter controls how deep complex fields are auto-expanded when selected by name (e.g., `fields=child` with `depth=2` expands one nested level into child's complex sub-properties). Explicit dot-paths (e.g., `child.address.city`) always resolve regardless of depth.
+
+### Fixed
+- `FieldSelectionUtil`: broad field selector overwritten by narrow dot-path.
+  - When both `child` and `child.name` appeared in `fields`, the dot-path recursion overwrote the broader auto-expansion. Changed `if` to `else if` in `parseFieldsRecursive` so the two branches are mutually exclusive.
+- `FieldSelectionUtil`: `ClassCastException` with wildcard or bounded generic types.
+  - `getType` now safely unwraps `WildcardType` (returns upper bound), `TypeVariable` (returns bound), and nested `ParameterizedType` (returns raw type) instead of performing an unchecked cast.
+- `FieldSelectionUtil`: `java.sql.Timestamp`, `java.sql.Date`, and `java.sql.Time` treated as scalar values.
+  - Added `java.sql` to the excluded-packages set so these types are no longer expanded into their bean properties (e.g., `nanos`).
+- `FieldSelectionUtil`: `parseFields` is now depth-aware, delegating to `resolveProperties` for auto-expansion of matched complex fields instead of a hardcoded scalar-only loop.
+
+### Tests
+- Add 6 tests for record field selection: flat record, explicit field selection, nested records with depth, record-inside-bean, bean-inside-record, and list of records.
+- Add 6 tests for depth-aware field selection with explicit fields: depth 1/2/3, list mapping, explicit dot-path unaffected by depth, and backward compatibility with existing overload.
+- Add regression tests for the three `FieldSelectionUtil` bug fixes: broad-vs-narrow selector, wildcard/TypeVariable/nested-ParameterizedType generics, and `java.sql.Timestamp` as scalar.
+
 ## [1.0.5] - 2026-03-03
 
 ### Fixed

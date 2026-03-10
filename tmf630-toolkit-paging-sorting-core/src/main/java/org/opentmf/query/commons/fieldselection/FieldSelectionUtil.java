@@ -6,7 +6,10 @@ import java.beans.Introspector;
 import java.beans.PropertyDescriptor;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.RecordComponent;
 import java.lang.reflect.Type;
+import java.lang.reflect.TypeVariable;
+import java.lang.reflect.WildcardType;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -34,6 +37,10 @@ public final class FieldSelectionUtil {
     return convertToMapList(List.of(obj), fields, 1).get(0);
   }
 
+  public static Map<String, Object> fieldsToMap(Object obj, String fields, int depth) {
+    return convertToMapList(List.of(obj), fields, depth).get(0);
+  }
+
   public static List<Map<String, Object>> fieldsToMapList(List<?> objects) {
     return convertToMapList(objects, null, 1);
   }
@@ -46,6 +53,10 @@ public final class FieldSelectionUtil {
     return convertToMapList(objects, fields, 1);
   }
 
+  public static List<Map<String, Object>> fieldsToMapList(List<?> objects, String fields, int depth) {
+    return convertToMapList(objects, fields, depth);
+  }
+
   private static List<Map<String, Object>> convertToMapList(
       List<?> objects, String fields, int depth) {
     if (objects == null || objects.isEmpty()) {
@@ -56,7 +67,7 @@ public final class FieldSelectionUtil {
     if (fields == null || fields.isEmpty()) {
       fieldsMap = resolveProperties(beanClass, depth);
     } else {
-      fieldsMap = parseFields(beanClass, fields);
+      fieldsMap = parseFields(beanClass, fields, depth);
     }
     List<Map<String, Object>> mappedElements = new ArrayList<>();
     for (Object element : objects) {
@@ -70,6 +81,9 @@ public final class FieldSelectionUtil {
   static List<PropertyDescriptor> getProperties(Class<?> clazz) {
     if (shouldExclude(clazz)) {
       return Collections.emptyList();
+    }
+    if (clazz.isRecord()) {
+      return getRecordProperties(clazz);
     }
     List<PropertyDescriptor> readWriteProperties = new ArrayList<>();
     try {
@@ -86,9 +100,24 @@ public final class FieldSelectionUtil {
     return readWriteProperties;
   }
 
+  private static List<PropertyDescriptor> getRecordProperties(Class<?> recordClass) {
+    List<PropertyDescriptor> result = new ArrayList<>();
+    for (RecordComponent rc : recordClass.getRecordComponents()) {
+      try {
+        PropertyDescriptor pd = new PropertyDescriptor(rc.getName(), rc.getAccessor(), null);
+        result.add(pd);
+      } catch (IntrospectionException e) {
+        throw new IllegalArgumentException(
+            "Error creating descriptor for record component " + rc.getName(), e);
+      }
+    }
+    return result;
+  }
+
   private static final Set<String> EXCLUDED_PACKAGES =
       new TreeSet<>(
-          Set.of("java.lang", "java.time", "java.util", "java.math", "java.io", "java.net"));
+          Set.of("java.lang", "java.time", "java.util", "java.math", "java.io", "java.net",
+              "java.sql"));
 
   private static boolean shouldExclude(Class<?> clazz) {
     Package p = clazz.getPackage();
@@ -102,13 +131,38 @@ public final class FieldSelectionUtil {
       return type.getComponentType();
     } else if (pd.getReadMethod().getGenericReturnType() instanceof ParameterizedType pType) {
       Type[] types = pType.getActualTypeArguments();
-      if (types.length == 1) {
-        return (Class<?>) types[0];
-      } else {
-        return (Class<?>) types[1];
-      }
+      Type target = types.length == 1 ? types[0] : types[1];
+      Class<?> resolved = resolveClass(target);
+      return resolved != null ? resolved : type;
     }
     return type;
+  }
+
+  private static Class<?> resolveClass(Type type) {
+    if (type instanceof Class<?> clazz) {
+      return clazz;
+    }
+    if (type instanceof WildcardType wt) {
+      Type[] upper = wt.getUpperBounds();
+      if (upper.length > 0 && upper[0] instanceof Class<?> clazz) {
+        return clazz;
+      }
+      return Object.class;
+    }
+    if (type instanceof TypeVariable<?> tv) {
+      Type[] bounds = tv.getBounds();
+      if (bounds.length > 0 && bounds[0] instanceof Class<?> clazz) {
+        return clazz;
+      }
+      return Object.class;
+    }
+    if (type instanceof ParameterizedType pt) {
+      Type rawType = pt.getRawType();
+      if (rawType instanceof Class<?> clazz) {
+        return clazz;
+      }
+    }
+    return null;
   }
 
   private static void assignValues(
@@ -163,6 +217,14 @@ public final class FieldSelectionUtil {
 
   private static Object getValue(Class<?> elementClass, String fieldName, Object element) {
     try {
+      if (elementClass.isRecord()) {
+        for (RecordComponent rc : elementClass.getRecordComponents()) {
+          if (rc.getName().equals(fieldName)) {
+            return rc.getAccessor().invoke(element);
+          }
+        }
+        return null;
+      }
       Object value = null;
       BeanInfo beanInfo = Introspector.getBeanInfo(elementClass);
       for (PropertyDescriptor pd : beanInfo.getPropertyDescriptors()) {
@@ -211,7 +273,7 @@ public final class FieldSelectionUtil {
     return fieldMap;
   }
 
-  static Map<String, FieldNode> parseFields(Class<?> beanClass, String fieldsParam) {
+  static Map<String, FieldNode> parseFields(Class<?> beanClass, String fieldsParam, int depth) {
     Map<String, FieldNode> root = new LinkedHashMap<>();
 
     if (fieldsParam == null || fieldsParam.isEmpty()) {
@@ -228,7 +290,7 @@ public final class FieldSelectionUtil {
       set.add(field.trim());
     }
 
-    parseFieldsRecursive(beanClass, set, root, "", 0, null);
+    parseFieldsRecursive(beanClass, set, root, "", 0, null, depth);
 
     return root;
   }
@@ -239,7 +301,8 @@ public final class FieldSelectionUtil {
       Map<String, FieldNode> map,
       String base,
       int level,
-      String embeddedIdFieldName) {
+      String embeddedIdFieldName,
+      int depth) {
     if (fields.isEmpty() || level > 10) {
       return;
     }
@@ -248,7 +311,7 @@ public final class FieldSelectionUtil {
       String name = pd.getName();
       Class<?> propertyType = getType(pd);
       if (FIELD_HELPER.isEmbeddedId(beanClass, pd)) {
-        parseFieldsRecursive(propertyType, fields, map, base, level, name);
+        parseFieldsRecursive(propertyType, fields, map, base, level, name, depth);
       } else {
         String path = base + name;
         List<PropertyDescriptor> nestedProperties = getProperties(propertyType);
@@ -256,19 +319,13 @@ public final class FieldSelectionUtil {
           if (nestedProperties.isEmpty()) {
             map.put(name, new FieldNode(embeddedIdFieldName));
           } else {
-            Map<String, FieldNode> nestedMap = new LinkedHashMap<>();
-            for (PropertyDescriptor nestedProp : nestedProperties) {
-              if (getProperties(getType(nestedProp)).isEmpty()) {
-                nestedMap.put(nestedProp.getName(), new FieldNode());
-              }
-            }
-            map.put(name, new FieldNode(nestedMap));
+            Map<String, FieldNode> nestedMap = resolveProperties(propertyType, depth - 1);
+            map.put(name, nestedMap.isEmpty() ? new FieldNode() : new FieldNode(nestedMap));
           }
           fields.remove(path);
-        }
-        if (!nestedProperties.isEmpty()) {
+        } else if (!nestedProperties.isEmpty()) {
           Map<String, FieldNode> nestedMap = new LinkedHashMap<>();
-          parseFieldsRecursive(propertyType, fields, nestedMap, path + ".", level + 1, null);
+          parseFieldsRecursive(propertyType, fields, nestedMap, path + ".", level + 1, null, depth);
           if (!nestedMap.isEmpty()) {
             map.put(name, new FieldNode(nestedMap));
           }
