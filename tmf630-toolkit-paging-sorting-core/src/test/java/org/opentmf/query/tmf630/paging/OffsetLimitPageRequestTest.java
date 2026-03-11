@@ -2,6 +2,7 @@ package org.opentmf.query.tmf630.paging;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -37,6 +38,34 @@ class OffsetLimitPageRequestTest {
     OffsetLimitPageRequest pageable = new OffsetLimitPageRequest(0, 10, Sort.unsorted());
     assertFalse(pageable.hasPrevious());
     assertEquals(0, pageable.previousOrFirst().getOffset());
+  }
+
+  @Test
+  void equalsAndHashCodeWorkCorrectly() {
+    Sort sort = Sort.by("id");
+    OffsetLimitPageRequest a = new OffsetLimitPageRequest(10, 5, sort);
+    OffsetLimitPageRequest b = new OffsetLimitPageRequest(10, 5, sort);
+    OffsetLimitPageRequest differentOffset = new OffsetLimitPageRequest(20, 5, sort);
+    OffsetLimitPageRequest differentLimit = new OffsetLimitPageRequest(10, 3, sort);
+    OffsetLimitPageRequest differentSort =
+        new OffsetLimitPageRequest(10, 5, Sort.by(Sort.Direction.DESC, "id"));
+
+    assertEquals(a, b);
+    assertEquals(a.hashCode(), b.hashCode());
+    assertNotEquals(a, differentOffset);
+    assertNotEquals(a, differentLimit);
+    assertNotEquals(a, differentSort);
+    assertNotEquals(a, null);
+    assertNotEquals(a, "string");
+  }
+
+  @Test
+  void toStringContainsAllFields() {
+    OffsetLimitPageRequest pageable = new OffsetLimitPageRequest(5, 10, Sort.by("name"));
+    String str = pageable.toString();
+    assertTrue(str.contains("offset=5"));
+    assertTrue(str.contains("limit=10"));
+    assertTrue(str.contains("name"));
   }
 
   @Test

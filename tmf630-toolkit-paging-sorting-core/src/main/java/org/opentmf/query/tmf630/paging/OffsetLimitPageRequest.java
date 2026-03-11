@@ -2,6 +2,7 @@ package org.opentmf.query.tmf630.paging;
 
 import java.io.Serial;
 import java.io.Serializable;
+import java.util.Objects;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 
@@ -71,5 +72,22 @@ public final class OffsetLimitPageRequest implements Pageable, Serializable {
   @Override
   public boolean hasPrevious() {
     return offset >= limit;
+  }
+
+  @Override
+  public boolean equals(Object o) {
+    if (this == o) return true;
+    if (!(o instanceof OffsetLimitPageRequest that)) return false;
+    return offset == that.offset && limit == that.limit && sort.equals(that.sort);
+  }
+
+  @Override
+  public int hashCode() {
+    return Objects.hash(offset, limit, sort);
+  }
+
+  @Override
+  public String toString() {
+    return "OffsetLimitPageRequest[offset=" + offset + ", limit=" + limit + ", sort=" + sort + "]";
   }
 }

@@ -16,7 +16,8 @@ Release notes and version history are available in [`CHANGELOG.md`](./CHANGELOG.
 - JsonPath-based `filter=` support merged into the same QueryDSL predicate pipeline
 - Strict same-element array correlation for document backends (Mongo `$elemMatch` translation)
 - Range-aware response helpers (`Content-Range`, `X-Total-Count`, `X-Result-Count`)
-- Field selection utility (`fields=` support) for response shaping
+- Field selection utility (`fields=` support) for response shaping — automatic when using `@Tmf630Response`
+- `@Tmf630Response` annotation for fully transparent TMF630 response handling (status, headers, field selection)
 - Works in both Spring Boot and plain Spring projects
 
 ## Module layout
@@ -189,10 +190,11 @@ Notes:
 
 ## Configuration prefixes
 
-| Prefix                               | Purpose                        |
-|--------------------------------------|--------------------------------|
-| `opentmf.tmf630.paging`              | Paging/sorting behavior        |
-| `opentmf.tmf630.attribute-filtering` | Query filter parsing and rules |
+| Prefix                               | Purpose                         |
+|--------------------------------------|---------------------------------|
+| `opentmf.tmf630.paging`              | Paging/sorting behavior         |
+| `opentmf.tmf630.attribute-filtering` | Query filter parsing and rules  |
+| `opentmf.tmf630.field-selection`     | `@Tmf630Response` field selection behavior |
 
 ### Common paging properties
 
@@ -220,6 +222,11 @@ Notes:
 - `opentmf.tmf630.attribute-filtering.on-unknown-operator` (`REJECT` or `IGNORE`)
 - `opentmf.tmf630.attribute-filtering.json-path-filter.enabled` (default: `true`)
 - `opentmf.tmf630.attribute-filtering.json-path-filter.max-length` (default: `2048`)
+
+### Field selection properties
+
+- `opentmf.tmf630.field-selection.enabled` (default: `true`) — enables the `@Tmf630Response` auto-advice
+- `opentmf.tmf630.field-selection.default-depth` (default: `1`) — how deep nested objects are auto-expanded when selected by name (see depth semantics below)
 
 ### Configuration scenario 1: default behavior (no custom config)
 
@@ -382,6 +389,10 @@ Sample records:
 
 ### 2) Controller usage (Spring Boot)
 
+There are three ways to wire TMF630 responses, from most transparent to most manual.
+
+**Level 1: Fully transparent — `@Tmf630Response` on a `Page<T>` return** (recommended)
+
 ```java
 @RestController
 @RequestMapping("/api/persons")
@@ -394,14 +405,151 @@ class PersonController {
   }
 
   @GetMapping
-  ResponseEntity<List<Person>> search(
+  @Tmf630Response
+  Page<Person> search(
       @QuerydslPredicate(root = Person.class) Predicate predicate,
       Pageable pageable) {
-    Page<Person> page = repository.findAll(predicate, pageable);
-    return Tmf630Util.tmfPage(page);
+    return repository.findAll(predicate, pageable);
   }
 }
 ```
+
+The library does everything: resolves the HTTP status (`200`, `206`, or `416`), adds `Content-Range` / `X-Total-Count` / `X-Result-Count` headers, serializes page content as a JSON array, and transparently applies `fields=` selection when that query parameter is present.
+
+`@Tmf630Response` can be placed at the class level to apply to every handler method in the controller.
+
+**Controlling expansion depth per endpoint**
+
+The optional `depth` attribute overrides the global `default-depth` for a specific endpoint:
+
+```java
+@GetMapping("/persons")
+@Tmf630Response(depth = 2)    // expand complex fields 2 levels deep for this endpoint
+Page<Person> list(Pageable pageable) { ... }
+
+@GetMapping("/orders")
+@Tmf630Response(depth = 1)    // only top-level scalar fields of any selected complex field
+Page<Order> orders(Pageable pageable) { ... }
+
+@GetMapping("/simple")
+@Tmf630Response               // inherits opentmf.tmf630.field-selection.default-depth (default 1)
+Page<Simple> simple(Pageable pageable) { ... }
+```
+
+The resolution order is: **method-level `depth`** → **class-level `depth`** → **`opentmf.tmf630.field-selection.default-depth`**.
+
+`depth` controls how deep a named complex field (e.g. `fields=address`) is expanded by the library's field mapper:
+- `depth=0` — the field is included as a raw value; Jackson serializes it natively. All of the object's getters are called by Jackson, including any lazy-loaded sub-associations.
+- `depth=1` (**default**) — only the direct scalar fields of `address` are included; complex sub-fields (e.g. `country`, or a `@OneToMany states`) are excluded. Their getters are never called, preventing unintended JPA lazy-load cascades.
+- `depth=2` — `address` and its first-level complex sub-fields (e.g. `country`) are both expanded; `country`'s own complex sub-fields are not.
+
+The default of `1` is intentional: when a client sends `fields=address`, the library maps only the scalar properties of `address` into an explicit sub-map. Jackson never receives the raw `Address` POJO and therefore never calls `getStates()` or any other lazy-loaded association. To include a nested association, use an explicit dot-path (`fields=address.states`) or raise the depth.
+
+Explicit dot-paths in `fields` (e.g. `fields=address.country.code`) always resolve regardless of `depth`.
+
+---
+
+#### Avoiding JPA lazy-load cascades — recommended patterns
+
+When no `fields=` parameter is present, the library returns `page.getContent()` as-is. Jackson then serializes the raw JPA entity objects and calls **every getter**, including any `@OneToMany` or `@ManyToOne` lazy associations. Depending on whether the JPA session is still open, this either triggers N+1 queries or throws a `LazyInitializationException`.
+
+The following patterns prevent this, ordered from best to most pragmatic.
+
+---
+
+**Pattern A — Return a DTO from the repository (strongly recommended)**
+
+The cleanest solution: your Spring Data query returns a flat DTO that contains only the fields you need. Lazy associations do not exist on the DTO, so there is nothing to load.
+
+```java
+// DTO — no JPA associations, no lazy fields
+public record PersonDto(Long id, String name, String birthdate) {}
+
+// Repository — only fetch what you need
+@Query("SELECT new com.example.PersonDto(p.id, p.name, p.birthdate) FROM Person p")
+Page<PersonDto> search(Predicate predicate, Pageable pageable);
+
+// Controller — safe to use with or without fields=
+@GetMapping("/persons")
+@Tmf630Response
+Page<PersonDto> list(
+    @QuerydslPredicate(root = Person.class) Predicate predicate,
+    Pageable pageable) {
+  return repo.search(predicate, pageable);
+}
+```
+
+Because `PersonDto` is a plain record with no associations, serialization is always safe. The `@Tmf630Response` advice still applies `fields=` selection on top if the client requests it.
+
+This is the pattern we recommend for all list/search endpoints in production microservices.
+
+---
+
+**Pattern B — Use `fields=` with only scalar field names**
+
+When the client sends `fields=id,name,birthdate` and none of those names resolve to a lazy association, `FieldSelectionUtil` at `depth=1` (the default) maps only scalar properties. The raw entity POJO is never passed to Jackson — instead Jackson receives a plain `Map` — so `getAddress()`, `getChildren()`, etc. are never called.
+
+> **Rule of thumb:** only lazy-load risk arises when a field name in `fields=` refers to a complex JPA association. Scalar fields (`String`, `Long`, `LocalDate`, enums, …) are always safe.
+
+---
+
+**Pattern C — Fetch the association explicitly when you need it**
+
+If you genuinely need a nested object in the response, use `@EntityGraph` or `JOIN FETCH` so the association is loaded in a single query:
+
+```java
+@EntityGraph(attributePaths = {"address"})
+Page<Person> findAll(Predicate predicate, Pageable pageable);
+```
+
+Then the client sends `fields=id,name,address`. With `depth=1` (the default), the library maps only the scalar sub-fields of `address` (e.g. `city`, `zip`), never touching `address.states` or other deeper associations. To go one level deeper for a specific endpoint, annotate it with `@Tmf630Response(depth = 2)`.
+
+---
+
+**Patterns to avoid**
+
+| Pattern | Problem |
+|---|---|
+| OSIV enabled (Spring Boot default `spring.jpa.open-in-view=true`) | Session stays open for the entire HTTP request; lazy loads silently succeed but produce hidden N+1 queries |
+| `@Transactional` on a controller method | Same hidden N+1 risk, slightly narrower scope |
+| `@Tmf630Response(depth = 0)` with no `fields=` | Raw entity handed to Jackson; every getter called; full object graph loaded |
+
+> **Recommendation for new projects:** set `spring.jpa.open-in-view=false` in `application.yml` and use Pattern A (DTOs) for all list endpoints. This makes lazy-load issues surface at development time as `LazyInitializationException` rather than silently degrading performance in production.
+
+---
+
+**Level 2: Manual paging, transparent field selection**
+
+```java
+@GetMapping
+@Tmf630Response
+ResponseEntity<List<Person>> search(
+    @QuerydslPredicate(root = Person.class) Predicate predicate,
+    Pageable pageable) {
+  Page<Person> page = repository.findAll(predicate, pageable);
+  return Tmf630Util.tmfPage(page);
+}
+```
+
+`Tmf630Util.tmfPage(page)` handles status and headers. The `@Tmf630Response` annotation enables automatic `fields=` selection without any extra parameter or code.
+
+**Level 3: Fully manual (no annotation needed)**
+
+```java
+@GetMapping
+ResponseEntity<List<Person>> search(
+    @QuerydslPredicate(root = Person.class) Predicate predicate,
+    Pageable pageable,
+    @RequestParam(required = false) String fields) {
+  Page<Person> page = repository.findAll(predicate, pageable);
+  if (fields != null) {
+    return Tmf630Util.tmfPage(page, fields);
+  }
+  return Tmf630Util.tmfPage(page);
+}
+```
+
+This gives the developer full control over every step. `Tmf630Util.tmfPage(page, fields)` returns `ResponseEntity<List<Map<String, Object>>>` with field selection pre-applied.
 
 ### 3) Combining predicates with path variables
 
@@ -765,13 +913,13 @@ Package:
 
 - `org.opentmf.query.commons.fieldselection.FieldSelectionUtil`
 
-Example:
+For list endpoints backed by `Page<T>`, the preferred approach is `@Tmf630Response` (see section 2) — field selection is handled automatically without any extra code. For single-object endpoints or cases where manual control is needed, `FieldSelectionUtil` can be called directly:
 
 ```java
 Map<String, Object> result = FieldSelectionUtil.fieldsToMap(person, "id,name,surname");
 ```
 
-Controller example:
+Controller example (single-object endpoint):
 
 ```java
 @RestController
@@ -818,7 +966,7 @@ Response example:
 
 This section combines all major capabilities in one flow.
 
-Controller example for combined usage:
+**Recommended approach** — let `@Tmf630Response` handle everything:
 
 ```java
 @RestController
@@ -832,21 +980,36 @@ class PersonCombinedController {
   }
 
   @GetMapping
-  ResponseEntity<List<Map<String, Object>>> search(
+  @Tmf630Response
+  Page<Person> search(
       @QuerydslPredicate(root = Person.class) Predicate predicate,
-      Pageable pageable,
-      @RequestParam(required = false) String fields) {
-    Page<Person> page = repository.findAll(predicate, pageable);
-
-    List<Map<String, Object>> content =
-        (fields == null || fields.isBlank())
-            ? FieldSelectionUtil.fieldsToMapList(page.getContent())
-            : FieldSelectionUtil.fieldsToMapList(page.getContent(), fields);
-
-    Page<Map<String, Object>> mappedPage =
-        new org.springframework.data.domain.PageImpl<>(content, pageable, page.getTotalElements());
-    return Tmf630Util.tmfPage(mappedPage);
+      Pageable pageable) {
+    return repository.findAll(predicate, pageable);
   }
+}
+```
+
+Status (`200`/`206`/`416`), range headers, and `fields=` selection are all handled automatically. Use `@Tmf630Response(depth = N)` to control how deep complex fields are expanded.
+
+**Manual equivalent** (Level 3, full control):
+
+```java
+@GetMapping
+ResponseEntity<List<Map<String, Object>>> search(
+    @QuerydslPredicate(root = Person.class) Predicate predicate,
+    Pageable pageable,
+    @RequestParam(required = false) String fields) {
+  Page<Person> page = repository.findAll(predicate, pageable);
+
+  List<Map<String, Object>> content =
+      (fields == null || fields.isBlank())
+          ? FieldSelectionUtil.fieldsToMapList(page.getContent())
+          : FieldSelectionUtil.fieldsToMapList(page.getContent(), fields);
+
+  Page<Map<String, Object>> mappedPage =
+      new org.springframework.data.domain.PageImpl<>(content, pageable, page.getTotalElements());
+  return Tmf630Util.tmfPage(mappedPage);
+}
 }
 ```
 

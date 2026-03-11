@@ -22,11 +22,11 @@ class Tmf630PagingPropertiesTest {
 
     Tmf630PagingSettings settings = properties.toSettings();
 
-    assertTrue(settings.isEnabled());
-    assertEquals(25, settings.getDefaultLimit());
-    assertEquals(300, settings.getMaxLimit());
-    assertFalse(settings.isStrictMode());
-    assertTrue(settings.isAllowNestedSortProperties());
-    assertEquals(List.of("id", "createdOn"), settings.getSortAllowlist());
+    assertTrue(settings.enabled());
+    assertEquals(25, settings.defaultLimit());
+    assertEquals(300, settings.maxLimit());
+    assertFalse(settings.strictMode());
+    assertTrue(settings.allowNestedSortProperties());
+    assertEquals(List.of("id", "createdOn"), settings.sortAllowlist());
   }
 }

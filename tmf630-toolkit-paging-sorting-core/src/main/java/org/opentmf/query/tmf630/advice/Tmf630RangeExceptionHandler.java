@@ -15,29 +15,22 @@ public class Tmf630RangeExceptionHandler {
   @ExceptionHandler(RequestedRangeNotSatisfiableException.class)
   public ResponseEntity<ErrorMessage> handle(RequestedRangeNotSatisfiableException e) {
     long total = e.getTotalElements();
+    long offset = e.getRequestedOffset();
 
-    ErrorMessage error = getRangeNotSatisfiableError(e);
     HttpHeaders headers = new HttpHeaders();
-    Tmf630Util.applyRangeHeaders(headers, total, e.getRequestedOffset(), 0, false);
+    Tmf630Util.applyRangeHeaders(headers, total, offset, 0, false);
+
+    ErrorMessage error =
+        new ErrorMessage(
+            String.valueOf(HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE.value()),
+            HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE.getReasonPhrase(),
+            "Requested offset is outside the available range.",
+            "Requested offset "
+                + offset
+                + " does not overlap with existing items. Valid offsets are between 0 and "
+                + (total == 0 ? 0 : total - 1)
+                + ".");
 
     return new ResponseEntity<>(error, headers, HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE);
-  }
-
-  private static ErrorMessage getRangeNotSatisfiableError(
-      RequestedRangeNotSatisfiableException exception) {
-    long offset = exception.getRequestedOffset();
-    long total = exception.getTotalElements();
-
-    ErrorMessage error = new ErrorMessage();
-    error.setCode(String.valueOf(HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE.value()));
-    error.setStatus(HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE.getReasonPhrase());
-    error.setReason("Requested offset is outside the available range.");
-    error.setMessage(
-        "Requested offset "
-            + offset
-            + " does not overlap with existing items. Valid offsets are between 0 and "
-            + (total == 0 ? 0 : total - 1)
-            + ".");
-    return error;
   }
 }

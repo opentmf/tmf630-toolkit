@@ -26,7 +26,7 @@ public class TmfPageableHandlerMethodArgumentResolver extends PageableHandlerMet
     this.settings = settings;
     this.sortParser =
         new TmfSortParser(
-            settings.getSortAllowlist(), settings.isAllowNestedSortProperties());
+            settings.sortAllowlist(), settings.allowNestedSortProperties());
   }
 
   @Override
@@ -55,8 +55,8 @@ public class TmfPageableHandlerMethodArgumentResolver extends PageableHandlerMet
     }
 
     long offset = parseLong(offsetRaw, 0L, OFFSET);
-    int limit = parseInt(limitRaw, settings.getDefaultLimit(), LIMIT);
-    limit = Math.min(limit, settings.getMaxLimit());
+    int limit = parseInt(limitRaw, settings.defaultLimit(), LIMIT);
+    limit = Math.min(limit, settings.maxLimit());
     if (limit <= 0) {
       throw new IllegalArgumentException("limit must be > 0");
     }
@@ -79,7 +79,7 @@ public class TmfPageableHandlerMethodArgumentResolver extends PageableHandlerMet
       }
       return value;
     } catch (NumberFormatException e) {
-      if (settings.isStrictMode()) {
+      if (settings.strictMode()) {
         throw new IllegalArgumentException(fieldName + " must be numeric", e);
       }
       return defaultValue;
@@ -97,7 +97,7 @@ public class TmfPageableHandlerMethodArgumentResolver extends PageableHandlerMet
       }
       return value;
     } catch (NumberFormatException e) {
-      if (settings.isStrictMode()) {
+      if (settings.strictMode()) {
         throw new IllegalArgumentException(fieldName + " must be numeric", e);
       }
       return defaultValue;

@@ -26,7 +26,7 @@ public final class FieldSelectionUtil {
   private FieldSelectionUtil() {}
 
   public static Map<String, Object> fieldsToMap(Object obj) {
-    return convertToMapList(List.of(obj), null, 1).get(0);
+    return convertToMapList(List.of(obj), null, 0).get(0);
   }
 
   public static Map<String, Object> fieldsToMap(Object obj, int depth) {
@@ -34,7 +34,7 @@ public final class FieldSelectionUtil {
   }
 
   public static Map<String, Object> fieldsToMap(Object obj, String fields) {
-    return convertToMapList(List.of(obj), fields, 1).get(0);
+    return convertToMapList(List.of(obj), fields, 0).get(0);
   }
 
   public static Map<String, Object> fieldsToMap(Object obj, String fields, int depth) {
@@ -42,7 +42,7 @@ public final class FieldSelectionUtil {
   }
 
   public static List<Map<String, Object>> fieldsToMapList(List<?> objects) {
-    return convertToMapList(objects, null, 1);
+    return convertToMapList(objects, null, 0);
   }
 
   public static List<Map<String, Object>> fieldsToMapList(List<?> objects, int depth) {
@@ -50,7 +50,7 @@ public final class FieldSelectionUtil {
   }
 
   public static List<Map<String, Object>> fieldsToMapList(List<?> objects, String fields) {
-    return convertToMapList(objects, fields, 1);
+    return convertToMapList(objects, fields, 0);
   }
 
   public static List<Map<String, Object>> fieldsToMapList(List<?> objects, String fields, int depth) {

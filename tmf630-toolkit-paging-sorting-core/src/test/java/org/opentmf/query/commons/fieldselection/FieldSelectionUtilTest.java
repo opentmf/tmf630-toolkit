@@ -19,7 +19,7 @@ import org.junit.jupiter.api.Test;
 class FieldSelectionUtilTest {
 
   @Test
-  void mapsObjectWithImplicitDepth() {
+  void defaultDepthZeroEmitsScalarsOnly() {
     Parent parent = new Parent();
     parent.setId("p1");
     Child child = new Child();
@@ -29,7 +29,23 @@ class FieldSelectionUtilTest {
     Map<String, Object> result = FieldSelectionUtil.fieldsToMap(parent);
 
     assertEquals("p1", result.get("id"));
-    assertTrue(result.containsKey("child"));
+    assertFalse(result.containsKey("child"),
+        "depth=0 should not include complex fields");
+  }
+
+  @Test
+  void depthOneIncludesOneNestedLevel() {
+    Parent parent = new Parent();
+    parent.setId("p1");
+    Child child = new Child();
+    child.setName("child");
+    parent.setChild(child);
+
+    Map<String, Object> result = FieldSelectionUtil.fieldsToMap(parent, 1);
+
+    assertEquals("p1", result.get("id"));
+    assertTrue(result.containsKey("child"),
+        "depth=1 should include direct complex fields");
   }
 
   @Test
@@ -176,17 +192,17 @@ class FieldSelectionUtilTest {
   }
 
   @Test
-  @SuppressWarnings("unchecked")
-  void depthOnePreservesBackwardCompatibilityWithExistingOverload() {
+  void defaultDepthZeroMatchesExplicitDepthZeroForFields() {
     Parent parent = createDeepParent();
 
     Map<String, Object> withoutDepth = FieldSelectionUtil.fieldsToMap(parent, "child");
-    Map<String, Object> withDepthOne = FieldSelectionUtil.fieldsToMap(parent, "child", 1);
+    Map<String, Object> withDepthZero = FieldSelectionUtil.fieldsToMap(parent, "child", 0);
 
-    Map<String, Object> childA = (Map<String, Object>) withoutDepth.get("child");
-    Map<String, Object> childB = (Map<String, Object>) withDepthOne.get("child");
-    assertEquals(childA.keySet(), childB.keySet(),
-        "depth=1 should produce identical output to the existing no-depth overload");
+    assertEquals(withoutDepth.keySet(), withDepthZero.keySet(),
+        "no-depth overload should now behave as depth=0");
+    Object childA = withoutDepth.get("child");
+    Object childB = withDepthZero.get("child");
+    assertEquals(childA.getClass(), childB.getClass());
   }
 
   private Parent createDeepParent() {
@@ -327,12 +343,25 @@ class FieldSelectionUtilTest {
     parent.setId("p1");
     parent.setLocation(new CountryRecord("DE"));
 
+    Map<String, Object> withDepth = FieldSelectionUtil.fieldsToMap(parent, 1);
+
+    assertEquals("p1", withDepth.get("id"));
+    assertTrue(withDepth.containsKey("location"));
+    Map<String, Object> locationMap = (Map<String, Object>) withDepth.get("location");
+    assertEquals("DE", locationMap.get("code"));
+  }
+
+  @Test
+  void mapsRecordInsideBeanDefaultDepthExcludesComplex() {
+    Parent parent = new Parent();
+    parent.setId("p1");
+    parent.setLocation(new CountryRecord("DE"));
+
     Map<String, Object> result = FieldSelectionUtil.fieldsToMap(parent);
 
     assertEquals("p1", result.get("id"));
-    assertTrue(result.containsKey("location"));
-    Map<String, Object> locationMap = (Map<String, Object>) result.get("location");
-    assertEquals("DE", locationMap.get("code"));
+    assertFalse(result.containsKey("location"),
+        "depth=0 should not include complex record fields");
   }
 
   @Test
@@ -342,12 +371,25 @@ class FieldSelectionUtilTest {
     child.setName("nested-bean");
     RecordWithBean rec = new RecordWithBean("r1", child);
 
-    Map<String, Object> result = FieldSelectionUtil.fieldsToMap(rec);
+    Map<String, Object> result = FieldSelectionUtil.fieldsToMap(rec, 1);
 
     assertEquals("r1", result.get("label"));
     assertTrue(result.containsKey("child"));
     Map<String, Object> childMap = (Map<String, Object>) result.get("child");
     assertEquals("nested-bean", childMap.get("name"));
+  }
+
+  @Test
+  void mapsBeanInsideRecordDefaultDepthExcludesComplex() {
+    Child child = new Child();
+    child.setName("nested-bean");
+    RecordWithBean rec = new RecordWithBean("r1", child);
+
+    Map<String, Object> result = FieldSelectionUtil.fieldsToMap(rec);
+
+    assertEquals("r1", result.get("label"));
+    assertFalse(result.containsKey("child"),
+        "depth=0 should not include complex bean fields inside record");
   }
 
   @Test

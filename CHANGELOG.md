@@ -2,9 +2,19 @@
 
 All notable changes to `tmf630-toolkit` are documented in this file.
 
-## [1.0.6-SNAPSHOT]
+## [1.0.6] - 2026-03-11
 
 ### Added
+- `@Tmf630Response` annotation for fully transparent TMF630 response handling.
+  - When placed on a controller method (or class) returning `Page<T>`, the library automatically resolves the HTTP status (`200`, `206`, or `416`), adds `Content-Range` / `X-Total-Count` / `X-Result-Count` headers, serializes the page content as a JSON array, and applies `fields=` query parameter selection — all without any boilerplate code.
+  - Works at method level or class level (applies to every handler method in the controller).
+  - Three usage layers: (1) fully transparent `@Tmf630Response` + `Page<T>` return, (2) manual `tmfPage()` + annotation for auto field selection, (3) fully manual with no annotation.
+  - Optional `depth` attribute (`@Tmf630Response(depth = N)`) overrides the global `default-depth` for a specific endpoint. `depth=1` (the default) maps only the scalar sub-fields of any explicitly-named complex field, preventing lazy-load cascades into deeper associations; `depth=0` passes the raw object to Jackson (all getters called); `depth=2` expands one additional level. Explicit dot-paths always resolve regardless of depth. Resolution order: method-level `depth` → class-level `depth` → `opentmf.tmf630.field-selection.default-depth`.
+- `Tmf630ResponseBodyAdvice` — a `ResponseBodyAdvice` that powers the `@Tmf630Response` annotation. Auto-configured via Spring Boot; non-Boot users can register it as a bean.
+- `Tmf630Util.tmfPage(Page<T>, String fields)` — convenience overload that combines TMF630 page response construction with field selection in a single call.
+- New configuration namespace `opentmf.tmf630.field-selection`:
+  - `enabled` (default: `true`) — enables/disables the `@Tmf630Response` advice.
+  - `default-depth` (default: `1`) — controls how deep nested objects are auto-expanded during field selection. Defaults to `1` so that when a client sends `fields=address`, the library maps only the scalar properties of the named field into an explicit sub-map; Jackson never receives the raw POJO and therefore never triggers lazy-load cascades into deeper associations (e.g. a `@OneToMany states` on `Address`).
 - Java record support in `FieldSelectionUtil`.
   - Records are detected via `clazz.isRecord()` and their components discovered through `RecordComponent` API.
   - Both property discovery and value reading bypass `Introspector` for records, since Java 17's `Introspector` does not reliably recognize record accessor methods (`name()` vs `getName()`).
@@ -13,6 +23,14 @@ All notable changes to `tmf630-toolkit` are documented in this file.
   - `fieldsToMap(Object obj, String fields, int depth)`
   - `fieldsToMapList(List<?> objects, String fields, int depth)`
   - The `depth` parameter controls how deep complex fields are auto-expanded when selected by name (e.g., `fields=child` with `depth=2` expands one nested level into child's complex sub-properties). Explicit dot-paths (e.g., `child.address.city`) always resolve regardless of depth.
+
+### Changed
+- **Breaking**: `FieldSelectionUtil` default depth changed from `1` to `0`. Overloads without an explicit `depth` parameter (`fieldsToMap(obj)`, `fieldsToMapList(list)`, `fieldsToMap(obj, fields)`, `fieldsToMapList(list, fields)`) now emit scalar properties only; complex sub-objects are not auto-expanded. Use the `depth` overloads (e.g., `fieldsToMap(obj, 1)`) to restore previous behavior.
+- `Tmf630ResponseBodyAdvice` / `@Tmf630Response` default depth changed from `0` to `1`. Scalar sub-fields of any explicitly-named complex field are now included automatically; deeper associations (e.g. `@OneToMany`) remain excluded, preventing JPA lazy-load cascades. Use `@Tmf630Response(depth = 0)` or set `opentmf.tmf630.field-selection.default-depth=0` to opt out.
+- `ErrorMessage` converted from a mutable POJO (with setters) to a Java record. JSON serialization is identical; constructor replaces setters.
+- `Tmf630PagingSettings` converted from a manual immutable class to a Java record for consistency with `Tmf630FilterSettings`.
+- `Tmf630Util.applyRangeHeaders` parameter `returned` widened from `int` to `long` for consistency with `total` and `offset`.
+- `OffsetLimitPageRequest` now implements `equals`, `hashCode`, and `toString`.
 
 ### Fixed
 - `FieldSelectionUtil`: broad field selector overwritten by narrow dot-path.
@@ -23,7 +41,23 @@ All notable changes to `tmf630-toolkit` are documented in this file.
   - Added `java.sql` to the excluded-packages set so these types are no longer expanded into their bean properties (e.g., `nanos`).
 - `FieldSelectionUtil`: `parseFields` is now depth-aware, delegating to `resolveProperties` for auto-expansion of matched complex fields instead of a hardcoded scalar-only loop.
 
+### Docs
+- New README section: **"Avoiding JPA lazy-load cascades — recommended patterns"**, placed directly after the `depth` semantics explanation.
+  - **Pattern A (strongly recommended):** use a DTO/record as the repository return type. Because the DTO carries no JPA associations, serialization is always safe with or without `fields=`. Includes a complete code example (record DTO + `@Query` repository + `@Tmf630Response` controller).
+  - **Pattern B:** restrict `fields=` to scalar field names; the library's `depth=1` default ensures the raw entity POJO is never handed to Jackson, so lazy association getters are never called.
+  - **Pattern C:** when a nested association is genuinely needed, use `@EntityGraph` or `JOIN FETCH` to load it eagerly in a single query, then let `depth=1` prevent cascading into deeper levels.
+  - Patterns-to-avoid table: OSIV, `@Transactional` on controller, and `depth=0` without `fields=`.
+  - Recommendation callout: set `spring.jpa.open-in-view=false` for new projects so lazy-load problems surface as hard errors at development time rather than silent N+1 queries in production.
+- Clarified `depth` semantics: `depth=0` passes the raw POJO to Jackson (all getters called, including lazy associations); `depth=1` maps only scalar sub-fields into an explicit `Map`, preventing any getter call on the named complex object.
+- Clarified that `depth` is only consulted when a `fields=` query parameter is present; without `fields=`, raw entity objects are returned to Jackson unconditionally regardless of the `depth` setting.
+
 ### Tests
+- Add 21 unit tests for `Tmf630ResponseBodyAdvice`: Page→200/206/416 handling, field selection on Page/List/single-object, null body, empty page/list, ResponseEntity-wrapped Page (skips status override), class-level annotation detection, default constructor, depth resolution (method-level, class-level, method-overrides-class, zero depth, global fallback), and depth-aware field selection.
+- Add 14 integration tests for `@Tmf630Response`: fully transparent Page, partial content, 416, field selection, class-level annotation, empty page, manual `tmfPage()` + annotation, non-annotated endpoint isolation, method-level depth (depth=1 excludes second-level complex fields, depth=2 includes them), class-level depth inheritance, and method depth overriding class depth.
+- Add 2 tests for `OffsetLimitPageRequest` equals/hashCode/toString.
+- Add 3 tests for `Tmf630PagingSettings` record: accessors, defensive copy, equals/hashCode.
+- Add 2 tests for `Tmf630Util.tmfPage(Page, String fields)` overload.
+- Add tests for `Tmf630FieldSelectionProperties` defaults and setters.
 - Add 6 tests for record field selection: flat record, explicit field selection, nested records with depth, record-inside-bean, bean-inside-record, and list of records.
 - Add 6 tests for depth-aware field selection with explicit fields: depth 1/2/3, list mapping, explicit dot-path unaffected by depth, and backward compatibility with existing overload.
 - Add regression tests for the three `FieldSelectionUtil` bug fixes: broad-vs-narrow selector, wildcard/TypeVariable/nested-ParameterizedType generics, and `java.sql.Timestamp` as scalar.
