@@ -220,7 +220,7 @@ public class JsonPathFilterPredicateBuilder {
     }
 
     Object typedValue =
-        valueConverter.convert(comparison.literal().valueAsString(), resolvedField.javaType());
+        valueConverter.convert(comparison.literal().valueAsString(), resolvedField.javaType(), resolvedField.fieldPath());
 
     TmfOperator tmfOperator =
         switch (comparison.operator()) {

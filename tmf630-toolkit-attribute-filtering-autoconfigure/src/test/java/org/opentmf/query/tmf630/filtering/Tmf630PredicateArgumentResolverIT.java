@@ -2,6 +2,7 @@ package org.opentmf.query.tmf630.filtering;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.querydsl.core.types.Predicate;
@@ -13,9 +14,12 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.querydsl.binding.QuerydslPredicate;
+import org.springframework.http.ResponseEntity;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 @SpringBootTest(
     classes = Tmf630PredicateArgumentResolverIT.TestApp.class,
@@ -117,8 +121,32 @@ class Tmf630PredicateArgumentResolverIT {
         .andExpect(status().isBadRequest());
   }
 
+  @Test
+  void filteringExceptionHandlerReturns400WithStructuredBodyEvenWhenAppHasCatchAllHandler()
+      throws Exception {
+    // Simulates a consuming service that has @ExceptionHandler(Exception.class) returning 500.
+    // Our Tmf630FilteringExceptionHandler at HIGHEST_PRECEDENCE must win and return 400.
+    mockMvc
+        .perform(get("/search").param("forbidden.eq", "x"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("400"))
+        .andExpect(jsonPath("$.status").value("Bad Request"))
+        .andExpect(jsonPath("$.reason").value("Invalid filter parameter."))
+        .andExpect(jsonPath("$.message").isNotEmpty());
+  }
+
+  @Test
+  void filteringExceptionBodyContainsFieldNameAndFormatHintForTemporalType() throws Exception {
+    // Verify rich error message: field name + ISO format hint
+    mockMvc
+        .perform(get("/search").param("createdOn.eq", "2025-01-01"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("createdOn")))
+        .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("Instant")));
+  }
+
   @SpringBootApplication
-  @Import(TestController.class)
+  @Import({TestController.class, CatchAllExceptionHandler.class})
   static class TestApp {}
 
   @RestController
@@ -134,5 +162,15 @@ class Tmf630PredicateArgumentResolverIT {
     private String transformationId;
     private Instant createdOn;
     private String status;
+  }
+
+  /** Simulates a consuming application's generic exception handler that returns 500. */
+  @RestControllerAdvice
+  static class CatchAllExceptionHandler {
+
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<String> handleAll(Exception ex) {
+      return ResponseEntity.internalServerError().body("Internal error: " + ex.getMessage());
+    }
   }
 }

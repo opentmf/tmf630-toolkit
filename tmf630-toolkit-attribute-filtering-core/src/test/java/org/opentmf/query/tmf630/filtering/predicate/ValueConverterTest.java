@@ -2,8 +2,12 @@ package org.opentmf.query.tmf630.filtering.predicate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.opentmf.query.tmf630.filtering.TmfFilteringException;
@@ -62,6 +66,56 @@ class ValueConverterTest {
   @Test
   void throwsWhenAllFactoryMethodsAndValueOfFail() {
     assertThrows(TmfFilteringException.class, () -> converter.convert("bogus", PlainStatus.class));
+  }
+
+  @Test
+  void includesFieldNameAndFormatHintInErrorMessageForTemporalTypes() {
+    TmfFilteringException ex1 = assertThrows(TmfFilteringException.class,
+        () -> converter.convert("blabla", LocalDate.class, "birthdate"));
+    assertTrue(ex1.getMessage().contains("\"birthdate\""));
+    assertTrue(ex1.getMessage().contains("LocalDate"));
+    assertTrue(ex1.getMessage().contains("yyyy-MM-dd"));
+    assertTrue(ex1.getMessage().contains("1990-06-15"));
+
+    TmfFilteringException ex2 = assertThrows(TmfFilteringException.class,
+        () -> converter.convert("blabla", LocalDateTime.class, "createdAt"));
+    assertTrue(ex2.getMessage().contains("\"createdAt\""));
+    assertTrue(ex2.getMessage().contains("LocalDateTime"));
+    assertTrue(ex2.getMessage().contains("yyyy-MM-dd'T'HH:mm:ss"));
+
+    TmfFilteringException ex3 = assertThrows(TmfFilteringException.class,
+        () -> converter.convert("blabla", OffsetDateTime.class, "updatedAt"));
+    assertTrue(ex3.getMessage().contains("\"updatedAt\""));
+    assertTrue(ex3.getMessage().contains("OffsetDateTime"));
+    assertTrue(ex3.getMessage().contains("XXX"));
+  }
+
+  @Test
+  void includesFieldNameInEnumErrorMessage() {
+    TmfFilteringException ex = assertThrows(TmfFilteringException.class,
+        () -> converter.convert("bogus", PlainStatus.class, "jobStatus"));
+    assertTrue(ex.getMessage().contains("\"jobStatus\""));
+    assertTrue(ex.getMessage().contains("PlainStatus"));
+    assertTrue(ex.getMessage().contains("bogus"));
+  }
+
+  @Test
+  void fallsBackToGenericMessageWhenFieldNameIsNull() {
+    TmfFilteringException ex = assertThrows(TmfFilteringException.class,
+        () -> converter.convert("blabla", LocalDate.class, null));
+    // still contains format hint even without field name
+    assertTrue(ex.getMessage().contains("yyyy-MM-dd"));
+    assertTrue(ex.getMessage().contains("1990-06-15"));
+  }
+
+  @Test
+  void allKnownTemporalTypesHaveFormatHints() {
+    assertTrue(ValueConverter.TYPE_FORMAT_HINTS.containsKey(LocalDate.class));
+    assertTrue(ValueConverter.TYPE_FORMAT_HINTS.containsKey(LocalDateTime.class));
+    assertTrue(ValueConverter.TYPE_FORMAT_HINTS.containsKey(java.time.LocalTime.class));
+    assertTrue(ValueConverter.TYPE_FORMAT_HINTS.containsKey(OffsetDateTime.class));
+    assertTrue(ValueConverter.TYPE_FORMAT_HINTS.containsKey(java.time.ZonedDateTime.class));
+    assertTrue(ValueConverter.TYPE_FORMAT_HINTS.containsKey(Instant.class));
   }
 
   static class NoConverter {}

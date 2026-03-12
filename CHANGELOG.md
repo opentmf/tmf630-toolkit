@@ -2,6 +2,55 @@
 
 All notable changes to `tmf630-toolkit` are documented in this file.
 
+## [1.0.7-SNAPSHOT] - Unreleased
+
+### Fixed
+- `TmfFilteringException` now propagates directly from `Tmf630PredicateArgumentResolver` instead of being wrapped in `ResponseStatusException`.
+  - **Root cause of 500 in consuming services**: Spring's `ResponseStatusException` wrapping was being intercepted by consuming applications that had a catch-all `@ExceptionHandler(Exception.class)`, which returned a generic `500 Internal Server Error` to the client.
+  - **Solution**: A new `Tmf630FilteringExceptionHandler` (`@RestControllerAdvice` at `@Order(Ordered.HIGHEST_PRECEDENCE)`) is auto-configured as part of the attribute-filtering feature. It catches `TmfFilteringException` before any catch-all handler in the consuming application and returns a structured `400 Bad Request` response:
+    ```json
+    {
+      "code": "400",
+      "status": "Bad Request",
+      "reason": "Invalid filter parameter.",
+      "message": "Field \"createdOn\" (Instant) could not be parsed from value \"2025-01-01\". Expected format: yyyy-MM-dd'T'HH:mm:ssX (ISO-8601 UTC), example: 1990-06-15T11:30:00Z"
+    }
+    ```
+  - The `@Order(HIGHEST_PRECEDENCE)` annotation ensures the library handler wins over any consuming service's `@ExceptionHandler(Exception.class)`. The handler only intercepts `TmfFilteringException` and leaves all other exception types to the consuming service's own handlers.
+- `ValueConverter` now returns `400 Bad Request` with a descriptive error message when a query parameter value cannot be parsed for `LocalDate`, `LocalTime`, `LocalDateTime`, `OffsetDateTime`, `ZonedDateTime`, and `Instant` fields.
+  - Previously, conversion failures produced either a generic `500 Internal Server Error` or an unhelpful `400` message such as `"Failed to convert value 'blabla' to LocalDate"`.
+  - The new message includes the field name, the Java type, the expected ISO-8601 format, and a concrete example:
+    ```
+    Field "birthdate" (LocalDate) could not be parsed from value "15/06/1990".
+    Expected format: yyyy-MM-dd, example: 1990-06-15
+    ```
+  - Enum conversion errors now follow the same pattern, naming the field and the enum type.
+  - The field name is now propagated from all three call sites (`Tmf630PredicateArgumentResolver` single-value, multi-value, and `JsonPathFilterPredicateBuilder`).
+
+### Added
+- `Tmf630FilteringExceptionHandler` — a new `@RestControllerAdvice` at `@Order(Ordered.HIGHEST_PRECEDENCE)` that handles `TmfFilteringException` and returns a structured `400` response. Auto-configured via `Tmf630AttributeFilteringAutoConfiguration` with `@ConditionalOnMissingBean`, so it can be replaced by a custom bean if needed.
+- `ValueConverter.TYPE_FORMAT_HINTS` — a static `Map<Class<?>, FormatHint>` that maps known `java.time` types to their expected format string and a concrete example value. Public to allow introspection and extension.
+- `ValueConverter.convert(String rawValue, Class<?> targetType, String fieldName)` overload — produces richer error messages when the field name is known at the call site. The original two-argument overload delegates to this with `fieldName = null`.
+
+### Docs
+- New README section **6) Date and datetime field formats** documenting:
+  - Accepted ISO-8601 formats for all six supported `java.time` types with example query strings.
+  - Clarification that `@DateTimeFormat` annotations on entity fields are **not** respected (conversion is type-based).
+  - How to override the `ValueConverter` bean to accept a custom format or to share the application's own `ConversionService`.
+- Renumbered developer handbook sections 7–9 to 8–10 to accommodate the new section 6.
+
+### Tests
+- 2 new IT tests in `Tmf630PredicateArgumentResolverIT`:
+  - `filteringExceptionHandlerReturns400WithStructuredBodyEvenWhenAppHasCatchAllHandler` — verifies that our handler at `HIGHEST_PRECEDENCE` wins over a `@ExceptionHandler(Exception.class)` defined in the same application context.
+  - `filteringExceptionBodyContainsFieldNameAndFormatHintForTemporalType` — verifies the field name and ISO format hint appear in the response body for a temporal-type parse failure.
+- 2 new unit tests in `Tmf630FilteringExceptionHandlerTest` covering the response status, body structure, and message content.
+- Updated 6 unit tests in `Tmf630PredicateArgumentResolverTest` to assert `TmfFilteringException` instead of `ResponseStatusException`.
+- 5 new unit tests in `ValueConverterTest`:
+  - `includesFieldNameAndFormatHintInErrorMessageForTemporalTypes` — verifies rich message for `LocalDate`, `LocalDateTime`, `OffsetDateTime`.
+  - `includesFieldNameInEnumErrorMessage` — verifies field name and enum type appear in enum parse failure.
+  - `fallsBackToGenericMessageWhenFieldNameIsNull` — verifies format hint still included even without a field name.
+  - `allKnownTemporalTypesHaveFormatHints` — asserts all six `java.time` types are registered in `TYPE_FORMAT_HINTS`.
+
 ## [1.0.6] - 2026-03-11
 
 ### Added

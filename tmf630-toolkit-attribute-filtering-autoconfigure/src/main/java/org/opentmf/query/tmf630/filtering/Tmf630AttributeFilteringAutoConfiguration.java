@@ -3,6 +3,7 @@ package org.opentmf.query.tmf630.filtering;
 import com.querydsl.core.types.Predicate;
 import java.util.ArrayList;
 import java.util.List;
+import org.opentmf.query.tmf630.filtering.advice.Tmf630FilteringExceptionHandler;
 import org.opentmf.query.tmf630.filtering.predicate.FieldPathResolver;
 import org.opentmf.query.tmf630.filtering.predicate.PredicateFactory;
 import org.opentmf.query.tmf630.filtering.predicate.ValueConverter;
@@ -26,6 +27,12 @@ import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandl
     havingValue = "true",
     matchIfMissing = true)
 public class Tmf630AttributeFilteringAutoConfiguration {
+
+  @Bean
+  @ConditionalOnMissingBean
+  public Tmf630FilteringExceptionHandler tmf630FilteringExceptionHandler() {
+    return new Tmf630FilteringExceptionHandler();
+  }
 
   @Bean
   @ConditionalOnMissingBean

@@ -22,9 +22,6 @@ import org.springframework.web.bind.support.WebDataBinderFactory;
 import org.springframework.web.context.request.NativeWebRequest;
 import org.springframework.web.method.support.HandlerMethodArgumentResolver;
 import org.springframework.web.method.support.ModelAndViewContainer;
-import org.springframework.web.server.ResponseStatusException;
-
-import static org.springframework.http.HttpStatus.BAD_REQUEST;
 
 public class Tmf630PredicateArgumentResolver implements HandlerMethodArgumentResolver {
 
@@ -71,15 +68,10 @@ public class Tmf630PredicateArgumentResolver implements HandlerMethodArgumentRes
       WebDataBinderFactory binderFactory) {
     Class<?> rootEntity = resolveRootEntity(parameter);
     if (rootEntity == null) {
-      throw new ResponseStatusException(
-          BAD_REQUEST, "Predicate parameter requires @QuerydslPredicate(root=...)");
+      throw new TmfFilteringException("Predicate parameter requires @QuerydslPredicate(root=...)");
     }
 
-    try {
-      return buildPredicate(rootEntity, webRequest.getParameterMap());
-    } catch (TmfFilteringException ex) {
-      throw new ResponseStatusException(BAD_REQUEST, ex.getMessage(), ex);
-    }
+    return buildPredicate(rootEntity, webRequest.getParameterMap());
   }
 
   private Predicate buildPredicate(Class<?> rootEntity, Map<String, String[]> parameterMap) {
@@ -174,7 +166,7 @@ public class Tmf630PredicateArgumentResolver implements HandlerMethodArgumentRes
         clauseCount = incrementClauseCount(clauseCount);
         List<Object> typedValues = new ArrayList<>(values.length);
         for (String rawValue : values) {
-          typedValues.add(valueConverter.convert(rawValue, resolvedField.javaType()));
+          typedValues.add(valueConverter.convert(rawValue, resolvedField.javaType(), resolvedField.fieldPath()));
         }
         clause = predicateFactory.buildMulti(rootPath, resolvedField, operator, typedValues);
         result.and(clause);
@@ -184,7 +176,7 @@ public class Tmf630PredicateArgumentResolver implements HandlerMethodArgumentRes
       BooleanBuilder perKey = new BooleanBuilder();
       for (String rawValue : values) {
         clauseCount = incrementClauseCount(clauseCount);
-        Object typedValue = valueConverter.convert(rawValue, resolvedField.javaType());
+        Object typedValue = valueConverter.convert(rawValue, resolvedField.javaType(), resolvedField.fieldPath());
         clause = predicateFactory.build(rootPath, resolvedField, operator, typedValue);
         if (settings.combineRepeatedValues() == CombineMode.AND) {
           perKey.and(clause);

@@ -671,7 +671,77 @@ If your entity happens to have a field with one of these names (for example, a c
 
 The bare form (`field=value`) is ambiguous for reserved names, and the library resolves it in favor of the framework parameter. The explicit operator form (`field.op=value`) always bypasses the reservation.
 
-### 6) Enum field resolution
+### 6) Date and datetime field formats
+
+The library uses Spring's `DefaultFormattingConversionService` internally to parse query parameter values into their Java target types. All `java.time` types use strict ISO-8601 format by default:
+
+| Java type | Accepted format | Example query |
+|---|---|---|
+| `LocalDate` | `yyyy-MM-dd` | `birthdate.gt=1990-06-15` |
+| `LocalTime` | `HH:mm:ss[.SSS]` | `startTime.gte=14:30:00` |
+| `LocalDateTime` | `yyyy-MM-dd'T'HH:mm:ss[.SSS]` | `createdAt.lt=2024-01-15T14:30:00` |
+| `OffsetDateTime` | `yyyy-MM-dd'T'HH:mm:ssXXX` | `updatedAt.gte=2024-01-15T14:30:00+03:00` |
+| `ZonedDateTime` | `yyyy-MM-dd'T'HH:mm:ssXXX'['VV']'` | `scheduledAt.lt=2024-01-15T14:30:00+03:00[Europe/Istanbul]` |
+| `Instant` | `yyyy-MM-dd'T'HH:mm:ssX` (UTC) | `timestamp.gte=2024-01-15T11:30:00Z` |
+
+> Fractional seconds (`[.SSS]`) are optional for `LocalTime`, `LocalDateTime`, and `LocalDateTime`.
+
+#### Error messages
+
+When a value cannot be parsed, the library returns **`400 Bad Request`** with a structured JSON body:
+
+```json
+{
+  "code": "400",
+  "status": "Bad Request",
+  "reason": "Invalid filter parameter.",
+  "message": "Field \"birthdate\" (LocalDate) could not be parsed from value \"15/06/1990\". Expected format: yyyy-MM-dd, example: 1990-06-15"
+}
+```
+
+The library registers `Tmf630FilteringExceptionHandler` at `@Order(Ordered.HIGHEST_PRECEDENCE)`. This ensures the `400` response reaches the client even when the consuming application has a catch-all `@ExceptionHandler(Exception.class)` that would otherwise return `500`. The handler only intercepts `TmfFilteringException`; all other exception types are left to the consuming application's own handlers.
+
+> **Consuming service note:** If you still see `500` after upgrading, verify that no framework-level component (e.g., an API gateway, Sentry integration, or a custom `HandlerExceptionResolver`) strips the response before it reaches the client.
+
+#### `@DateTimeFormat` annotations are not respected
+
+The library converts by **Java type**, not by inspecting field annotations. If your entity field is annotated:
+
+```java
+@DateTimeFormat(pattern = "dd/MM/yyyy")
+private LocalDate birthdate;
+```
+
+the library still expects `yyyy-MM-dd` in the query string. The `@DateTimeFormat` pattern only affects Spring MVC's own binding (form fields, `@RequestParam`), not this library's predicate resolution.
+
+#### Customising the accepted format
+
+The `ValueConverter` bean is registered with `@ConditionalOnMissingBean`, so you can override it in a `@Configuration` class to accept a custom format or to share the application's own `ConversionService`:
+
+```java
+@Configuration
+public class MyConversionConfig {
+
+  // Option A: share the application ConversionService
+  @Bean
+  public ValueConverter tmf630ValueConverter(ConversionService conversionService) {
+    return new ValueConverter(conversionService);
+  }
+
+  // Option B: register an additional formatter for a specific type
+  @Bean
+  public ValueConverter tmf630ValueConverter() {
+    DefaultFormattingConversionService svc = new DefaultFormattingConversionService();
+    svc.addConverter(String.class, LocalDate.class,
+        s -> LocalDate.parse(s, DateTimeFormatter.ofPattern("dd/MM/yyyy")));
+    return new ValueConverter(svc);
+  }
+}
+```
+
+### 7) Enum field resolution
+
+
 
 When a query parameter targets an enum field, the library resolves the string value to an enum constant using this chain:
 
@@ -739,7 +809,7 @@ public enum Status {
 
 Factory methods are discovered once per enum type and cached for the lifetime of the application.
 
-### 7) Combined query examples
+### 8) Combined query examples
 
 #### Example A: multiple operators in one request
 
@@ -905,7 +975,7 @@ The library throws a filtering exception (mapped to HTTP `400`) for unsupported 
 - `filter=` exceeds configured max length
 - JsonPath filter feature is disabled by configuration
 
-### 8) Field selection utility (optional helper)
+### 9) Field selection utility (optional helper)
 
 `FieldSelectionUtil` can map objects into filtered `Map<String, Object>` views, useful when clients request specific fields.
 
@@ -962,7 +1032,7 @@ Response example:
 }
 ```
 
-### 9) Full combined scenario (filter + paging + sorting + field selection + range statuses)
+### 10) Full combined scenario (filter + paging + sorting + field selection + range statuses)
 
 This section combines all major capabilities in one flow.
 

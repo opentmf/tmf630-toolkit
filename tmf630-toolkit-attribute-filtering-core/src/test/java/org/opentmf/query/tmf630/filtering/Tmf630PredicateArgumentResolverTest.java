@@ -20,7 +20,6 @@ import org.springframework.data.querydsl.binding.QuerydslPredicate;
 import org.springframework.format.support.DefaultFormattingConversionService;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.context.request.ServletWebRequest;
-import org.springframework.web.server.ResponseStatusException;
 
 class Tmf630PredicateArgumentResolverTest {
 
@@ -69,7 +68,7 @@ class Tmf630PredicateArgumentResolverTest {
     request.setParameter("name.eq", "abc");
 
     assertThrows(
-        ResponseStatusException.class,
+        TmfFilteringException.class,
         () ->
             resolver.resolveArgument(
                 invalidPredicateParameter(),
@@ -85,7 +84,7 @@ class Tmf630PredicateArgumentResolverTest {
     request.setParameter("forbidden.eq", "abc");
 
     assertThrows(
-        ResponseStatusException.class,
+        TmfFilteringException.class,
         () ->
             resolver.resolveArgument(
                 predicateParameter(),
@@ -218,7 +217,7 @@ class Tmf630PredicateArgumentResolverTest {
     request.setParameter("name.eq", "a", "b");
 
     assertThrows(
-        ResponseStatusException.class,
+        TmfFilteringException.class,
         () ->
             resolver.resolveArgument(
                 predicateParameter(),
@@ -250,7 +249,7 @@ class Tmf630PredicateArgumentResolverTest {
     request.setParameter("filter", "$.name");
 
     assertThrows(
-        ResponseStatusException.class,
+        TmfFilteringException.class,
         () ->
             resolver.resolveArgument(
                 predicateParameter(),
@@ -352,7 +351,7 @@ class Tmf630PredicateArgumentResolverTest {
     request.addParameter("filter", "$[?(@.name == 'b')]");
 
     assertThrows(
-        ResponseStatusException.class,
+        TmfFilteringException.class,
         () ->
             resolver.resolveArgument(
                 predicateParameter(),
@@ -363,6 +362,7 @@ class Tmf630PredicateArgumentResolverTest {
 
   @Test
   void rejectsWhenJsonPathFilterIsDisabled() {
+
     Tmf630FilterSettings settings =
         new Tmf630FilterSettings(
             true,
@@ -392,7 +392,7 @@ class Tmf630PredicateArgumentResolverTest {
     request.setParameter("filter", "$[?(@.name == 'x')]");
 
     assertThrows(
-        ResponseStatusException.class,
+        TmfFilteringException.class,
         () ->
             resolver.resolveArgument(
                 predicateParameter(),
