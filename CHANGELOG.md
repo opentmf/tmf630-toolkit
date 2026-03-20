@@ -2,7 +2,7 @@
 
 All notable changes to `tmf630-toolkit` are documented in this file.
 
-## [1.0.7-SNAPSHOT] - Unreleased
+## [1.0.7] - 2026-03-20
 
 ### Changed
 - Parent POM: `spring-boot.version` (imported BOM) bumped to `3.5.12`.
