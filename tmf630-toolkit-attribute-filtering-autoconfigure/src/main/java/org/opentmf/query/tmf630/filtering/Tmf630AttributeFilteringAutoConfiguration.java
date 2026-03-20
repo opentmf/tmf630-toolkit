@@ -7,6 +7,7 @@ import org.opentmf.query.tmf630.filtering.advice.Tmf630FilteringExceptionHandler
 import org.opentmf.query.tmf630.filtering.predicate.FieldPathResolver;
 import org.opentmf.query.tmf630.filtering.predicate.PredicateFactory;
 import org.opentmf.query.tmf630.filtering.predicate.ValueConverter;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -104,11 +105,16 @@ public class Tmf630AttributeFilteringAutoConfiguration {
 
   @Bean
   public BeanPostProcessor tmf630ResolverOrderingPostProcessor(
-      Tmf630PredicateArgumentResolver resolver) {
+      ObjectProvider<Tmf630PredicateArgumentResolver> resolverProvider) {
     return new BeanPostProcessor() {
       @Override
       public Object postProcessAfterInitialization(Object bean, String beanName) {
         if (!(bean instanceof RequestMappingHandlerAdapter adapter)) {
+          return bean;
+        }
+
+        Tmf630PredicateArgumentResolver resolver = resolverProvider.getIfAvailable();
+        if (resolver == null) {
           return bean;
         }
 

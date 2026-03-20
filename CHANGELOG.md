@@ -4,6 +4,11 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 
 ## [1.0.7-SNAPSHOT] - Unreleased
 
+### Changed
+- Parent POM: `spring-boot.version` (imported BOM) bumped to `3.5.12`.
+- `tmf630ResolverOrderingPostProcessor` no longer eagerly injects `Tmf630PredicateArgumentResolver`.
+  - The `BeanPostProcessor` now accepts `ObjectProvider<Tmf630PredicateArgumentResolver>` and lazily resolves the bean inside `postProcessAfterInitialization`. This eliminates the "not eligible for getting processed by all BeanPostProcessors" warnings for all library beans (`OperatorRegistry`, `ParamKeyParser`, `ValueConverter`, `FieldPathResolver`, `PredicateFactory`, `JsonPathFilterPredicateBuilder`, `FieldAllowlistProvider`, `Tmf630FilteringExceptionHandler`).
+
 ### Fixed
 - `TmfFilteringException` now propagates directly from `Tmf630PredicateArgumentResolver` instead of being wrapped in `ResponseStatusException`.
   - **Root cause of 500 in consuming services**: Spring's `ResponseStatusException` wrapping was being intercepted by consuming applications that had a catch-all `@ExceptionHandler(Exception.class)`, which returned a generic `500 Internal Server Error` to the client.
@@ -45,6 +50,7 @@ All notable changes to `tmf630-toolkit` are documented in this file.
   - `filteringExceptionBodyContainsFieldNameAndFormatHintForTemporalType` — verifies the field name and ISO format hint appear in the response body for a temporal-type parse failure.
 - 2 new unit tests in `Tmf630FilteringExceptionHandlerTest` covering the response status, body structure, and message content.
 - Updated 6 unit tests in `Tmf630PredicateArgumentResolverTest` to assert `TmfFilteringException` instead of `ResponseStatusException`.
+- `Tmf630ResolverOrderingPostProcessorTest` updated to supply `ObjectProvider<Tmf630PredicateArgumentResolver>` (anonymous provider) to match the auto-configuration signature.
 - 5 new unit tests in `ValueConverterTest`:
   - `includesFieldNameAndFormatHintInErrorMessageForTemporalTypes` — verifies rich message for `LocalDate`, `LocalDateTime`, `OffsetDateTime`.
   - `includesFieldNameInEnumErrorMessage` — verifies field name and enum type appear in enum parse failure.
