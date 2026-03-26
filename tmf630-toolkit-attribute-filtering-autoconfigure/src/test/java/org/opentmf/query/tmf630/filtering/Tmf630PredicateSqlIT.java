@@ -11,11 +11,17 @@ import java.util.stream.Collectors;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.opentmf.query.tmf630.filtering.it.sql.SqlCaptureInspector;
+import org.opentmf.query.tmf630.filtering.it.sql.SqlSearchController;
+import org.opentmf.query.tmf630.filtering.it.sql.SqlSearchEntity;
+import org.opentmf.query.tmf630.filtering.it.sql.SqlSearchEntityRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.data.mongodb.autoconfigure.DataMongoAutoConfiguration;
+import org.springframework.boot.data.mongodb.autoconfigure.DataMongoRepositoriesAutoConfiguration;
+import org.springframework.boot.mongodb.autoconfigure.MongoAutoConfiguration;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
@@ -27,7 +33,7 @@ import org.springframework.test.web.servlet.MockMvc;
       "spring.jpa.show-sql=false",
       "spring.datasource.url=${tmf630.sql.it.datasource.url:jdbc:tc:postgresql:18.1-alpine:///db}",
       "spring.datasource.driver-class-name=org.testcontainers.jdbc.ContainerDatabaseDriver",
-      "spring.jpa.properties.hibernate.session_factory.statement_inspector=org.opentmf.query.tmf630.filtering.SqlCaptureInspector",
+      "spring.jpa.properties.hibernate.session_factory.statement_inspector=org.opentmf.query.tmf630.filtering.it.sql.SqlCaptureInspector",
       "opentmf.tmf630.attribute-filtering.allowlist.mode=DENY_ALL",
       "opentmf.tmf630.attribute-filtering.allowlist.entities.SqlSearchEntity=transformationId,status,modifiedBy,createdOn,priority",
       "opentmf.tmf630.attribute-filtering.regex.enabled=true",
@@ -210,7 +216,12 @@ class Tmf630PredicateSqlIT {
     return selects.get(0);
   }
 
-  @SpringBootApplication
-  @Import(SqlSearchController.class)
+  @SpringBootApplication(
+      scanBasePackageClasses = SqlSearchController.class,
+      exclude = {
+        MongoAutoConfiguration.class,
+        DataMongoAutoConfiguration.class,
+        DataMongoRepositoriesAutoConfiguration.class
+      })
   static class TestApp {}
 }

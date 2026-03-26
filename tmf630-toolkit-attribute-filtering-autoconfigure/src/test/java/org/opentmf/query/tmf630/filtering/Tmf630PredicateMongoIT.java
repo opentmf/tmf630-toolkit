@@ -5,32 +5,34 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 import com.mongodb.DBRef;
 import com.querydsl.core.types.Predicate;
 import com.querydsl.mongodb.document.MongodbDocumentSerializer;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.stream.StreamSupport;
 import org.bson.Document;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.opentmf.query.tmf630.filtering.it.mongo.MongoSearchController;
+import org.opentmf.query.tmf630.filtering.it.mongo.MongoSearchEntity;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.data.jpa.autoconfigure.DataJpaRepositoriesAutoConfiguration;
+import org.springframework.boot.hibernate.autoconfigure.HibernateJpaAutoConfiguration;
+import org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.data.querydsl.binding.QuerydslPredicate;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RestController;
-import org.testcontainers.containers.MongoDBContainer;
+import org.testcontainers.mongodb.MongoDBContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -47,21 +49,19 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @Testcontainers
 class Tmf630PredicateMongoIT {
 
-  private static final Path REAL_DATASET_PATH =
-      Path.of(
-          "/home/gokhan/prj/iot-solutionhub/api-adapters/sdn-service-order-adapter/src/test/resources/payload/uc-list-service-order-response.json");
+  private static final String DATASET_RESOURCE = "fixtures/uc-list-service-order-response.json";
 
   @Container
   static final MongoDBContainer mongo = new MongoDBContainer("mongo:8.0.5");
 
   @DynamicPropertySource
   static void mongoProperties(DynamicPropertyRegistry registry) {
-    registry.add("spring.data.mongodb.uri", mongo::getReplicaSetUrl);
+    registry.add("spring.mongodb.uri", mongo::getReplicaSetUrl);
   }
 
   @Autowired private MockMvc mockMvc;
   @Autowired private MongoTemplate mongoTemplate;
-  @Autowired private ObjectMapper objectMapper;
+  @Autowired private JsonMapper jsonMapper;
   @Autowired private JsonPathFilterPredicateBuilder jsonPathFilterPredicateBuilder;
   @Autowired private Tmf630AttributeFilteringProperties filteringProperties;
 
@@ -80,10 +80,10 @@ class Tmf630PredicateMongoIT {
           "externalReference.name");
 
   @BeforeEach
-  void setUp() throws Exception {
+  void setUp() {
     mongoTemplate.dropCollection("mongo_search_entity");
-    String json = Files.readString(REAL_DATASET_PATH);
-    JsonNode root = objectMapper.readTree(json);
+    String json = readClasspathUtf8();
+    JsonNode root = jsonMapper.readTree(json);
     List<Document> documents = new ArrayList<>();
     for (JsonNode node : root) {
       documents.add(Document.parse(node.toString()));
@@ -166,26 +166,14 @@ class Tmf630PredicateMongoIT {
         .andExpect(status().isBadRequest());
   }
 
-  @SpringBootApplication
+  @SpringBootApplication(
+      scanBasePackageClasses = MongoSearchController.class,
+      exclude = {
+        DataSourceAutoConfiguration.class,
+        HibernateJpaAutoConfiguration.class,
+        DataJpaRepositoriesAutoConfiguration.class
+      })
   static class TestApp {}
-
-  @RestController
-  static class TestMongoSearchController {
-
-    private final MongoSearchRepository repository;
-
-    TestMongoSearchController(MongoSearchRepository repository) {
-      this.repository = repository;
-    }
-
-    @GetMapping("/mongo-search")
-    List<MongoSearchEntity> search(@QuerydslPredicate(root = MongoSearchEntity.class) Predicate predicate) {
-      if (predicate == null) {
-        return repository.findAll();
-      }
-      return StreamSupport.stream(repository.findAll(predicate).spliterator(), false).toList();
-    }
-  }
 
   private long countDocumentsByFilter(String filterExpression) {
     Predicate predicate =
@@ -208,6 +196,18 @@ class Tmf630PredicateMongoIT {
     @Override
     protected boolean isReference(com.querydsl.core.types.Path<?> path) {
       return false;
+    }
+  }
+
+  private static String readClasspathUtf8() {
+    try (InputStream in =
+        Tmf630PredicateMongoIT.class.getClassLoader().getResourceAsStream(DATASET_RESOURCE)) {
+      if (in == null) {
+        throw new IllegalStateException("Classpath resource not found: " + DATASET_RESOURCE);
+      }
+      return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+    } catch (IOException e) {
+      throw new RuntimeException(e);
     }
   }
 }

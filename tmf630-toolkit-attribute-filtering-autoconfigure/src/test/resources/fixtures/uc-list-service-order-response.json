@@ -1,0 +1,1121 @@
+[{
+        "id": "6215245d7fce055f32210d79",
+        "href": "/tmf-api/serviceOrdering/v4/serviceOrder/6215245d7fce055f32210d79",
+        "category": "SDWAN service order",
+        "externalId": "BSS748",
+        "requestedStartDate": "2021-12-25T12:00:00",
+        "externalReference": [{
+                "id": "OPCO-ID-012",
+                "name": "MARKET_ACCOUNT_ID"
+            },
+            {
+                "id": "OPCO-BAN-012",
+                "name": "BILLING_ACCOUNT_NUMBER"
+            },
+            {
+                "id": "OPCO-BSR-012",
+                "name": "BILLING_SERVICE_REFERENCE"
+            },
+            {
+                "id": "OPCO-ORDER-012",
+                "name": "ORDER_REFERENCE"
+            },
+            {
+                "id": "OPCO-OPP-012",
+                "name": "OPPORTUNITY_ID"
+            }
+        ],
+        "milestone": [{
+            "id": "1",
+            "description": "Service Order Received",
+            "message": "Service Order Received",
+            "milestoneDate": "2022-02-22T17:58:52.143",
+            "status": "COMPLETED"
+        }],
+        "relatedParty": [{
+            "id": "VFUK",
+            "role": "channel",
+            "countryCode": "GB",
+            "marketCode": "VFUK",
+            "orderSystem": "PowerChanger",
+            "@type": "RelatedParty",
+            "@referredType": "RelatedPartyChannelInfo"
+        }],
+        "serviceOrderItem": [{
+            "id": "1",
+            "action": "add",
+            "service": {
+                "serviceType": "ucc.unity.tenant",
+                "place": [{
+                    "role": "HQAddress",
+                    "city": "Maidenhead",
+                    "country": "GB",
+                    "postcode": "SL6 4HH",
+                    "streetName": "Boyn Hill Road",
+                    "streetNr": "23",
+                    "@baseType": "Place",
+                    "@schemaLocation": "https://github.com/tmforum-apis/Open_Api_And_Data_Model/blob/master/schemas/Common/GeographicAddress.schema.json",
+                    "@type": "GeographicalAddress"
+                }],
+                "serviceCharacteristic": [{
+                        "name": "TenantInfo",
+                        "valueType": "object",
+                        "value": {
+                            "id": null,
+                            "href": null,
+                            "profile": "FULL_STACK_STANDARD",
+                            "currency": "GBP",
+                            "name": "Acme Construction",
+                            "mainNumber": "+4930505900501",
+                            "faxNumber": "+4930505900502",
+                            "@baseType": null,
+                            "@schemaLocation": "./Unity/UccTenantInfo.schema.json",
+                            "@type": "UccTenantInfo"
+                        }
+                    },
+                    {
+                        "name": "TenantAdminInfo",
+                        "valueType": "object",
+                        "value": {
+                            "id": null,
+                            "href": null,
+                            "firstName": "Bob",
+                            "lastName": "Andrews",
+                            "email": "bob.andrews@acme-construction.com",
+                            "phoneNumber": "+23123212432143",
+                            "@baseType": null,
+                            "@schemaLocation": "./Unity/UccTenantAdminInfo.schema.json",
+                            "@type": "UccTenantAdminInfo"
+                        }
+                    },
+                    {
+                        "name": "TenantFlowSettings",
+                        "valueType": "object",
+                        "value": {
+                            "id": null,
+                            "href": null,
+                            "activateImmediately": true,
+                            "sendWelcomeEmail": false,
+                            "sendConfirmationEmail": false,
+                            "@baseType": null,
+                            "@schemaLocation": "./Unity/UccTenantFlowSettings.schema.json",
+                            "@type": "UccTenantFlowSettings"
+                        }
+                    }
+                ]
+            },
+            "state": "acknowledged",
+            "@type": "ServiceOrderItem"
+        }],
+        "state": "acknowledged",
+        "@type": "ServiceOrder"
+    },
+    {
+        "id": "621524e67fce055f32210d7a",
+        "href": "/tmf-api/serviceOrdering/v4/serviceOrder/621524e67fce055f32210d7a",
+        "category": "SDWAN service order",
+        "externalId": "BSS748",
+        "requestedStartDate": "2021-12-25T12:00:00",
+        "externalReference": [{
+                "id": "OPCO-ID-012",
+                "name": "MARKET_ACCOUNT_ID"
+            },
+            {
+                "id": "OPCO-BAN-012",
+                "name": "BILLING_ACCOUNT_NUMBER"
+            },
+            {
+                "id": "OPCO-BSR-012",
+                "name": "BILLING_SERVICE_REFERENCE"
+            },
+            {
+                "id": "OPCO-ORDER-012",
+                "name": "ORDER_REFERENCE"
+            },
+            {
+                "id": "OPCO-OPP-012",
+                "name": "OPPORTUNITY_ID"
+            }
+        ],
+        "milestone": [{
+            "id": "1",
+            "description": "Service Order Received",
+            "message": "Service Order Received",
+            "milestoneDate": "2022-02-22T18:01:10.794",
+            "status": "COMPLETED"
+        }],
+        "relatedParty": [{
+            "id": "VFUK",
+            "role": "channel",
+            "countryCode": "GB",
+            "marketCode": "VFUK",
+            "orderSystem": "PowerChanger",
+            "@type": "RelatedParty",
+            "@referredType": "RelatedPartyChannelInfo"
+        }],
+        "serviceOrderItem": [{
+            "id": "1",
+            "action": "add",
+            "service": {
+                "serviceType": "ucc.unity.tenant",
+                "place": [{
+                    "role": "HQAddress",
+                    "city": "Maidenhead",
+                    "country": "GB",
+                    "postcode": "SL6 4HH",
+                    "streetName": "Boyn Hill Road",
+                    "streetNr": "23",
+                    "@baseType": "Place",
+                    "@schemaLocation": "https://github.com/tmforum-apis/Open_Api_And_Data_Model/blob/master/schemas/Common/GeographicAddress.schema.json",
+                    "@type": "GeographicalAddress"
+                }],
+                "serviceCharacteristic": [{
+                        "name": "TenantInfo",
+                        "valueType": "object",
+                        "value": {
+                            "id": null,
+                            "href": null,
+                            "profile": "FULL_STACK_STANDARD",
+                            "currency": "GBP",
+                            "name": "Acme Construction",
+                            "mainNumber": "+4930505900501",
+                            "faxNumber": "+4930505900502",
+                            "@baseType": null,
+                            "@schemaLocation": "./Unity/UccTenantInfo.schema.json",
+                            "@type": "UccTenantInfo"
+                        }
+                    },
+                    {
+                        "name": "TenantAdminInfo",
+                        "valueType": "object",
+                        "value": {
+                            "id": null,
+                            "href": null,
+                            "firstName": "Bob",
+                            "lastName": "Andrews",
+                            "email": "bob.andrews@acme-construction.com",
+                            "phoneNumber": "+23123212432143",
+                            "@baseType": null,
+                            "@schemaLocation": "./Unity/UccTenantAdminInfo.schema.json",
+                            "@type": "UccTenantAdminInfo"
+                        }
+                    },
+                    {
+                        "name": "TenantFlowSettings",
+                        "valueType": "object",
+                        "value": {
+                            "id": null,
+                            "href": null,
+                            "activateImmediately": true,
+                            "sendWelcomeEmail": false,
+                            "sendConfirmationEmail": false,
+                            "@baseType": null,
+                            "@schemaLocation": "./Unity/UccTenantFlowSettings.schema.json",
+                            "@type": "UccTenantFlowSettings"
+                        }
+                    }
+                ]
+            },
+            "state": "acknowledged",
+            "@type": "ServiceOrderItem"
+        }],
+        "state": "acknowledged",
+        "@type": "ServiceOrder"
+    },
+    {
+        "id": "621525c93371310f909d7ec8",
+        "href": "/tmf-api/serviceOrdering/v4/serviceOrder/621525c93371310f909d7ec8",
+        "category": "SDWAN service order",
+        "externalId": "BSS748",
+        "requestedStartDate": "2021-12-25T12:00:00",
+        "externalReference": [{
+                "id": "OPCO-ID-012",
+                "name": "MARKET_ACCOUNT_ID"
+            },
+            {
+                "id": "OPCO-BAN-012",
+                "name": "BILLING_ACCOUNT_NUMBER"
+            },
+            {
+                "id": "OPCO-BSR-012",
+                "name": "BILLING_SERVICE_REFERENCE"
+            },
+            {
+                "id": "OPCO-ORDER-012",
+                "name": "ORDER_REFERENCE"
+            },
+            {
+                "id": "OPCO-OPP-012",
+                "name": "OPPORTUNITY_ID"
+            }
+        ],
+        "milestone": [{
+            "id": "1",
+            "description": "Service Order Received",
+            "message": "Service Order Received",
+            "milestoneDate": "2022-02-22T18:04:56.255",
+            "status": "COMPLETED"
+        }],
+        "relatedParty": [{
+            "id": "VFUK",
+            "role": "channel",
+            "countryCode": "GB",
+            "marketCode": "VFUK",
+            "orderSystem": "PowerChanger",
+            "@type": "RelatedParty",
+            "@referredType": "RelatedPartyChannelInfo"
+        }],
+        "serviceOrderItem": [{
+            "id": "1",
+            "action": "add",
+            "service": {
+                "serviceType": "ucc.unity.tenant",
+                "place": [{
+                    "role": "HQAddress",
+                    "city": "Maidenhead",
+                    "country": "GB",
+                    "postcode": "SL6 4HH",
+                    "streetName": "Boyn Hill Road",
+                    "streetNr": "23",
+                    "@baseType": "Place",
+                    "@schemaLocation": "https://github.com/tmforum-apis/Open_Api_And_Data_Model/blob/master/schemas/Common/GeographicAddress.schema.json",
+                    "@type": "GeographicalAddress"
+                }],
+                "serviceCharacteristic": [{
+                        "name": "TenantInfo",
+                        "valueType": "object",
+                        "value": {
+                            "id": null,
+                            "href": null,
+                            "profile": "FULL_STACK_STANDARD",
+                            "currency": "GBP",
+                            "name": "Acme Construction",
+                            "mainNumber": "+4930505900501",
+                            "faxNumber": "+4930505900502",
+                            "@baseType": null,
+                            "@schemaLocation": "./Unity/UccTenantInfo.schema.json",
+                            "@type": "UccTenantInfo"
+                        }
+                    },
+                    {
+                        "name": "TenantAdminInfo",
+                        "valueType": "object",
+                        "value": {
+                            "id": null,
+                            "href": null,
+                            "firstName": "Bob",
+                            "lastName": "Andrews",
+                            "email": "bob.andrews@acme-construction.com",
+                            "phoneNumber": "+23123212432143",
+                            "@baseType": null,
+                            "@schemaLocation": "./Unity/UccTenantAdminInfo.schema.json",
+                            "@type": "UccTenantAdminInfo"
+                        }
+                    },
+                    {
+                        "name": "TenantFlowSettings",
+                        "valueType": "object",
+                        "value": {
+                            "id": null,
+                            "href": null,
+                            "activateImmediately": true,
+                            "sendWelcomeEmail": false,
+                            "sendConfirmationEmail": false,
+                            "@baseType": null,
+                            "@schemaLocation": "./Unity/UccTenantFlowSettings.schema.json",
+                            "@type": "UccTenantFlowSettings"
+                        }
+                    }
+                ]
+            },
+            "state": "acknowledged",
+            "@type": "ServiceOrderItem"
+        }],
+        "state": "acknowledged",
+        "@type": "ServiceOrder"
+    },
+    {
+        "id": "621526c73371310f909d7ec9",
+        "href": "/tmf-api/serviceOrdering/v4/serviceOrder/621526c73371310f909d7ec9",
+        "category": "SDWAN service order",
+        "externalId": "BSS748",
+        "requestedStartDate": "2021-12-25T12:00:00",
+        "externalReference": [{
+                "id": "OPCO-ID-012",
+                "name": "MARKET_ACCOUNT_ID"
+            },
+            {
+                "id": "OPCO-BAN-012",
+                "name": "BILLING_ACCOUNT_NUMBER"
+            },
+            {
+                "id": "OPCO-BSR-012",
+                "name": "BILLING_SERVICE_REFERENCE"
+            },
+            {
+                "id": "OPCO-ORDER-012",
+                "name": "ORDER_REFERENCE"
+            },
+            {
+                "id": "OPCO-OPP-012",
+                "name": "OPPORTUNITY_ID"
+            }
+        ],
+        "milestone": [{
+            "id": "1",
+            "description": "Service Order Received",
+            "message": "Service Order Received",
+            "milestoneDate": "2022-02-22T18:09:11.272",
+            "status": "COMPLETED"
+        }],
+        "relatedParty": [{
+            "id": "VFUK",
+            "role": "channel",
+            "countryCode": "GB",
+            "marketCode": "VFUK",
+            "orderSystem": "PowerChanger",
+            "@type": "RelatedParty",
+            "@referredType": "RelatedPartyChannelInfo"
+        }],
+        "serviceOrderItem": [{
+            "id": "1",
+            "action": "add",
+            "service": {
+                "serviceType": "ucc.unity.tenant",
+                "place": [{
+                    "role": "HQAddress",
+                    "city": "Maidenhead",
+                    "country": "GB",
+                    "postcode": "SL6 4HH",
+                    "streetName": "Boyn Hill Road",
+                    "streetNr": "23",
+                    "@baseType": "Place",
+                    "@schemaLocation": "https://github.com/tmforum-apis/Open_Api_And_Data_Model/blob/master/schemas/Common/GeographicAddress.schema.json",
+                    "@type": "GeographicalAddress"
+                }],
+                "serviceCharacteristic": [{
+                        "name": "TenantInfo",
+                        "valueType": "object",
+                        "value": {
+                            "id": null,
+                            "href": null,
+                            "profile": "FULL_STACK_STANDARD",
+                            "currency": "GBP",
+                            "name": "Acme Construction",
+                            "mainNumber": "+4930505900501",
+                            "faxNumber": "+4930505900502",
+                            "@baseType": null,
+                            "@schemaLocation": "./Unity/UccTenantInfo.schema.json",
+                            "@type": "UccTenantInfo"
+                        }
+                    },
+                    {
+                        "name": "TenantAdminInfo",
+                        "valueType": "object",
+                        "value": {
+                            "id": null,
+                            "href": null,
+                            "firstName": "Bob",
+                            "lastName": "Andrews",
+                            "email": "bob.andrews@acme-construction.com",
+                            "phoneNumber": "+23123212432143",
+                            "@baseType": null,
+                            "@schemaLocation": "./Unity/UccTenantAdminInfo.schema.json",
+                            "@type": "UccTenantAdminInfo"
+                        }
+                    },
+                    {
+                        "name": "TenantFlowSettings",
+                        "valueType": "object",
+                        "value": {
+                            "id": null,
+                            "href": null,
+                            "activateImmediately": true,
+                            "sendWelcomeEmail": false,
+                            "sendConfirmationEmail": false,
+                            "@baseType": null,
+                            "@schemaLocation": "./Unity/UccTenantFlowSettings.schema.json",
+                            "@type": "UccTenantFlowSettings"
+                        }
+                    }
+                ]
+            },
+            "state": "acknowledged",
+            "@type": "ServiceOrderItem"
+        }],
+        "state": "acknowledged",
+        "@type": "ServiceOrder"
+    },
+    {
+        "id": "6215dfe52c2b0673ea90594f",
+        "href": "/tmf-api/serviceOrdering/v4/serviceOrder/6215dfe52c2b0673ea90594f",
+        "category": "SDWAN service order",
+        "externalId": "BSS748",
+        "requestedStartDate": "2021-12-25T12:00:00",
+        "externalReference": [{
+                "id": "OPCO-ID-012",
+                "name": "MARKET_ACCOUNT_ID"
+            },
+            {
+                "id": "OPCO-BAN-012",
+                "name": "BILLING_ACCOUNT_NUMBER"
+            },
+            {
+                "id": "OPCO-BSR-012",
+                "name": "BILLING_SERVICE_REFERENCE"
+            },
+            {
+                "id": "OPCO-ORDER-012",
+                "name": "ORDER_REFERENCE"
+            },
+            {
+                "id": "OPCO-OPP-012",
+                "name": "OPPORTUNITY_ID"
+            }
+        ],
+        "milestone": [{
+            "id": "1",
+            "description": "Service Order Received",
+            "message": "Service Order Received",
+            "milestoneDate": "2022-02-23T07:18:59.842",
+            "status": "COMPLETED"
+        }],
+        "relatedParty": [{
+            "id": "VFUK",
+            "role": "channel",
+            "countryCode": "GB",
+            "marketCode": "VFUK",
+            "orderSystem": "PowerChanger",
+            "@type": "RelatedParty",
+            "@referredType": "RelatedPartyChannelInfo"
+        }],
+        "serviceOrderItem": [{
+            "id": "1",
+            "action": "add",
+            "service": {
+                "serviceType": "ucc.unity.tenant",
+                "place": [{
+                    "role": "HQAddress",
+                    "city": "Maidenhead",
+                    "country": "GB",
+                    "postcode": "SL6 4HH",
+                    "streetName": "Boyn Hill Road",
+                    "streetNr": "23",
+                    "@baseType": "Place",
+                    "@schemaLocation": "https://github.com/tmforum-apis/Open_Api_And_Data_Model/blob/master/schemas/Common/GeographicAddress.schema.json",
+                    "@type": "GeographicalAddress"
+                }],
+                "serviceCharacteristic": [{
+                        "name": "TenantInfo",
+                        "valueType": "object",
+                        "value": {
+                            "id": null,
+                            "href": null,
+                            "profile": "FULL_STACK_STANDARD",
+                            "currency": "GBP",
+                            "name": "Acme Construction",
+                            "mainNumber": "+4930505900501",
+                            "faxNumber": "+4930505900502",
+                            "@baseType": null,
+                            "@schemaLocation": "./Unity/UccTenantInfo.schema.json",
+                            "@type": "UccTenantInfo"
+                        }
+                    },
+                    {
+                        "name": "TenantAdminInfo",
+                        "valueType": "object",
+                        "value": {
+                            "id": null,
+                            "href": null,
+                            "firstName": "Bob",
+                            "lastName": "Andrews",
+                            "email": "bob.andrews@acme-construction.com",
+                            "phoneNumber": "+23123212432143",
+                            "@baseType": null,
+                            "@schemaLocation": "./Unity/UccTenantAdminInfo.schema.json",
+                            "@type": "UccTenantAdminInfo"
+                        }
+                    },
+                    {
+                        "name": "TenantFlowSettings",
+                        "valueType": "object",
+                        "value": {
+                            "id": null,
+                            "href": null,
+                            "activateImmediately": true,
+                            "sendWelcomeEmail": false,
+                            "sendConfirmationEmail": false,
+                            "@baseType": null,
+                            "@schemaLocation": "./Unity/UccTenantFlowSettings.schema.json",
+                            "@type": "UccTenantFlowSettings"
+                        }
+                    }
+                ]
+            },
+            "state": "acknowledged",
+            "@type": "ServiceOrderItem"
+        }],
+        "state": "acknowledged",
+        "@type": "ServiceOrder"
+    },
+    {
+        "id": "6215e0662c2b0673ea905950",
+        "href": "/tmf-api/serviceOrdering/v4/serviceOrder/6215e0662c2b0673ea905950",
+        "category": "SDWAN service order",
+        "externalId": "BSS748",
+        "requestedStartDate": "2021-12-25T12:00:00",
+        "externalReference": [{
+                "id": "OPCO-ID-012",
+                "name": "MARKET_ACCOUNT_ID"
+            },
+            {
+                "id": "OPCO-BAN-012",
+                "name": "BILLING_ACCOUNT_NUMBER"
+            },
+            {
+                "id": "OPCO-BSR-012",
+                "name": "BILLING_SERVICE_REFERENCE"
+            },
+            {
+                "id": "OPCO-ORDER-012",
+                "name": "ORDER_REFERENCE"
+            },
+            {
+                "id": "OPCO-OPP-012",
+                "name": "OPPORTUNITY_ID"
+            }
+        ],
+        "milestone": [{
+            "id": "1",
+            "description": "Service Order Received",
+            "message": "Service Order Received",
+            "milestoneDate": "2022-02-23T07:21:10.832",
+            "status": "COMPLETED"
+        }],
+        "relatedParty": [{
+            "id": "VFUK",
+            "role": "channel",
+            "countryCode": "GB",
+            "marketCode": "VFUK",
+            "orderSystem": "PowerChanger",
+            "@type": "RelatedParty",
+            "@referredType": "RelatedPartyChannelInfo"
+        }],
+        "serviceOrderItem": [{
+            "id": "1",
+            "action": "add",
+            "service": {
+                "serviceType": "ucc.unity.tenant",
+                "place": [{
+                    "role": "HQAddress",
+                    "city": "Maidenhead",
+                    "country": "GB",
+                    "postcode": "SL6 4HH",
+                    "streetName": "Boyn Hill Road",
+                    "streetNr": "23",
+                    "@baseType": "Place",
+                    "@schemaLocation": "https://github.com/tmforum-apis/Open_Api_And_Data_Model/blob/master/schemas/Common/GeographicAddress.schema.json",
+                    "@type": "GeographicalAddress"
+                }],
+                "serviceCharacteristic": [{
+                        "name": "TenantInfo",
+                        "valueType": "object",
+                        "value": {
+                            "id": null,
+                            "href": null,
+                            "profile": "FULL_STACK_STANDARD",
+                            "currency": "GBP",
+                            "name": "Acme Construction",
+                            "mainNumber": "+4930505900501",
+                            "faxNumber": "+4930505900502",
+                            "@baseType": null,
+                            "@schemaLocation": "./Unity/UccTenantInfo.schema.json",
+                            "@type": "UccTenantInfo"
+                        }
+                    },
+                    {
+                        "name": "TenantAdminInfo",
+                        "valueType": "object",
+                        "value": {
+                            "id": null,
+                            "href": null,
+                            "firstName": "Bob",
+                            "lastName": "Andrews",
+                            "email": "bob.andrews@acme-construction.com",
+                            "phoneNumber": "+23123212432143",
+                            "@baseType": null,
+                            "@schemaLocation": "./Unity/UccTenantAdminInfo.schema.json",
+                            "@type": "UccTenantAdminInfo"
+                        }
+                    },
+                    {
+                        "name": "TenantFlowSettings",
+                        "valueType": "object",
+                        "value": {
+                            "id": null,
+                            "href": null,
+                            "activateImmediately": true,
+                            "sendWelcomeEmail": false,
+                            "sendConfirmationEmail": false,
+                            "@baseType": null,
+                            "@schemaLocation": "./Unity/UccTenantFlowSettings.schema.json",
+                            "@type": "UccTenantFlowSettings"
+                        }
+                    }
+                ]
+            },
+            "state": "acknowledged",
+            "@type": "ServiceOrderItem"
+        }],
+        "state": "acknowledged",
+        "@type": "ServiceOrder"
+    },
+    {
+        "id": "6215e0a72c2b0673ea905951",
+        "href": "/tmf-api/serviceOrdering/v4/serviceOrder/6215e0a72c2b0673ea905951",
+        "category": "SDWAN service order",
+        "externalId": "BSS748",
+        "requestedStartDate": "2021-12-25T12:00:00",
+        "externalReference": [{
+                "id": "OPCO-ID-012",
+                "name": "MARKET_ACCOUNT_ID"
+            },
+            {
+                "id": "OPCO-BAN-012",
+                "name": "BILLING_ACCOUNT_NUMBER"
+            },
+            {
+                "id": "OPCO-BSR-012",
+                "name": "BILLING_SERVICE_REFERENCE"
+            },
+            {
+                "id": "OPCO-ORDER-012",
+                "name": "ORDER_REFERENCE"
+            },
+            {
+                "id": "OPCO-OPP-012",
+                "name": "OPPORTUNITY_ID"
+            }
+        ],
+        "milestone": [{
+            "id": "1",
+            "description": "Service Order Received",
+            "message": "Service Order Received",
+            "milestoneDate": "2022-02-23T07:22:15.092",
+            "status": "COMPLETED"
+        }],
+        "relatedParty": [{
+            "id": "VFUK",
+            "role": "channel",
+            "countryCode": "GB",
+            "marketCode": "VFUK",
+            "orderSystem": "PowerChanger",
+            "@type": "RelatedParty",
+            "@referredType": "RelatedPartyChannelInfo"
+        }],
+        "serviceOrderItem": [{
+            "id": "1",
+            "action": "add",
+            "service": {
+                "serviceType": "ucc.unity.tenant",
+                "place": [{
+                    "role": "HQAddress",
+                    "city": "Maidenhead",
+                    "country": "GB",
+                    "postcode": "SL6 4HH",
+                    "streetName": "Boyn Hill Road",
+                    "streetNr": "23",
+                    "@baseType": "Place",
+                    "@schemaLocation": "https://github.com/tmforum-apis/Open_Api_And_Data_Model/blob/master/schemas/Common/GeographicAddress.schema.json",
+                    "@type": "GeographicalAddress"
+                }],
+                "serviceCharacteristic": [{
+                        "name": "TenantInfo",
+                        "valueType": "object",
+                        "value": {
+                            "id": null,
+                            "href": null,
+                            "profile": "FULL_STACK_STANDARD",
+                            "currency": "GBP",
+                            "name": "Acme Construction",
+                            "mainNumber": "+4930505900501",
+                            "faxNumber": "+4930505900502",
+                            "@baseType": null,
+                            "@schemaLocation": "./Unity/UccTenantInfo.schema.json",
+                            "@type": "UccTenantInfo"
+                        }
+                    },
+                    {
+                        "name": "TenantAdminInfo",
+                        "valueType": "object",
+                        "value": {
+                            "id": null,
+                            "href": null,
+                            "firstName": "Bob",
+                            "lastName": "Andrews",
+                            "email": "bob.andrews@acme-construction.com",
+                            "phoneNumber": "+23123212432143",
+                            "@baseType": null,
+                            "@schemaLocation": "./Unity/UccTenantAdminInfo.schema.json",
+                            "@type": "UccTenantAdminInfo"
+                        }
+                    },
+                    {
+                        "name": "TenantFlowSettings",
+                        "valueType": "object",
+                        "value": {
+                            "id": null,
+                            "href": null,
+                            "activateImmediately": true,
+                            "sendWelcomeEmail": false,
+                            "sendConfirmationEmail": false,
+                            "@baseType": null,
+                            "@schemaLocation": "./Unity/UccTenantFlowSettings.schema.json",
+                            "@type": "UccTenantFlowSettings"
+                        }
+                    }
+                ]
+            },
+            "state": "acknowledged",
+            "@type": "ServiceOrderItem"
+        }],
+        "state": "acknowledged",
+        "@type": "ServiceOrder"
+    },
+    {
+        "id": "6215e19d2c2b0673ea905952",
+        "href": "/tmf-api/serviceOrdering/v4/serviceOrder/6215e19d2c2b0673ea905952",
+        "category": "SDWAN service order",
+        "externalId": "BSS748",
+        "requestedStartDate": "2021-12-25T12:00:00",
+        "externalReference": [{
+                "id": "OPCO-ID-012",
+                "name": "MARKET_ACCOUNT_ID"
+            },
+            {
+                "id": "OPCO-BAN-012",
+                "name": "BILLING_ACCOUNT_NUMBER"
+            },
+            {
+                "id": "OPCO-BSR-012",
+                "name": "BILLING_SERVICE_REFERENCE"
+            },
+            {
+                "id": "OPCO-ORDER-012",
+                "name": "ORDER_REFERENCE"
+            },
+            {
+                "id": "OPCO-OPP-012",
+                "name": "OPPORTUNITY_ID"
+            }
+        ],
+        "milestone": [{
+            "id": "1",
+            "description": "Service Order Received",
+            "message": "Service Order Received",
+            "milestoneDate": "2022-02-23T07:26:21.297",
+            "status": "COMPLETED"
+        }],
+        "relatedParty": [{
+            "id": "VFUK",
+            "role": "channel",
+            "countryCode": "GB",
+            "marketCode": "VFUK",
+            "orderSystem": "PowerChanger",
+            "@type": "RelatedParty",
+            "@referredType": "RelatedPartyChannelInfo"
+        }],
+        "serviceOrderItem": [{
+            "id": "1",
+            "action": "add",
+            "service": {
+                "serviceType": "ucc.unity.tenant",
+                "place": [{
+                    "role": "HQAddress",
+                    "city": "Maidenhead",
+                    "country": "GB",
+                    "postcode": "SL6 4HH",
+                    "streetName": "Boyn Hill Road",
+                    "streetNr": "23",
+                    "@baseType": "Place",
+                    "@schemaLocation": "https://github.com/tmforum-apis/Open_Api_And_Data_Model/blob/master/schemas/Common/GeographicAddress.schema.json",
+                    "@type": "GeographicalAddress"
+                }],
+                "serviceCharacteristic": [{
+                        "name": "TenantInfo",
+                        "valueType": "object",
+                        "value": {
+                            "id": null,
+                            "href": null,
+                            "profile": "FULL_STACK_STANDARD",
+                            "currency": "GBP",
+                            "name": "Acme Construction",
+                            "mainNumber": "+4930505900501",
+                            "faxNumber": "+4930505900502",
+                            "@baseType": null,
+                            "@schemaLocation": "./Unity/UccTenantInfo.schema.json",
+                            "@type": "UccTenantInfo"
+                        }
+                    },
+                    {
+                        "name": "TenantAdminInfo",
+                        "valueType": "object",
+                        "value": {
+                            "id": null,
+                            "href": null,
+                            "firstName": "Bob",
+                            "lastName": "Andrews",
+                            "email": "bob.andrews@acme-construction.com",
+                            "phoneNumber": "+23123212432143",
+                            "@baseType": null,
+                            "@schemaLocation": "./Unity/UccTenantAdminInfo.schema.json",
+                            "@type": "UccTenantAdminInfo"
+                        }
+                    },
+                    {
+                        "name": "TenantFlowSettings",
+                        "valueType": "object",
+                        "value": {
+                            "id": null,
+                            "href": null,
+                            "activateImmediately": true,
+                            "sendWelcomeEmail": false,
+                            "sendConfirmationEmail": false,
+                            "@baseType": null,
+                            "@schemaLocation": "./Unity/UccTenantFlowSettings.schema.json",
+                            "@type": "UccTenantFlowSettings"
+                        }
+                    }
+                ]
+            },
+            "state": "acknowledged",
+            "@type": "ServiceOrderItem"
+        }],
+        "state": "acknowledged",
+        "@type": "ServiceOrder"
+    },
+    {
+        "id": "6215e69e2c2b0673ea905953",
+        "href": "/tmf-api/serviceOrdering/v4/serviceOrder/6215e69e2c2b0673ea905953",
+        "category": "SDWAN service order",
+        "externalId": "BSS748",
+        "requestedStartDate": "2021-12-25T12:00:00",
+        "externalReference": [{
+                "id": "OPCO-ID-012",
+                "name": "MARKET_ACCOUNT_ID"
+            },
+            {
+                "id": "OPCO-BAN-012",
+                "name": "BILLING_ACCOUNT_NUMBER"
+            },
+            {
+                "id": "OPCO-BSR-012",
+                "name": "BILLING_SERVICE_REFERENCE"
+            },
+            {
+                "id": "OPCO-ORDER-012",
+                "name": "ORDER_REFERENCE"
+            },
+            {
+                "id": "OPCO-OPP-012",
+                "name": "OPPORTUNITY_ID"
+            }
+        ],
+        "milestone": [{
+            "id": "1",
+            "description": "Service Order Received",
+            "message": "Service Order Received",
+            "milestoneDate": "2022-02-23T07:47:42.274",
+            "status": "COMPLETED"
+        }],
+        "relatedParty": [{
+            "id": "VFUK",
+            "role": "channel",
+            "countryCode": "GB",
+            "marketCode": "VFUK",
+            "orderSystem": "PowerChanger",
+            "@type": "RelatedParty",
+            "@referredType": "RelatedPartyChannelInfo"
+        }],
+        "serviceOrderItem": [{
+            "id": "1",
+            "action": "add",
+            "service": {
+                "serviceType": "ucc.unity.tenant",
+                "place": [{
+                    "role": "HQAddress",
+                    "city": "Maidenhead",
+                    "country": "GB",
+                    "postcode": "SL6 4HH",
+                    "streetName": "Boyn Hill Road",
+                    "streetNr": "23",
+                    "@baseType": "Place",
+                    "@schemaLocation": "https://github.com/tmforum-apis/Open_Api_And_Data_Model/blob/master/schemas/Common/GeographicAddress.schema.json",
+                    "@type": "GeographicalAddress"
+                }],
+                "serviceCharacteristic": [{
+                        "name": "TenantInfo",
+                        "valueType": "object",
+                        "value": {
+                            "id": null,
+                            "href": null,
+                            "profile": "FULL_STACK_STANDARD",
+                            "currency": "GBP",
+                            "name": "Acme Construction",
+                            "mainNumber": "+4930505900501",
+                            "faxNumber": "+4930505900502",
+                            "@baseType": null,
+                            "@schemaLocation": "./Unity/UccTenantInfo.schema.json",
+                            "@type": "UccTenantInfo"
+                        }
+                    },
+                    {
+                        "name": "TenantAdminInfo",
+                        "valueType": "object",
+                        "value": {
+                            "id": null,
+                            "href": null,
+                            "firstName": "Bob",
+                            "lastName": "Andrews",
+                            "email": "bob.andrews@acme-construction.com",
+                            "phoneNumber": "+23123212432143",
+                            "@baseType": null,
+                            "@schemaLocation": "./Unity/UccTenantAdminInfo.schema.json",
+                            "@type": "UccTenantAdminInfo"
+                        }
+                    },
+                    {
+                        "name": "TenantFlowSettings",
+                        "valueType": "object",
+                        "value": {
+                            "id": null,
+                            "href": null,
+                            "activateImmediately": true,
+                            "sendWelcomeEmail": false,
+                            "sendConfirmationEmail": false,
+                            "@baseType": null,
+                            "@schemaLocation": "./Unity/UccTenantFlowSettings.schema.json",
+                            "@type": "UccTenantFlowSettings"
+                        }
+                    }
+                ]
+            },
+            "state": "acknowledged",
+            "@type": "ServiceOrderItem"
+        }],
+        "state": "acknowledged",
+        "@type": "ServiceOrder"
+    },
+    {
+        "id": "6215e8252c2b0673ea905954",
+        "href": "/tmf-api/serviceOrdering/v4/serviceOrder/6215e8252c2b0673ea905954",
+        "category": "SDWAN service order",
+        "externalId": "BSS748",
+        "requestedStartDate": "2021-12-25T12:00:00",
+        "externalReference": [{
+                "id": "OPCO-ID-012",
+                "name": "MARKET_ACCOUNT_ID"
+            },
+            {
+                "id": "OPCO-BAN-012",
+                "name": "BILLING_ACCOUNT_NUMBER"
+            },
+            {
+                "id": "OPCO-BSR-012",
+                "name": "BILLING_SERVICE_REFERENCE"
+            },
+            {
+                "id": "OPCO-ORDER-012",
+                "name": "ORDER_REFERENCE"
+            },
+            {
+                "id": "OPCO-OPP-012",
+                "name": "OPPORTUNITY_ID"
+            }
+        ],
+        "milestone": [{
+            "id": "1",
+            "description": "Service Order Received",
+            "message": "Service Order Received",
+            "milestoneDate": "2022-02-23T07:54:13.039",
+            "status": "COMPLETED"
+        }],
+        "relatedParty": [{
+            "id": "VFUK",
+            "role": "channel",
+            "countryCode": "GB",
+            "marketCode": "VFUK",
+            "orderSystem": "PowerChanger",
+            "@type": "RelatedParty",
+            "@referredType": "RelatedPartyChannelInfo"
+        }],
+        "serviceOrderItem": [{
+            "id": "1",
+            "action": "add",
+            "service": {
+                "serviceType": "ucc.unity.tenant",
+                "place": [{
+                    "role": "HQAddress",
+                    "city": "Maidenhead",
+                    "country": "GB",
+                    "postcode": "SL6 4HH",
+                    "streetName": "Boyn Hill Road",
+                    "streetNr": "23",
+                    "@baseType": "Place",
+                    "@schemaLocation": "https://github.com/tmforum-apis/Open_Api_And_Data_Model/blob/master/schemas/Common/GeographicAddress.schema.json",
+                    "@type": "GeographicalAddress"
+                }],
+                "serviceCharacteristic": [{
+                        "name": "TenantInfo",
+                        "valueType": "object",
+                        "value": {
+                            "id": null,
+                            "href": null,
+                            "profile": "FULL_STACK_STANDARD",
+                            "currency": "GBP",
+                            "name": "Acme Construction",
+                            "mainNumber": "+4930505900501",
+                            "faxNumber": "+4930505900502",
+                            "@baseType": null,
+                            "@schemaLocation": "./Unity/UccTenantInfo.schema.json",
+                            "@type": "UccTenantInfo"
+                        }
+                    },
+                    {
+                        "name": "TenantAdminInfo",
+                        "valueType": "object",
+                        "value": {
+                            "id": null,
+                            "href": null,
+                            "firstName": "Bob",
+                            "lastName": "Andrews",
+                            "email": "bob.andrews@acme-construction.com",
+                            "phoneNumber": "+23123212432143",
+                            "@baseType": null,
+                            "@schemaLocation": "./Unity/UccTenantAdminInfo.schema.json",
+                            "@type": "UccTenantAdminInfo"
+                        }
+                    },
+                    {
+                        "name": "TenantFlowSettings",
+                        "valueType": "object",
+                        "value": {
+                            "id": null,
+                            "href": null,
+                            "activateImmediately": true,
+                            "sendWelcomeEmail": false,
+                            "sendConfirmationEmail": false,
+                            "@baseType": null,
+                            "@schemaLocation": "./Unity/UccTenantFlowSettings.schema.json",
+                            "@type": "UccTenantFlowSettings"
+                        }
+                    }
+                ]
+            },
+            "state": "acknowledged",
+            "@type": "ServiceOrderItem"
+        }],
+        "state": "acknowledged",
+        "@type": "ServiceOrder"
+    }
+]

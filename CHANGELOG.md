@@ -2,6 +2,29 @@
 
 All notable changes to `tmf630-toolkit` are documented in this file.
 
+## [2.0.0] - 2026-03-26
+
+### Changed
+- **Spring Boot 4.0.4** baseline (was 3.5.x). This is a major upgrade that requires consuming projects to use Spring Boot 4.x.
+- **Jackson 3** (`tools.jackson`) is now the default JSON stack. Spring Boot 4 auto-configures `JsonMapper` instead of the Jackson 2 `ObjectMapper`.
+- **Jayway JsonPath 3.0.0** (`com.jayway.jsonpath:json-path:3.0.0`), aligned with Jackson 3. Correlated multi-field matching in nested arrays uses the nested `[?(...)]` filter form (translated to `$elemMatch` on Mongo).
+- **Testcontainers 2.0.4** (managed by Boot 4 BOM). Artifact IDs now use the `testcontainers-` prefix (e.g. `testcontainers-postgresql`, `testcontainers-mongodb`).
+- **QueryDSL 5.1.0** (`com.querydsl`) with `jakarta` classifier — unchanged group/artifact, version now referenced via `${querydsl.version}` property.
+- Deprecated `spring-boot-starter-web` replaced with `spring-boot-starter-webmvc`.
+- `attribute-filtering-core` now depends on `spring-web` instead of `spring-webmvc`; redundant `spring-core` and `spring-context` compile-scope dependencies removed (both are transitive). `spring-context` is retained as test-scoped. `spring-webmvc` is now declared explicitly in `attribute-filtering-autoconfigure` where it is directly used.
+- MongoDB connection properties moved from `spring.data.mongodb.*` to `spring.mongodb.*` (Spring Boot 4 change).
+- Spring Boot 4 package reorganization: `AutoConfigureMockMvc` moved to `org.springframework.boot.webmvc.test.autoconfigure`, `WebMvcAutoConfiguration` moved to `org.springframework.boot.webmvc.autoconfigure`.
+
+### Added
+- Maven Enforcer plugin now requires **Java 17** (`<requireJavaVersion>[17,)</requireJavaVersion>`).
+- Comprehensive JsonPath filter guide in README with Jayway 3.x syntax examples, including correlated multi-field matching in nested arrays using the nested `[?(...)]` form.
+
+### Tests
+- Integration test fixtures moved to isolated subpackages (`it.mongo`, `it.jpa`, `it.sql`) to prevent cross-context bean conflicts in Spring Boot 4.
+- Each IT's `@SpringBootApplication` now uses `scanBasePackageClasses` and `exclude` to precisely control auto-configuration loading.
+- QueryDSL APT compiler plugin configuration consolidated to a single top-level `<configuration>` block (removes duplicate `testCompile` execution).
+- External test dataset copied to `src/test/resources/fixtures/` for CI portability.
+
 ## [1.0.7] - 2026-03-20
 
 ### Changed

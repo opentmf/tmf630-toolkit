@@ -1,4 +1,4 @@
-package org.opentmf.query.tmf630.filtering;
+package org.opentmf.query.tmf630.filtering.it.mongo;
 
 import com.querydsl.core.annotations.QueryEntity;
 import java.util.List;
@@ -7,7 +7,7 @@ import org.springframework.data.mongodb.core.mapping.Document;
 
 @QueryEntity
 @Document("mongo_search_entity")
-class MongoSearchEntity {
+public class MongoSearchEntity {
 
   @Id
   private String id;
@@ -75,7 +75,7 @@ class MongoSearchEntity {
   }
 
   @QueryEntity
-  static class ExternalReference {
+  public static class ExternalReference {
     private String id;
     private String name;
 

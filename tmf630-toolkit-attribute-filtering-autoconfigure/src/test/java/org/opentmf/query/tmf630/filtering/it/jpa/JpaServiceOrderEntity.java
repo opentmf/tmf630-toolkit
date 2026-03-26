@@ -1,4 +1,4 @@
-package org.opentmf.query.tmf630.filtering;
+package org.opentmf.query.tmf630.filtering.it.jpa;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -7,7 +7,7 @@ import jakarta.persistence.Table;
 
 @Entity
 @Table(name = "jpa_service_order")
-class JpaServiceOrderEntity {
+public class JpaServiceOrderEntity {
 
   @Id
   private String id;
