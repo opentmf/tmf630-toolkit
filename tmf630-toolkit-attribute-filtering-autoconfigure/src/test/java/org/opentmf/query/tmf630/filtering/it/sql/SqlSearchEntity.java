@@ -1,4 +1,4 @@
-package org.opentmf.query.tmf630.filtering;
+package org.opentmf.query.tmf630.filtering.it.sql;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -9,7 +9,7 @@ import java.time.Instant;
 
 @Entity
 @Table(name = "sql_search_entity")
-class SqlSearchEntity {
+public class SqlSearchEntity {
 
   @Id
   @GeneratedValue(strategy = GenerationType.IDENTITY)

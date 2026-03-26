@@ -1,4 +1,4 @@
-package org.opentmf.query.tmf630.filtering;
+package org.opentmf.query.tmf630.filtering.it.sql;
 
 import java.util.ArrayList;
 import java.util.Collections;

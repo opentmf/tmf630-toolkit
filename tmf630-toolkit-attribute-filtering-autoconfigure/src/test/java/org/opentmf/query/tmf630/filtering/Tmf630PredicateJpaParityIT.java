@@ -4,19 +4,25 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.opentmf.query.tmf630.filtering.it.jpa.JpaServiceOrderController;
+import org.opentmf.query.tmf630.filtering.it.jpa.JpaServiceOrderEntity;
+import org.opentmf.query.tmf630.filtering.it.jpa.JpaServiceOrderRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.data.mongodb.autoconfigure.DataMongoAutoConfiguration;
+import org.springframework.boot.data.mongodb.autoconfigure.DataMongoRepositoriesAutoConfiguration;
+import org.springframework.boot.mongodb.autoconfigure.MongoAutoConfiguration;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -36,19 +42,17 @@ import org.springframework.test.web.servlet.MockMvc;
 @ActiveProfiles("test")
 class Tmf630PredicateJpaParityIT {
 
-  private static final Path REAL_DATASET_PATH =
-      Path.of(
-          "/home/gokhan/prj/iot-solutionhub/api-adapters/sdn-service-order-adapter/src/test/resources/payload/uc-list-service-order-response.json");
+  private static final String DATASET_RESOURCE = "fixtures/uc-list-service-order-response.json";
 
   @Autowired private MockMvc mockMvc;
   @Autowired private JpaServiceOrderRepository repository;
-  @Autowired private ObjectMapper objectMapper;
+  @Autowired private JsonMapper jsonMapper;
 
   @BeforeEach
   void setUp() throws Exception {
     repository.deleteAll();
-    String json = Files.readString(REAL_DATASET_PATH);
-    JsonNode root = objectMapper.readTree(json);
+    String json = readClasspathUtf8(DATASET_RESOURCE);
+    JsonNode root = jsonMapper.readTree(json);
     List<JpaServiceOrderEntity> entities = new ArrayList<>();
     for (JsonNode node : root) {
       JpaServiceOrderEntity entity = new JpaServiceOrderEntity();
@@ -120,7 +124,24 @@ class Tmf630PredicateJpaParityIT {
         .andExpect(status().isBadRequest());
   }
 
-  @SpringBootApplication
-  @Import(JpaServiceOrderController.class)
+  @SpringBootApplication(
+      scanBasePackageClasses = JpaServiceOrderController.class,
+      exclude = {
+        MongoAutoConfiguration.class,
+        DataMongoAutoConfiguration.class,
+        DataMongoRepositoriesAutoConfiguration.class
+      })
   static class TestApp {}
+
+  private static String readClasspathUtf8(String resource) {
+    try (InputStream in =
+        Tmf630PredicateJpaParityIT.class.getClassLoader().getResourceAsStream(resource)) {
+      if (in == null) {
+        throw new IllegalStateException("Classpath resource not found: " + resource);
+      }
+      return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+    } catch (IOException e) {
+      throw new RuntimeException(e);
+    }
+  }
 }

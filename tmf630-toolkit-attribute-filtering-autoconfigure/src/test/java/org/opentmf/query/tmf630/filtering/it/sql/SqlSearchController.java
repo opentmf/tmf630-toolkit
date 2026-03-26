@@ -1,4 +1,4 @@
-package org.opentmf.query.tmf630.filtering;
+package org.opentmf.query.tmf630.filtering.it.sql;
 
 import com.querydsl.core.types.Predicate;
 import com.querydsl.core.types.dsl.PathBuilder;
@@ -11,21 +11,21 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-class JpaServiceOrderController {
+public class SqlSearchController {
 
   private final EntityManager entityManager;
 
-  JpaServiceOrderController(EntityManager entityManager) {
+  public SqlSearchController(EntityManager entityManager) {
     this.entityManager = entityManager;
   }
 
-  @GetMapping("/jpa-search")
-  List<JpaServiceOrderEntity> search(
-      @QuerydslPredicate(root = JpaServiceOrderEntity.class) Predicate predicate) {
-    PathBuilder<JpaServiceOrderEntity> root =
+  @GetMapping("/sql-search")
+  public List<SqlSearchEntity> search(
+      @QuerydslPredicate(root = SqlSearchEntity.class) Predicate predicate) {
+    PathBuilder<SqlSearchEntity> root =
         new PathBuilder<>(
-            JpaServiceOrderEntity.class,
-            Introspector.decapitalize(JpaServiceOrderEntity.class.getSimpleName()));
-    return new JPAQuery<JpaServiceOrderEntity>(entityManager).from(root).where(predicate).fetch();
+            SqlSearchEntity.class, Introspector.decapitalize(SqlSearchEntity.class.getSimpleName()));
+
+    return new JPAQuery<SqlSearchEntity>(entityManager).from(root).where(predicate).fetch();
   }
 }

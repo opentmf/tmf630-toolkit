@@ -20,7 +20,7 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
+import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
 import org.springframework.http.server.ServerHttpResponse;
 import org.springframework.http.server.ServletServerHttpRequest;
 import org.springframework.http.server.ServletServerHttpResponse;
@@ -34,19 +34,19 @@ class Tmf630ResponseBodyAdviceTest {
   @Test
   void supportsAnnotatedMethod() throws Exception {
     MethodParameter param = returnType(AnnotatedController.class, "annotatedMethod");
-    assertTrue(advice.supports(param, MappingJackson2HttpMessageConverter.class));
+    assertTrue(advice.supports(param, JacksonJsonHttpMessageConverter.class));
   }
 
   @Test
   void supportsClassLevelAnnotation() throws Exception {
     MethodParameter param = returnType(ClassAnnotatedController.class, "method");
-    assertTrue(advice.supports(param, MappingJackson2HttpMessageConverter.class));
+    assertTrue(advice.supports(param, JacksonJsonHttpMessageConverter.class));
   }
 
   @Test
   void doesNotSupportUnannotatedMethod() throws Exception {
     MethodParameter param = returnType(PlainController.class, "method");
-    assertFalse(advice.supports(param, MappingJackson2HttpMessageConverter.class));
+    assertFalse(advice.supports(param, JacksonJsonHttpMessageConverter.class));
   }
 
   @Test
@@ -64,7 +64,7 @@ class Tmf630ResponseBodyAdviceTest {
     Object result =
         advice.beforeBodyWrite(
             page, param, MediaType.APPLICATION_JSON,
-            MappingJackson2HttpMessageConverter.class,
+            JacksonJsonHttpMessageConverter.class,
             servletRequest("http://localhost/test"),
             response);
 
@@ -88,7 +88,7 @@ class Tmf630ResponseBodyAdviceTest {
 
     advice.beforeBodyWrite(
         page, param, MediaType.APPLICATION_JSON,
-        MappingJackson2HttpMessageConverter.class,
+        JacksonJsonHttpMessageConverter.class,
         servletRequest("http://localhost/test"),
         response);
 
@@ -109,7 +109,7 @@ class Tmf630ResponseBodyAdviceTest {
     Object result =
         advice.beforeBodyWrite(
             page, param, MediaType.APPLICATION_JSON,
-            MappingJackson2HttpMessageConverter.class,
+            JacksonJsonHttpMessageConverter.class,
             servletRequest("http://localhost/test"),
             response);
 
@@ -133,7 +133,7 @@ class Tmf630ResponseBodyAdviceTest {
     Object result =
         advice.beforeBodyWrite(
             page, param, MediaType.APPLICATION_JSON,
-            MappingJackson2HttpMessageConverter.class,
+            JacksonJsonHttpMessageConverter.class,
             servletRequest("http://localhost/test?fields=name"),
             response);
 
@@ -156,7 +156,7 @@ class Tmf630ResponseBodyAdviceTest {
     Object result =
         advice.beforeBodyWrite(
             body, param, MediaType.APPLICATION_JSON,
-            MappingJackson2HttpMessageConverter.class,
+            JacksonJsonHttpMessageConverter.class,
             servletRequest("http://localhost/test?fields=name"),
             response);
 
@@ -178,7 +178,7 @@ class Tmf630ResponseBodyAdviceTest {
     Object result =
         advice.beforeBodyWrite(
             body, param, MediaType.APPLICATION_JSON,
-            MappingJackson2HttpMessageConverter.class,
+            JacksonJsonHttpMessageConverter.class,
             servletRequest("http://localhost/test?fields=name"),
             response);
 
@@ -200,7 +200,7 @@ class Tmf630ResponseBodyAdviceTest {
     Object result =
         advice.beforeBodyWrite(
             body, param, MediaType.APPLICATION_JSON,
-            MappingJackson2HttpMessageConverter.class,
+            JacksonJsonHttpMessageConverter.class,
             servletRequest("http://localhost/test"),
             response);
 
@@ -223,7 +223,7 @@ class Tmf630ResponseBodyAdviceTest {
     Object result =
         advice.beforeBodyWrite(
             page, param, MediaType.APPLICATION_JSON,
-            MappingJackson2HttpMessageConverter.class,
+            JacksonJsonHttpMessageConverter.class,
             servletRequest("http://localhost/test"),
             response);
 
@@ -240,7 +240,7 @@ class Tmf630ResponseBodyAdviceTest {
     Object result =
         advice.beforeBodyWrite(
             null, param, MediaType.APPLICATION_JSON,
-            MappingJackson2HttpMessageConverter.class,
+            JacksonJsonHttpMessageConverter.class,
             servletRequest("http://localhost/test?fields=name"),
             response);
 
@@ -260,7 +260,7 @@ class Tmf630ResponseBodyAdviceTest {
     Object result =
         advice.beforeBodyWrite(
             page, param, MediaType.APPLICATION_JSON,
-            MappingJackson2HttpMessageConverter.class,
+            JacksonJsonHttpMessageConverter.class,
             servletRequest("http://localhost/test"),
             response);
 
@@ -287,7 +287,7 @@ class Tmf630ResponseBodyAdviceTest {
     Object result =
         advice.beforeBodyWrite(
             body, param, MediaType.APPLICATION_JSON,
-            MappingJackson2HttpMessageConverter.class,
+            JacksonJsonHttpMessageConverter.class,
             servletRequest("http://localhost/test?fields=name"),
             response);
 
@@ -350,7 +350,7 @@ class Tmf630ResponseBodyAdviceTest {
     Object result =
         advice.beforeBodyWrite(
             page, param, MediaType.APPLICATION_JSON,
-            MappingJackson2HttpMessageConverter.class,
+            JacksonJsonHttpMessageConverter.class,
             servletRequest("http://localhost/test?fields=address"),
             response);
 

@@ -1,5 +1,11 @@
 # tmf630-toolkit
 
+> **This is a server-side library.** It runs inside your Spring Boot backend, translates
+> incoming HTTP query parameters into database predicates, and provides helper annotations
+> and utilities to serve TMF-630 compliant responses (paging headers, range status codes,
+> field selection). It is not a client SDK and has no relationship to any client-side
+> filtering or JavaScript runtime.
+
 `tmf630-toolkit` is the adaptation of TMF-630 REST API Design Guidelines for Spring Web MVC.
 
 When a Spring Boot based microservice references this library, it automatically gains TMF630-style paging/sorting and advanced filtering capabilities through configuration, without writing custom query parsing logic. Using the library from other Spring-based projects is also possible but requires explicit bean wiring.
@@ -48,9 +54,9 @@ This will manage the dependencies of the opentmf libraries to use their latest c
 </dependencyManagement>
 ```
 
-## Then choose your dependencies
+### Then choose your dependencies
 
-### Spring Boot (recommended one-liner)
+#### Spring Boot (recommended one-liner)
 
 ```xml
 <dependency>
@@ -59,7 +65,7 @@ This will manage the dependencies of the opentmf libraries to use their latest c
 </dependency>
 ```
 
-### Spring Boot (pick only what you need)
+#### Spring Boot (pick only what you need)
 
 ```xml
 <!-- Paging/sorting -->
@@ -89,7 +95,7 @@ This will manage the dependencies of the opentmf libraries to use their latest c
 </dependency>
 ```
 
-Dependency versions are aligned via Spring Boot BOM `3.5.10`.
+Dependency versions are aligned via Spring Boot BOM `4.0.4`.
 
 ## Prerequisites for attribute filtering
 
@@ -975,6 +981,104 @@ The library throws a filtering exception (mapped to HTTP `400`) for unsupported 
 - `filter=` exceeds configured max length
 - JsonPath filter feature is disabled by configuration
 
+#### JsonPath filter syntax reference (Jayway 3.x)
+
+[Jayway JsonPath 3.x](https://github.com/json-path/JsonPath) is used **solely** as a syntax validator: the library calls `JsonPath.compile()` to verify that the incoming `filter=` expression is syntactically valid JsonPath. Jayway is **never** used to evaluate the expression against a result array at runtime. Once the expression passes Jayway's syntax check, the library's own parser takes over, translates the expression into a QueryDSL `Predicate` (or a MongoDB `$elemMatch` for array-correlation patterns), and the database executes the query natively. Only the **restricted subset** listed below is accepted by the library's parser — anything not listed here will return `400 Bad Request`.
+
+All examples below assume a JSON array of objects such as:
+
+```json
+[
+  {
+    "name": "Fiber 100Mbps",
+    "status": "active",
+    "price": 49,
+    "category": "broadband",
+    "externalReference": [
+      {"name": "MARKET_ACCOUNT_ID", "id": "OPCO-ID-012"},
+      {"name": "ORDER_REFERENCE", "id": "OPCO-ORDER-012"}
+    ]
+  }
+]
+```
+
+##### Simple field equality
+
+```
+$[?(@.status == 'active')]
+$[?(@.status != 'active')]
+```
+
+##### Comparison operators
+
+```
+$[?(@.price > 10)]
+$[?(@.price >= 10)]
+$[?(@.price < 100)]
+$[?(@.price <= 100)]
+```
+
+##### Logical AND / OR
+
+```
+$[?(@.status == 'active' && @.name == 'Fiber 100Mbps')]
+$[?(@.status == 'active' || @.status == 'suspended')]
+$[?((@.status == 'active' || @.status == 'suspended') && @.category == 'broadband')]
+```
+
+Parentheses control grouping. The library supports arbitrary nesting depth.
+
+##### Nested field access
+
+```
+$[?(@.externalReference.name == 'ORDER_REFERENCE')]
+```
+
+Subject to allowlist and nested-path configuration (`allowNestedPathsJpa`, `allowNestedPathsDocdb`).
+
+##### Combining attribute filtering with `filter=`
+
+Attribute query parameters and `filter=` are merged into a single predicate:
+
+```http
+GET /api/orders?category.eq=broadband&filter=$[?(@.status == 'active' && @.price > 10)]
+```
+
+Default merge is `AND`. Override per request:
+
+```http
+GET /api/orders?category.eq=broadband&filter=$[?(@.status == 'suspended')]&filter.combineWithAttributes=OR
+```
+
+##### Correlated multi-field matching in nested arrays (Mongo only)
+
+When you need to ensure that **the same** nested array element satisfies multiple conditions (e.g. `name == 'ORDER_REFERENCE'` **and** `id == 'OPCO-ORDER-012'` on the same `externalReference` entry), use a nested filter:
+
+```
+$[?(@.externalReference[?(@.name == 'ORDER_REFERENCE' && @.id == 'OPCO-ORDER-012')])]
+```
+
+This library translates the nested `[?(...)]` pattern to a MongoDB `$elemMatch` query, ensuring strict **same-element** semantics. If `name` and `id` come from different array elements, the document does **not** match.
+
+> **JPA note:** Array-correlation patterns are intentionally rejected with `400 Bad Request` on JPA backends, since relational databases do not have a direct `$elemMatch` equivalent.
+
+> **Warning — uncorrelated matching:**
+> Using separate attribute parameters like `externalReference.name.eq=ORDER_REFERENCE&externalReference.id.eq=OPCO-ORDER-012` does **not** guarantee that both values come from the same array element. An object with `name=ORDER_REFERENCE` on one reference and `id=OPCO-ORDER-012` on a **different** reference would be a false positive. Always use the nested `[?(...)]` form for correlated conditions on Mongo backends.
+
+##### What this library does NOT support
+
+The following Jayway JsonPath features are **not** part of this library's restricted `filter=` subset and will return `400 Bad Request`:
+
+- Regex match (`=~`)
+- `IN` / `NIN` (use attribute-level `.in` / `.nin` operators instead)
+- `SIZE`, `EMPTY`, `CONTAINS` (Jayway-specific operators)
+- Exists check (`$[?(@.field)]`)
+- Wildcard / descent operators (`[*]`, `..`)
+- Functions (`length()`, `count()`, etc.)
+- Script expressions
+
+For set operations, null checks, pattern matching, and other advanced filtering, use the attribute-level query parameters (`.eq`, `.ne`, `.in`, `.nin`, `.like`, `.likei`, `.isnull`, `.isnotnull`, `.regex`, etc.) which provide full coverage of these use cases.
+
 ### 9) Field selection utility (optional helper)
 
 `FieldSelectionUtil` can map objects into filtered `Map<String, Object>` views, useful when clients request specific fields.
@@ -1079,7 +1183,6 @@ ResponseEntity<List<Map<String, Object>>> search(
   Page<Map<String, Object>> mappedPage =
       new org.springframework.data.domain.PageImpl<>(content, pageable, page.getTotalElements());
   return Tmf630Util.tmfPage(mappedPage);
-}
 }
 ```
 
