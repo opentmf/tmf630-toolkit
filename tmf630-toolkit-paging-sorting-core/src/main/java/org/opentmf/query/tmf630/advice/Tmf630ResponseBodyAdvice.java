@@ -1,6 +1,8 @@
 package org.opentmf.query.tmf630.advice;
 
 import java.util.List;
+import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 import org.opentmf.query.commons.fieldselection.FieldSelectionUtil;
 import org.opentmf.query.tmf630.annotation.Tmf630Response;
 import org.opentmf.query.tmf630.model.ErrorMessage;
@@ -15,8 +17,6 @@ import org.springframework.http.converter.HttpMessageConverter;
 import org.springframework.http.server.ServerHttpRequest;
 import org.springframework.http.server.ServerHttpResponse;
 import org.springframework.http.server.ServletServerHttpRequest;
-import org.springframework.lang.NonNull;
-import org.springframework.lang.Nullable;
 import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyAdvice;
 
