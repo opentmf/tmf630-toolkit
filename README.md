@@ -15,6 +15,35 @@ In addition to the query parameters, clients can also use a JsonPath in the opti
 
 Release notes and version history are available in [`CHANGELOG.md`](./CHANGELOG.md).
 
+## Table of contents
+
+- [What you get](#what-you-get)
+- [Module layout](#module-layout)
+- [Dependency management](#dependency-management)
+- [Prerequisites for attribute filtering](#prerequisites-for-attribute-filtering)
+- [Configuration prefixes](#configuration-prefixes)
+- [Developer handbook](#developer-handbook)
+  - [1) Example domain and sample data](#1-example-domain-and-sample-data)
+  - [2) Controller usage (Spring Boot)](#2-controller-usage-spring-boot)
+  - [3) Combining predicates with path variables](#3-combining-predicates-with-path-variables)
+  - [4) Paging and sorting examples](#4-paging-and-sorting-examples)
+  - [5) Full QueryDSL operator reference](#5-full-querydsl-operator-reference)
+  - [6) Date and datetime field formats](#6-date-and-datetime-field-formats)
+  - [7) Enum field resolution](#7-enum-field-resolution)
+  - [8) Combined query examples](#8-combined-query-examples)
+  - [9) Field selection utility (optional helper)](#9-field-selection-utility-optional-helper)
+  - [10) Full combined scenario](#10-full-combined-scenario-filter--paging--sorting--field-selection--range-statuses)
+  - [11) Correlated sort (MongoDB)](#11-correlated-sort-mongodb)
+- [Reference](#reference)
+  - [Backend-specific nested-path guidance (JPA vs Mongo)](#backend-specific-nested-path-guidance-jpa-vs-mongo)
+  - [`filter=` JsonPath syntax (Jayway 3.x)](#filter-jsonpath-syntax-jayway-3x)
+  - [Mongo `filter=` support scope](#mongo-filter-support-scope)
+  - [JPA `filter=` support scope](#jpa-filter-support-scope)
+  - [When `filter=` throws `400 Bad Request`](#when-filter-throws-400-bad-request)
+- [POC databases used](#poc-databases-used)
+- [Build](#build)
+- [License](#license)
+
 ## What you get
 
 - TMF630-style paging and sorting (`offset`, `limit`, `sort`)
@@ -28,13 +57,26 @@ Release notes and version history are available in [`CHANGELOG.md`](./CHANGELOG.
 
 ## Module layout
 
-| Module                                             | Description                                                      |
-|----------------------------------------------------|------------------------------------------------------------------|
-| `tmf630-toolkit-paging-sorting-core`               | Paging, sorting, field selection (no Boot dependency)            |
-| `tmf630-toolkit-paging-sorting-autoconfigure`      | Spring Boot auto-configuration for paging/sorting                |
-| `tmf630-toolkit-attribute-filtering-core`          | Attribute filtering to QueryDSL `Predicate` (no Boot dependency) |
-| `tmf630-toolkit-attribute-filtering-autoconfigure` | Spring Boot auto-configuration for filtering                     |
-| `tmf630-toolkit-all`                               | Convenience artifact depending on both autoconfigure modules     |
+| Module                                             | Description                                                                          |
+|----------------------------------------------------|--------------------------------------------------------------------------------------|
+| `tmf630-toolkit-paging-sorting-core`               | Paging, sorting, field selection (no Boot dependency)                                |
+| `tmf630-toolkit-paging-sorting-autoconfigure`      | Spring Boot auto-configuration for paging/sorting                                    |
+| `tmf630-toolkit-attribute-filtering-core`          | Attribute filtering to QueryDSL `Predicate` (no Boot dependency)                     |
+| `tmf630-toolkit-attribute-filtering-autoconfigure` | Spring Boot auto-configuration for filtering                                         |
+| `tmf630-toolkit-mongo-aggregation`                 | **Optional.** Correlated-sort `Aggregation` executor for MongoDB-backed services     |
+| `tmf630-toolkit-all`                               | Convenience artifact depending on both filtering autoconfigure modules               |
+
+The four "core" + "autoconfigure" modules are intentionally **DB-agnostic in
+production scope** — they declare only `querydsl-core`, `spring-web`,
+`spring-data-commons`, and `json-path`. JPA-only and other non-Mongo
+consumers pay no Mongo dependency cost.
+
+`tmf630-toolkit-mongo-aggregation` is an opt-in module that ships
+`spring-data-mongodb` and `querydsl-mongodb` as production dependencies.
+Add it only when your service uses MongoDB and wants the correlated-sort
+features (JsonPath / simple-rich grammar with `$let` / `$filter` /
+`$first` aggregation pipelines). See the [**Correlated sort**](#11-correlated-sort-mongodb)
+section below.
 
 ## Dependency management
 
@@ -81,6 +123,37 @@ This will manage the dependencies of the opentmf libraries to use their latest c
 </dependency>
 ```
 
+#### Spring Boot — MongoDB-backed services adding correlated sort
+
+If your service is MongoDB-backed and you want to accept correlated
+sort terms (e.g. sort by the value of an array element identified by a
+predicate), add the optional Mongo aggregation module **in addition to**
+the autoconfigure modules above:
+
+```xml
+<!-- Optional: correlated-sort Aggregation executor for Mongo backends -->
+<dependency>
+  <groupId>org.opentmf.query</groupId>
+  <artifactId>tmf630-toolkit-mongo-aggregation</artifactId>
+</dependency>
+```
+
+Adding this dependency:
+- Pulls `spring-data-mongodb` and `querydsl-mongodb` (with the legacy
+  `mongo-java-driver` excluded — Spring Boot 4's `mongodb-driver-core`
+  is used).
+- Auto-registers a `Tmf630MongoCorrelatedSortExecutor` bean when a
+  `MongoTemplate` is on the classpath.
+- Adds the `TmfSort` controller parameter binding (via the rich sort
+  resolver in `paging-sorting-autoconfigure`, which is registered
+  alongside the existing `Sort` resolver — plain-only controllers stay
+  unchanged).
+
+JPA-only and other non-Mongo services should **not** add this
+dependency. The base toolkit's plain `Sort` resolver continues to 400
+on correlated terms, which is the correct behavior for a JPA backend
+in v1.
+
 ### Plain Spring (manual wiring)
 
 ```xml
@@ -95,7 +168,7 @@ This will manage the dependencies of the opentmf libraries to use their latest c
 </dependency>
 ```
 
-Dependency versions are aligned via Spring Boot BOM `4.0.4`.
+Dependency versions are aligned via Spring Boot BOM `4.0.6`.
 
 ## Prerequisites for attribute filtering
 
@@ -175,32 +248,14 @@ These are typically already present in your service. The toolkit does not pull t
 - `spring-data-commons` — shared Spring Data types (`Pageable`, `Page`, `Sort`, `QuerydslPredicateExecutor`)
 - `json-path` — used for `filter=` JsonPath parsing
 
-## POC databases used
-
-The current proof-of-concept and integration coverage has been verified with these databases:
-
-- PostgreSQL `18.1-alpine` (via Testcontainers `jdbc:tc:postgresql:18.1-alpine:///db`) for JPA/SQL predicate and SQL reflection tests
-- H2 (in-memory) for lightweight JPA-based integration scenarios
-- MongoDB `8.0.5` (via Testcontainers `mongo:8.0.5`) for document-oriented filtering, including JsonPath array-correlation behavior
-- MariaDB `11.4.4` (via Testcontainers profile `it-mariadb`) for SQL/JPA compatibility validation
-- Microsoft SQL Server `2022-CU14-ubuntu-22.04` (via Testcontainers profile `it-mssql`) for SQL/JPA compatibility validation
-- Oracle XE `21-slim-faststart` (via Testcontainers profile `it-oracle`) for dedicated SQL/JPA validation
-- IBM DB2 `11.5.0.0a` (via Testcontainers profile `it-db2`) for dedicated SQL/JPA validation
-
-Notes:
-
-- JsonPath array-correlation in `filter=` is supported for Mongo/document backends.
-- The same array-correlation pattern is intentionally rejected for JPA backends (HTTP `400`).
-- MariaDB coverage is used as a practical compatibility indicator for the MySQL family due to shared lineage and behavior.
-- Microsoft SQL Server coverage is used as a practical compatibility indicator for Sybase-family behavior due to shared historical lineage.
-
 ## Configuration prefixes
 
-| Prefix                               | Purpose                         |
-|--------------------------------------|---------------------------------|
-| `opentmf.tmf630.paging`              | Paging/sorting behavior         |
-| `opentmf.tmf630.attribute-filtering` | Query filter parsing and rules  |
-| `opentmf.tmf630.field-selection`     | `@Tmf630Response` field selection behavior |
+| Prefix                               | Purpose                                          |
+|--------------------------------------|--------------------------------------------------|
+| `opentmf.tmf630.paging`              | Paging/sorting behavior                          |
+| `opentmf.tmf630.attribute-filtering` | Query filter parsing and rules                   |
+| `opentmf.tmf630.field-selection`     | `@Tmf630Response` field selection behavior       |
+| `opentmf.tmf630.mongo-aggregation`   | Correlated-sort behavior (mongo-aggregation module only) |
 
 ### Common paging properties
 
@@ -232,7 +287,15 @@ Notes:
 ### Field selection properties
 
 - `opentmf.tmf630.field-selection.enabled` (default: `true`) — enables the `@Tmf630Response` auto-advice
-- `opentmf.tmf630.field-selection.default-depth` (default: `1`) — how deep nested objects are auto-expanded when selected by name (see depth semantics below)
+- `opentmf.tmf630.field-selection.default-depth` (default: `1`) — how deep nested objects are auto-expanded when selected by name (see [depth semantics in section 9](#9-field-selection-utility-optional-helper))
+
+### Mongo aggregation properties (only when `tmf630-toolkit-mongo-aggregation` is on the classpath)
+
+- `opentmf.tmf630.mongo-aggregation.simple-rich.default-key` (default:
+  `id`) — the field name used for the bare-value bracket form
+  `arr[X]` in simple-rich sort terms. `arr[X]` is shorthand for
+  `arr[<defaultKey>=X]`. Projects whose convention uses `name`,
+  `code`, etc. flip this once globally without code changes.
 
 ### Configuration scenario 1: default behavior (no custom config)
 
@@ -338,33 +401,6 @@ opentmf:
             - birthdate
             - sex
 ```
-
-### Backend-specific nested-path guidance (JPA vs Mongo)
-
-Recommended operational policy:
-
-- For JPA-backed services, keep `allow-nested-paths-jpa` disabled.
-- For Mongo/document-backed services, enable `allow-nested-paths-docdb`.
-
-Minimal examples:
-
-```yaml
-# JPA-oriented service
-opentmf:
-  tmf630:
-    attribute-filtering:
-      allow-nested-paths-jpa: false
-```
-
-```yaml
-# Mongo-oriented service
-opentmf:
-  tmf630:
-    attribute-filtering:
-      allow-nested-paths-docdb: true
-```
-
-How this works in practice: nested-path policy is backend-aware through separate properties (`allow-nested-paths-jpa` and `allow-nested-paths-docdb`). In mixed JPA+Mongo applications, use explicit allowlists for tighter control.
 
 ## Developer handbook
 
@@ -605,6 +641,12 @@ Sort tokens:
 - `+field` or `field` = ascending
 - `-field` = descending
 - multiple values allowed via comma separation
+
+For services that need to sort by a value taken from a specific element
+of an embedded array (TMF "characteristics" pattern), the
+`tmf630-toolkit-mongo-aggregation` module adds two additional sort
+grammars on top of the plain form. See section
+[**11) Correlated sort (MongoDB)**](#11-correlated-sort-mongodb) below.
 
 Example paged response (partial):
 
@@ -915,169 +957,39 @@ Behavior summary:
 - Mongo/document: translated to `$elemMatch` and evaluated with same-element semantics
 - JPA: this array-correlation pattern is rejected with `400` (by design)
 
-#### Mongo `filter=` support scope (current state)
+#### Example E: TMF630 shorthand forms (`$.`-less filter)
 
-Supported subset (Mongo/document backends):
-
-- wrapper form: `$[?(...)]`
-- logical operators: `&&`, `||`
-- grouping with parentheses
-- comparisons: `==`, `!=`, `>`, `>=`, `<`, `<=`
-- literals: string, number, boolean, `null`
-- field paths: `@.field`, `@.nested.field`
-- array correlation: `@.arrayField[?(...)]` with strict same-element semantics via `$elemMatch`
-- merge with attribute filtering in the same request:
-  - default: `AND`
-  - override: `filter.combineWithAttributes=OR`
-
-Not supported yet:
-
-- full JsonPath language/functions (only restricted subset above)
-- nested array filters inside array filters in a single expression
-- broader wildcard/function/script-style JsonPath constructs
-
-Maturity note:
-
-- the supported subset is intended for production use
-- behavior is intentionally constrained for predictable parsing and backend translation
-
-#### JPA `filter=` support scope (current state)
-
-Key capability:
-
-- JPA clients can express complex grouped where-conditions using `filter=` with parentheses, `&&`, and `||` for non-array-correlation scenarios.
-
-Supported subset (JPA backends):
-
-- wrapper form: `$[?(...)]`
-- logical operators: `&&`, `||`
-- grouping with parentheses
-- comparisons: `==`, `!=`, `>`, `>=`, `<`, `<=`
-- literals: string, number, boolean, `null`
-- field paths: `@.field`, `@.nested.field` (subject to allowlist and nested-path configuration)
-- merge with attribute filtering in the same request:
-  - default: `AND`
-  - override: `filter.combineWithAttributes=OR`
-
-Not supported in JPA:
-
-- array-correlation patterns such as `@.arrayField[?(...)]`
-- these are intentionally rejected with `400 Bad Request`
-
-#### When `filter=` throws `400 Bad Request`
-
-The library throws a filtering exception (mapped to HTTP `400`) for unsupported or invalid `filter=` usage, including:
-
-- expression is not a filter wrapper (must be `$[?(...)]`)
-- expression has invalid JsonPath syntax
-- unsupported operators/tokens are used
-- unsupported literal forms are used
-- null is used with unsupported operators (for example `> null`)
-- more than one `filter` parameter is sent
-- `filter.combineWithAttributes` has invalid value (must be `AND` or `OR`) or appears multiple times
-- unknown/disallowed field paths when unknown-field behavior is `REJECT`
-- nested path usage when nested paths are disabled
-- array-correlation usage on JPA backends
-- `filter=` exceeds configured max length
-- JsonPath filter feature is disabled by configuration
-
-#### JsonPath filter syntax reference (Jayway 3.x)
-
-[Jayway JsonPath 3.x](https://github.com/json-path/JsonPath) is used **solely** as a syntax validator: the library calls `JsonPath.compile()` to verify that the incoming `filter=` expression is syntactically valid JsonPath. Jayway is **never** used to evaluate the expression against a result array at runtime. Once the expression passes Jayway's syntax check, the library's own parser takes over, translates the expression into a QueryDSL `Predicate` (or a MongoDB `$elemMatch` for array-correlation patterns), and the database executes the query natively. Only the **restricted subset** listed below is accepted by the library's parser — anything not listed here will return `400 Bad Request`.
-
-All examples below assume a JSON array of objects such as:
-
-```json
-[
-  {
-    "name": "Fiber 100Mbps",
-    "status": "active",
-    "price": 49,
-    "category": "broadband",
-    "externalReference": [
-      {"name": "MARKET_ACCOUNT_ID", "id": "OPCO-ID-012"},
-      {"name": "ORDER_REFERENCE", "id": "OPCO-ORDER-012"}
-    ]
-  }
-]
-```
-
-##### Simple field equality
-
-```
-$[?(@.status == 'active')]
-$[?(@.status != 'active')]
-```
-
-##### Comparison operators
-
-```
-$[?(@.price > 10)]
-$[?(@.price >= 10)]
-$[?(@.price < 100)]
-$[?(@.price <= 100)]
-```
-
-##### Logical AND / OR
-
-```
-$[?(@.status == 'active' && @.name == 'Fiber 100Mbps')]
-$[?(@.status == 'active' || @.status == 'suspended')]
-$[?((@.status == 'active' || @.status == 'suspended') && @.category == 'broadband')]
-```
-
-Parentheses control grouping. The library supports arbitrary nesting depth.
-
-##### Nested field access
-
-```
-$[?(@.externalReference.name == 'ORDER_REFERENCE')]
-```
-
-Subject to allowlist and nested-path configuration (`allowNestedPathsJpa`, `allowNestedPathsDocdb`).
-
-##### Combining attribute filtering with `filter=`
-
-Attribute query parameters and `filter=` are merged into a single predicate:
+Per TMF630, the leading `$` / `$.` may be omitted from `filter=` for simplicity. All three of the following match identically:
 
 ```http
-GET /api/orders?category.eq=broadband&filter=$[?(@.status == 'active' && @.price > 10)]
+GET /api/orders?filter=$[?(@.status == 'Pending')]
+GET /api/orders?filter=[?(@.status == 'Pending')]
+GET /api/orders?filter=$.[?(@.status == 'Pending')]
 ```
 
-Default merge is `AND`. Override per request:
+The bare-wrapper form drops the `$` entirely. The dotted-prefix form leaves it but writes the predicate without the bracket-around-`$` style — both are accepted.
+
+Sub-array correlation also supports the shorthand:
 
 ```http
-GET /api/orders?category.eq=broadband&filter=$[?(@.status == 'suspended')]&filter.combineWithAttributes=OR
+GET /api/orders?filter=statusChange[?(@.status == 'Pending')]
+GET /api/orders?filter=$.statusChange[?(@.status == 'Pending')]
 ```
 
-##### Correlated multi-field matching in nested arrays (Mongo only)
+Both rewrite internally to the canonical correlated form `$[?(@.statusChange[?(@.status == 'Pending')])]` and produce the same Mongo `$elemMatch` query.
 
-When you need to ensure that **the same** nested array element satisfies multiple conditions (e.g. `name == 'ORDER_REFERENCE'` **and** `id == 'OPCO-ORDER-012'` on the same `externalReference` entry), use a nested filter:
+#### Example F: JsonPath wildcard `[*]` as transparent projection
 
+Canonical JsonPath uses `[*]` to project across array elements. Mongo's BSON path-equality auto-projects implicitly, so the toolkit accepts both forms equivalently:
+
+```http
+GET /api/orders?filter=$[?(@.externalReference[*].name == 'ORDER_REFERENCE')]
+GET /api/orders?filter=$[?(@.externalReference.name == 'ORDER_REFERENCE')]
 ```
-$[?(@.externalReference[?(@.name == 'ORDER_REFERENCE' && @.id == 'OPCO-ORDER-012')])]
-```
 
-This library translates the nested `[?(...)]` pattern to a MongoDB `$elemMatch` query, ensuring strict **same-element** semantics. If `name` and `id` come from different array elements, the document does **not** match.
+Both match orders whose `externalReference` array has at least one element with `name == 'ORDER_REFERENCE'`. The `[*]` is stripped at parse time; quoted string literals containing `[*]` are preserved verbatim.
 
-> **JPA note:** Array-correlation patterns are intentionally rejected with `400 Bad Request` on JPA backends, since relational databases do not have a direct `$elemMatch` equivalent.
-
-> **Warning — uncorrelated matching:**
-> Using separate attribute parameters like `externalReference.name.eq=ORDER_REFERENCE&externalReference.id.eq=OPCO-ORDER-012` does **not** guarantee that both values come from the same array element. An object with `name=ORDER_REFERENCE` on one reference and `id=OPCO-ORDER-012` on a **different** reference would be a false positive. Always use the nested `[?(...)]` form for correlated conditions on Mongo backends.
-
-##### What this library does NOT support
-
-The following Jayway JsonPath features are **not** part of this library's restricted `filter=` subset and will return `400 Bad Request`:
-
-- Regex match (`=~`)
-- `IN` / `NIN` (use attribute-level `.in` / `.nin` operators instead)
-- `SIZE`, `EMPTY`, `CONTAINS` (Jayway-specific operators)
-- Exists check (`$[?(@.field)]`)
-- Wildcard / descent operators (`[*]`, `..`)
-- Functions (`length()`, `count()`, etc.)
-- Script expressions
-
-For set operations, null checks, pattern matching, and other advanced filtering, use the attribute-level query parameters (`.eq`, `.ne`, `.in`, `.nin`, `.like`, `.likei`, `.isnull`, `.isnotnull`, `.regex`, etc.) which provide full coverage of these use cases.
+For details on what `filter=` accepts, supported syntax, and exact error semantics, see the **Reference** section below ([JsonPath syntax](#filter-jsonpath-syntax-jayway-3x), [Mongo support scope](#mongo-filter-support-scope), [JPA support scope](#jpa-filter-support-scope), [400 conditions](#when-filter-throws-400-bad-request)).
 
 ### 9) Field selection utility (optional helper)
 
@@ -1087,7 +999,7 @@ Package:
 
 - `org.opentmf.query.commons.fieldselection.FieldSelectionUtil`
 
-For list endpoints backed by `Page<T>`, the preferred approach is `@Tmf630Response` (see section 2) — field selection is handled automatically without any extra code. For single-object endpoints or cases where manual control is needed, `FieldSelectionUtil` can be called directly:
+For list endpoints backed by `Page<T>`, the preferred approach is `@Tmf630Response` (see [section 2](#2-controller-usage-spring-boot)) — field selection is handled automatically without any extra code. For single-object endpoints or cases where manual control is needed, `FieldSelectionUtil` can be called directly:
 
 ```java
 Map<String, Object> result = FieldSelectionUtil.fieldsToMap(person, "id,name,surname");
@@ -1273,11 +1185,838 @@ Content-Type: application/json
 
 `206` here means the request is successful and returns only part of the full result set.
 
+### 11) Correlated sort (MongoDB)
+
+> **Module required**: `tmf630-toolkit-mongo-aggregation`. JPA-only
+> services skip this section; the plain `Sort` resolver continues to
+> 400 on correlated terms. See [`docs/correlated-sort.md`](./docs/correlated-sort.md)
+> for the full design note (URL grammar, semantics, capability matrices
+> for both grammars, and module layout).
+
+TMF Open API resources frequently encode attributes as arrays of
+`{name, value}` objects (Characteristics, ExternalReferences,
+RelatedParty, etc.). Sorting by, say, the `value` of the
+`characteristic` whose `name` equals `'price'` is **not expressible in
+a plain `find()` query** — sorting on `characteristic.value` picks the
+min/max value across the whole array, not the value of a specific
+element. The `mongo-aggregation` module addresses this with an
+`Aggregation`-based execution path triggered by two new sort
+grammars.
+
+#### Two grammars, one IR, one executor
+
+Both grammars produce the same internal AST and run through the same
+aggregation pipeline emitter. Pick whichever reads better at the call
+site.
+
+| Grammar | Example sort term | Notes |
+| --- | --- | --- |
+| **JsonPath** | `$.characteristic[?(@.name == 'price')].value` | Rich predicates (`&&`, `\|\|`, `==`, `!=`, `>`, `<`, `>=`, `<=`); the same syntax used by `filter=`. |
+| **Simple-rich** | `characteristic[name=price].value` | Equality only, terse, default-key inference (`arr[X]` → `arr[id=X]`); supports `min` / `max` / `str` / `num` / `date` functions. |
+
+Plain dotted sort terms (`-createdOn,+id`) keep the existing cheap
+`find()` path — there is no regression for non-correlated requests.
+The branch happens at the controller and is one `if`.
+
+#### Consumer pattern
+
+**Recommended shape** — controllers declare `TmfRichPageable` as the
+single sort+paging parameter. `TmfRichPageable` extends Spring Data
+`Pageable` and additionally exposes `tmfSort()` carrying both plain
+and correlated terms. Add `@Tmf630Response` for full TMF630 response
+handling (`Content-Range`, `X-Total-Count`, `X-Result-Count`,
+`200` / `206` / `416` status, `fields=` selection — see
+[section 2](#2-controller-usage-spring-boot)):
+
+```java
+@RestController
+class ProductController {
+
+  private final ProductRepository repository;
+  private final Tmf630MongoCorrelatedSortExecutor correlatedExecutor;
+
+  ProductController(
+      ProductRepository repository,
+      Tmf630MongoCorrelatedSortExecutor correlatedExecutor) {
+    this.repository = repository;
+    this.correlatedExecutor = correlatedExecutor;
+  }
+
+  @GetMapping("/products")
+  @Tmf630Response
+  Page<Product> list(
+      @QuerydslPredicate(root = Product.class) Predicate filter,
+      TmfRichPageable pageable) {
+
+    if (pageable.tmfSort().requiresAggregation()) {
+      return correlatedExecutor.findAll(Product.class, filter, pageable.tmfSort(), pageable);
+    }
+    return repository.findAll(filter, pageable);
+  }
+}
+```
+
+Note: `pageable.getSort()` returns the **plain subset** of the sort
+(or `Sort.unsorted()` when every term is correlated). When the
+correlated-sort branch fires, the executor reads sort via
+`pageable.tmfSort()`. The find()-path call simply passes `pageable`
+to Spring Data — its `getSort()` handles plain terms correctly and
+returns unsorted when correlated terms are present (the
+correlated-sort branch handles those itself, so the find()-path
+case never sees correlated terms).
+
+**Three-parameter shape** — also supported, identical end-state
+semantics. Useful if you have an existing controller using
+Spring Data `Pageable` and want to add correlated-sort awareness
+incrementally without changing the parameter type:
+
+```java
+@GetMapping("/products")
+@Tmf630Response
+Page<Product> list(
+    @QuerydslPredicate(root = Product.class) Predicate filter,
+    TmfSort sort,
+    Pageable pageable) {
+
+  if (sort.requiresAggregation()) {
+    return correlatedExecutor.findAll(Product.class, filter, sort, pageable);
+  }
+  return repository.findAll(filter, pageable.withSort(sort.toPlainSort()));
+}
+```
+
+`@Tmf630Response` works identically across both branches — the advice
+operates on the returned `Page<T>` shape, not on how the page was
+built. The correlated-sort executor returns a standard
+`PageImpl<T>`, so `Content-Range` / `X-Total-Count` / `X-Result-Count`
+headers, `200` / `206` / `416` status differentiation, and `fields=`
+selection all apply to correlated-sort responses with no extra
+wiring. `@Tmf630Response(depth = N)` also works as documented in
+section 2 — `depth` controls how aggressively `fields=` selection
+expands nested complex fields, and applies to whatever entity the
+executor returns.
+
+`Tmf630MongoCorrelatedSortExecutor` is auto-wired from the new module.
+Plain-only controllers using `Sort` as the parameter type are
+unchanged — they continue to 400 on correlated terms exactly as
+before.
+
+#### Sample resource
+
+The examples below assume a typical TMF Product Offering resource:
+
+```json
+[
+  { "id": "1",
+    "characteristic": [
+      { "name": "price", "value": 20.5 },
+      { "name": "color", "value": "blue" },
+      { "name": "size",  "value": "large" }
+    ]
+  },
+  { "id": "2",
+    "characteristic": [
+      { "name": "price", "value": 18 },
+      { "name": "color", "value": "blue" },
+      { "name": "size",  "value": "small" }
+    ]
+  },
+  { "id": "3",
+    "characteristic": [
+      { "name": "stock", "value": "none" },
+      { "name": "color", "value": "blue" },
+      { "name": "size",  "value": "small" }
+    ]
+  }
+]
+```
+
+#### Example A: sort by the value of a specific characteristic — JsonPath
+
+Sort ascending by the `value` of the `price` characteristic:
+
+```http
+GET /api/products?sort=$.characteristic[?(@.name == 'price')].value
+```
+
+For the dataset above the result order is:
+
+```
+3 (no price → null sorts first asc), 2 (price 18), 1 (price 20.5)
+```
+
+To exclude documents that don't have a `price` characteristic, pair
+the sort with an explicit filter:
+
+```http
+GET /api/products
+  ?filter=$[?(@.characteristic[?(@.name == 'price')])]
+  &sort=$.characteristic[?(@.name == 'price')].value
+```
+
+Result: `2, 1`.
+
+#### Example B: same sort, simple-rich form
+
+```http
+GET /api/products?sort=characteristic[name=price].value
+```
+
+Identical end state to Example A. Both lower to the same
+`Aggregation` pipeline.
+
+#### Example C: default-key shorthand
+
+When `name` is the bracket key (or whatever you've configured via
+`opentmf.tmf630.mongo-aggregation.simple-rich.default-key`), you can
+drop the `name=` prefix:
+
+```yaml
+opentmf:
+  tmf630:
+    mongo-aggregation:
+      simple-rich:
+        default-key: name
+```
+
+```http
+GET /api/products?sort=characteristic[price].value
+```
+
+Same result as Example B.
+
+#### Example D: descending with paging
+
+```http
+GET /api/products?sort=-characteristic[name=price].value&offset=0&limit=10
+```
+
+Returns documents ordered by `price` descending. Documents without a
+`price` characteristic sort **last** in descending (mirrors
+ascending-puts-null-first).
+
+#### Example E: tie-breaking with a plain term
+
+When multiple documents resolve to the same correlated key, MongoDB
+does not guarantee a stable order between them. Append a stable plain
+term to make it deterministic:
+
+```http
+GET /api/products?sort=-characteristic[name=price].value,+id
+```
+
+#### Example E.1: multi-term sort with multiple correlated keys
+
+A single sort string may carry **N correlated terms** plus optional
+plain terms. Each term is comma-separated, takes the usual `+` / `-`
+direction prefix, and is honored in declaration order. The executor
+emits one synthetic key per correlated term (`_sortKey0`, `_sortKey1`,
+…) inside `$addFields` and the final `$sort` stage orders by all of
+them in the order the user wrote.
+
+Two JsonPath terms — primary descending by `price` value, secondary
+ascending by `stock` value:
+
+```http
+GET /api/products?sort=-$.characteristic[?(@.name == 'price')].value,+$.characteristic[?(@.name == 'stock')].value
+```
+
+The same two-correlated-key pattern in simple-rich:
+
+```http
+GET /api/products?sort=-characteristic[name=price].value,+characteristic[name=stock].value
+```
+
+Grammars can mix in a single sort — JsonPath + simple-rich + plain
+tiebreaker, in any order:
+
+```http
+GET /api/products?sort=-$.characteristic[?(@.name == 'price')].value,+characteristic[name=stock].value,+id
+```
+
+The `+id` tail keeps the result deterministic when the two correlated
+keys also tie. Plain terms in the mix don't force a different
+execution shape — the presence of any correlated term is what routes
+the request through the aggregation pipeline; plain terms then ride
+along inside the same `$sort` stage.
+
+#### Example F: nested correlation (two levels deep)
+
+For TMF `ServiceOrder`-shaped resources where the array hop chains
+through another array, both grammars allow multi-level chaining.
+
+JsonPath:
+
+```http
+GET /api/serviceOrder
+  ?sort=$.serviceOrderItem[?(@.id == 'A100')]
+         .service.serviceCharacteristic[?(@.name == 'kafkaEventId')]
+         .value
+```
+
+Simple-rich:
+
+```http
+GET /api/serviceOrder
+  ?sort=serviceOrderItem[id=A100].service.serviceCharacteristic[name=kafkaEventId].value
+```
+
+The translator emits one `$let` per array level, defensively wrapping
+each `input` in `$ifNull: [..., []]` so a missing intermediate array
+resolves cleanly to `null` at the leaf instead of erroring at runtime.
+
+#### Example F.1: trailing dotted path crossing an object intermediate (simple-rich only)
+
+When the trailing path (after the last `[...]`) crosses an object
+intermediate before reaching a nested array, simple-rich treats the
+whole trailing portion as a Mongo path expression rather than a chain
+of naked hops. This works because Mongo auto-traverses objects and
+auto-projects fields across arrays.
+
+```http
+GET /api/serviceOrder?sort=serviceOrderItem[A100].service.serviceCharacteristic.value
+```
+
+Lowering: one explicit hop on `serviceOrderItem` with predicate
+`id == 'A100'` (default-key shorthand), and the trailing
+`service.serviceCharacteristic.value` becomes the leaf path. The
+translator emits:
+
+```js
+$let: {
+  vars: {
+    m0: { $first: { $filter: {
+      input: { $ifNull: [ "$serviceOrderItem", [] ] },
+      as: "c",
+      cond: { $eq: [ "$$c.id", "A100" ] }
+    }}}
+  },
+  in: "$$m0.service.serviceCharacteristic.value"
+}
+```
+
+Mongo evaluates `$$m0.service.serviceCharacteristic.value` by
+traversing through the `service` sub-document and projecting `.value`
+across `serviceCharacteristic`'s elements. For single-element arrays
+(the common TMF case where each `prodSpecCharValueUse` has one
+`productSpecCharacteristicValue`), the result is effectively that
+element's `value`. For multi-element arrays, Mongo's `$sort` uses the
+**min** element ascending and the **max** element descending — write
+`.min(value)` / `.max(value)` explicitly when you want unambiguous
+multi-element semantics.
+
+JsonPath does not accept this exact form: it requires a `[?(...)]`
+predicate at every array hop and rejects naked array traversal in the
+trailing path. Either drop to simple-rich for the trailing portion, or
+add a second predicate (Example F).
+
+#### Example G: aggregator functions (simple-rich only)
+
+For arrays where multiple elements match the bracket predicate (or
+where you don't want predicate-based selection at all), simple-rich
+adds `min` and `max` aggregator functions:
+
+```http
+GET /api/products?sort=-characteristic[name=score].max(value)
+```
+
+For each document, take the **maximum** `value` across all
+characteristics whose `name` is `score`, and order documents by that.
+
+```http
+GET /api/products?sort=+characteristic[name=score].min(value)
+```
+
+Same shape, ascending by minimum.
+
+#### Example H: type coercion (simple-rich only)
+
+When the leaf field is `Object`-typed across documents (a number in
+some, a string in others), MongoDB's BSON sort order groups by **type
+first** then value — strings cluster after numbers regardless of
+intuitive ordering. Coerce to a uniform type:
+
+```http
+GET /api/products?sort=characteristic[name=value].str(value)
+```
+
+All values are coerced to string before sorting. Failures degrade to
+`null` (sort order applies to the null per the asc-first /
+desc-last rule). Available coercions: `str` (string), `num`
+(double), `date` (BSON Date — accepts ISO-8601, numeric ms-since-epoch,
+ObjectId).
+
+#### Example I: composing aggregator and coercion
+
+Both orderings parse and run, but produce different results on
+mixed-type input:
+
+```http
+# Recommended: coerce each element first, then aggregate
+GET /api/products?sort=characteristic[name=value].max(str(value))
+
+# Possible but rarely intended: BSON-aggregate first, then coerce result
+GET /api/products?sort=characteristic[name=value].str(max(value))
+```
+
+For mixed-type fields, prefer the inner-coercion form — `max(str(...))`.
+The outer form's BSON ordering ranks strings above numbers regardless
+of intuitive ordering and is rarely what users mean.
+
+#### Example J: TMF630 shorthand and `[*]` wildcard for sort
+
+Per TMF630, `$.` may be omitted from a JsonPath sort term. Canonical
+JsonPath users can also include `[*]` as the explicit projection sigil.
+All four of the following parse to the same `SortPath` and produce the
+same Mongo aggregation pipeline:
+
+```http
+GET /api/products?sort=$.characteristic[?(@.name == 'price')].value
+GET /api/products?sort=characteristic[?(@.name == 'price')].value
+GET /api/products?sort=$.characteristic[?(@.name == 'price')][*].value
+GET /api/products?sort=characteristic[?(@.name == 'price')][*].value
+```
+
+The classifier identifies any sort term containing `[?(...)]` or `[*]`
+as JsonPath even when `$.` is absent, and the parser strips `[*]`
+outside quoted strings before lowering to the IR. This keeps URLs
+interoperable with external JsonPath tooling (jsonpath.com, Jayway
+evaluation) without the toolkit having to choose between
+strict-prefix-required and tolerant.
+
+#### Capability cheat-sheet — what each grammar accepts
+
+| Construct | Plain | Simple-rich | JsonPath |
+| --- | --- | --- | --- |
+| Equality match | (n/a — single field) | yes | yes |
+| Comparison operators (`>`, `<`, `>=`, `<=`, `!=`) | n/a | drop to JsonPath | yes |
+| Logical `&&` / `\|\|` in predicate | n/a | drop to JsonPath | yes |
+| Multi-level chained correlation | n/a | yes | yes |
+| Predicate on a sub-array of the matched element | n/a | drop to JsonPath | yes |
+| Aggregator functions (`min`, `max`) | n/a | yes | not supported |
+| Coercion wrappers (`str`, `num`, `date`) | n/a | yes | not supported |
+| Default-key bracket shorthand `arr[X]` | n/a | yes | n/a |
+| Trailing dotted path crossing object/array intermediates (e.g. `arr[X].deep.path.value`) | n/a | yes — Mongo path auto-traversal (min/max element of multi-element arrays per `$sort` direction) | rejected (400 — JsonPath requires a predicate at every array hop) |
+| JsonPath wildcard `[*]` (transparent projection) | n/a | n/a | accepted — stripped at parse time; equivalent to the same expression without `[*]` |
+| Recursive descent (`..`), array slices (`[0:5]`), JsonPath functions (`length()`) | rejected | n/a | rejected (HTTP 400) |
+| Trailing predicate without leaf field | n/a | n/a | rejected (HTTP 400) |
+| Mixed with plain terms in one comma-separated sort | yes | yes | yes |
+
+#### Runtime requirements
+
+- **MongoDB 4.0 or newer.** The aggregation path uses
+  `$convert ... onError`, introduced in 4.0. The cheap `find()` path
+  (plain sorts only) has no version requirement beyond what the base
+  toolkit already supports.
+- The new module's auto-configuration registers
+  `Tmf630MongoCorrelatedSortExecutor` only when a `MongoTemplate`
+  bean is on the classpath; without one, the bean is not created and
+  no behavior changes for non-Mongo services that happen to pull the
+  dependency transitively.
+
+#### Spring Data Mongo entity-mapping gotchas (worth knowing)
+
+If you hand-write or generate entity classes for a Mongo collection
+(typical for a read-only "proxy" service that filters/sorts data
+written by a different application), two Spring Data idiosyncrasies
+bite specifically when you start using nested-array predicates in
+correlated sort or filter.
+
+##### Gotcha 1: name-based id-property auto-promotion on nested classes
+
+Spring Data Mongo's id-property detection runs on **every persistent
+entity, root or nested**:
+
+1. If a property is annotated `@Id` → it's the id, mapped to `_id`.
+2. Otherwise, if a property is literally named `id` → **promote it to
+   id**, also mapped to `_id`.
+
+Rule 2 historically caused JsonPath / simple-rich predicates referencing
+`@.id == 'X'` / `[id=X]` to silently fail to match nested objects, since
+the BSON field had been renamed to `_id`. **As of 2.0.1, this is
+handled transparently by the toolkit** — `MongoFieldResolver` consults
+your `MongoMappingContext` at translation time and rewrites the user-
+facing path to whatever BSON name your entity declares. You can write
+predicates against `id` regardless of whether the nested field has
+`@Field("id")` or relies on the default auto-promotion.
+
+The mitigations below remain useful as **awareness items** — they
+explain *why* the resolver does what it does — but for typical Spring
+Data Mongo entities, no consumer-side configuration is required.
+
+##### Diagnose first — what does your writer actually store?
+
+Before picking a mitigation, **inspect a real document.** The fix
+depends on which stack wrote the data:
+
+```javascript
+// In mongo shell, against the actual collection:
+db.productOffering.findOne({}, { _id: 0 })
+```
+
+Look at one nested object. Is the inner key called `id` or `_id`?
+
+| Writer stack | Nested field stored as | Reader's job |
+| --- | --- | --- |
+| Spring Data Mongo (Java/Kotlin) | `_id` | Either alias `_id` ↔ `id` on read, or write JsonPath/simple-rich predicates against `_id` directly |
+| Anything else (Node, Python, Go, raw shell, vendor binary) | `id` | Tell Spring Data Mongo NOT to auto-remap, so `@.id` stays `id` end to end |
+
+You will not pick the right mitigation by guessing. Run the diagnostic.
+
+##### Mitigation A: surgical `@Field("id")` (writer doesn't remap)
+
+When the BSON keeps nested `id` as `id`, annotate every nested class's
+`id` field on the reader so Spring Data does not auto-promote it to
+`_id`:
+
+```java
+public class ProductSpecificationRef {
+  @Field("id") String id;     // reference, not an entity identity
+  String version;
+  String href;
+  String name;
+}
+```
+
+Pros: locality — the exception is visible at the field. No global
+behavior change.
+Cons: easy to forget when adding a new entity class. Audit on every
+new model.
+
+##### Mitigation B: global "only `@Id` counts" override (writer doesn't remap)
+
+If you'd rather rule out name-based auto-promotion entirely, replace
+the default `MongoMappingContext` with one that only honors `@Id`:
+
+```java
+@Configuration
+class MongoMappingConfig {
+
+  @Bean
+  MongoMappingContext mongoMappingContext() {
+    return new MongoMappingContext() {
+      @Override
+      protected <T> BasicMongoPersistentEntity<T> createPersistentEntity(
+          TypeInformation<T> typeInformation) {
+        return new BasicMongoPersistentEntity<T>(typeInformation) {
+          @Override
+          protected MongoPersistentProperty
+              returnPropertyIfBetterIdPropertyCandidateOrNull(
+                  MongoPersistentProperty property) {
+            return property.isAnnotationPresent(Id.class) ? property : null;
+          }
+        };
+      }
+    };
+  }
+}
+```
+
+Pros: one bean, fixes everything. New entities need nothing.
+Cons: now you must be **explicit about the top-level `_id`** — every
+root entity's identity property has to be `@Id`-annotated (or
+`@Field("_id")`). For composite-key resources like TMF620
+ProductOffering (where `id + version` is the composite identity),
+this is actually a feature: a bare `id` field stays as `id` and the
+composite is whatever you choose to make `@Id`-annotated.
+
+##### Mitigation C: alias `_id` → `id` on read (writer does remap)
+
+When the writer is also Spring Data Mongo and the BSON has `_id` on
+nested objects, neither `@Field("id")` nor a mapping-context override
+will help — the field truly isn't `id` in storage. The cleanest fix
+is a custom read-side converter that aliases nested `_id` back to
+`id` for non-root entities. This keeps every JsonPath / simple-rich
+predicate referencing `@.id` portable across writer stacks. Sketch:
+
+```java
+@ReadingConverter
+class NestedIdAliasingConverter
+    implements GenericConverter {
+
+  @Override
+  public Set<ConvertiblePair> getConvertibleTypes() {
+    return Set.of(new ConvertiblePair(Document.class, Document.class));
+  }
+
+  @Override
+  public Object convert(@Nullable Object source, TypeDescriptor srcType, TypeDescriptor tgtType) {
+    Document doc = (Document) source;
+    if (doc != null && doc.containsKey("_id") && !doc.containsKey("id")) {
+      doc.put("id", doc.remove("_id"));
+    }
+    return doc;
+  }
+}
+```
+
+Wire it into `MongoCustomConversions` and the
+`MappingMongoConverter`. The exact registration depends on your
+read-path needs (you may want to scope this to nested-only, leaving
+root `_id` intact). Treat the snippet as a starting point and verify
+with an integration test against real data.
+
+##### Mitigation D: bake `@Field("id")` into your code generator
+
+If you generate models with `openapi-generator-maven-plugin`, the
+post-generation step should add `@Field("id")` to every property
+named `id` automatically. A small Mustache template override in
+`src/main/resources/openapi/templates/pojo.mustache` is enough — flag
+the generator with a `vendorExtensions.x-is-id-field` rule and emit
+the annotation conditionally. One-time template work, every nested
+id annotated forever.
+
+##### Gotcha 2: the `_class` discriminator field
+
+Spring Data writes the FQN of the Java class to `_class` by default.
+For a read-only proxy that reads documents written by a different
+service, you can decouple from the writer's package layout by
+overriding the `MappingMongoConverter`'s type mapper:
+
+```java
+@Bean
+MappingMongoConverter mappingMongoConverter(
+    MongoDatabaseFactory factory,
+    MongoMappingContext ctx,
+    MongoCustomConversions conv) {
+  MappingMongoConverter c =
+      new MappingMongoConverter(new DefaultDbRefResolver(factory), ctx);
+  c.setCustomConversions(conv);
+  c.setTypeMapper(new DefaultMongoTypeMapper(null));   // null typeKey → ignore _class
+  return c;
+}
+```
+
+This sidesteps polymorphic-type FQN matching entirely; Spring Data
+falls back to the call-site class for every read. Safe for read-only
+proxies that don't have polymorphic field types keyed on `_class`.
+
+## Reference
+
+### Backend-specific nested-path guidance (JPA vs Mongo)
+
+Recommended operational policy:
+
+- For JPA-backed services, keep `allow-nested-paths-jpa` disabled.
+- For Mongo/document-backed services, enable `allow-nested-paths-docdb`.
+
+Minimal examples:
+
+```yaml
+# JPA-oriented service
+opentmf:
+  tmf630:
+    attribute-filtering:
+      allow-nested-paths-jpa: false
+```
+
+```yaml
+# Mongo-oriented service
+opentmf:
+  tmf630:
+    attribute-filtering:
+      allow-nested-paths-docdb: true
+```
+
+How this works in practice: nested-path policy is backend-aware through separate properties (`allow-nested-paths-jpa` and `allow-nested-paths-docdb`). In mixed JPA+Mongo applications, use explicit allowlists for tighter control.
+
+### `filter=` JsonPath syntax (Jayway 3.x)
+
+[Jayway JsonPath 3.x](https://github.com/json-path/JsonPath) is used **solely** as a syntax validator: the library calls `JsonPath.compile()` to verify that the incoming `filter=` expression is syntactically valid JsonPath. Jayway is **never** used to evaluate the expression against a result array at runtime. Once the expression passes Jayway's syntax check, the library's own parser takes over, translates the expression into a QueryDSL `Predicate` (or a MongoDB `$elemMatch` for array-correlation patterns), and the database executes the query natively. Only the **restricted subset** listed below is accepted by the library's parser — anything not listed here will return `400 Bad Request`.
+
+All examples below assume a JSON array of objects such as:
+
+```json
+[
+  {
+    "name": "Fiber 100Mbps",
+    "status": "active",
+    "price": 49,
+    "category": "broadband",
+    "externalReference": [
+      {"name": "MARKET_ACCOUNT_ID", "id": "OPCO-ID-012"},
+      {"name": "ORDER_REFERENCE", "id": "OPCO-ORDER-012"}
+    ]
+  }
+]
+```
+
+#### Simple field equality
+
+```
+$[?(@.status == 'active')]
+$[?(@.status != 'active')]
+```
+
+#### Comparison operators
+
+```
+$[?(@.price > 10)]
+$[?(@.price >= 10)]
+$[?(@.price < 100)]
+$[?(@.price <= 100)]
+```
+
+#### Logical AND / OR
+
+```
+$[?(@.status == 'active' && @.name == 'Fiber 100Mbps')]
+$[?(@.status == 'active' || @.status == 'suspended')]
+$[?((@.status == 'active' || @.status == 'suspended') && @.category == 'broadband')]
+```
+
+Parentheses control grouping. The library supports arbitrary nesting depth.
+
+#### Nested field access
+
+```
+$[?(@.externalReference.name == 'ORDER_REFERENCE')]
+```
+
+Subject to allowlist and nested-path configuration (`allowNestedPathsJpa`, `allowNestedPathsDocdb`).
+
+#### Combining attribute filtering with `filter=`
+
+Attribute query parameters and `filter=` are merged into a single predicate:
+
+```http
+GET /api/orders?category.eq=broadband&filter=$[?(@.status == 'active' && @.price > 10)]
+```
+
+Default merge is `AND`. Override per request:
+
+```http
+GET /api/orders?category.eq=broadband&filter=$[?(@.status == 'suspended')]&filter.combineWithAttributes=OR
+```
+
+#### Correlated multi-field matching in nested arrays (Mongo only)
+
+When you need to ensure that **the same** nested array element satisfies multiple conditions (e.g. `name == 'ORDER_REFERENCE'` **and** `id == 'OPCO-ORDER-012'` on the same `externalReference` entry), use a nested filter:
+
+```
+$[?(@.externalReference[?(@.name == 'ORDER_REFERENCE' && @.id == 'OPCO-ORDER-012')])]
+```
+
+This library translates the nested `[?(...)]` pattern to a MongoDB `$elemMatch` query, ensuring strict **same-element** semantics. If `name` and `id` come from different array elements, the document does **not** match.
+
+> **JPA note:** Array-correlation patterns are intentionally rejected with `400 Bad Request` on JPA backends, since relational databases do not have a direct `$elemMatch` equivalent.
+
+> **Warning — uncorrelated matching:**
+> Using separate attribute parameters like `externalReference.name.eq=ORDER_REFERENCE&externalReference.id.eq=OPCO-ORDER-012` does **not** guarantee that both values come from the same array element. An object with `name=ORDER_REFERENCE` on one reference and `id=OPCO-ORDER-012` on a **different** reference would be a false positive. Always use the nested `[?(...)]` form for correlated conditions on Mongo backends.
+
+#### What this library does NOT support
+
+The following Jayway JsonPath features are **not** part of this library's restricted `filter=` subset and will return `400 Bad Request`:
+
+- Regex match (`=~`)
+- `IN` / `NIN` (use attribute-level `.in` / `.nin` operators instead)
+- `SIZE`, `EMPTY`, `CONTAINS` (Jayway-specific operators)
+- Exists check (`$[?(@.field)]`)
+- Recursive descent operator (`..`)
+- Functions (`length()`, `count()`, etc.)
+- Script expressions
+
+For set operations, null checks, pattern matching, and other advanced filtering, use the attribute-level query parameters (`.eq`, `.ne`, `.in`, `.nin`, `.like`, `.likei`, `.isnull`, `.isnotnull`, `.regex`, etc.) which provide full coverage of these use cases.
+
+### Mongo `filter=` support scope
+
+Supported subset (Mongo/document backends):
+
+- wrapper form: `$[?(...)]` (canonical), `[?(...)]` (bare wrapper, TMF630 shorthand), or `<arrayPath>[?(...)]` / `$.<arrayPath>[?(...)]` (sub-array correlation shorthand, rewritten to the canonical correlated form)
+- logical operators: `&&`, `||`
+- grouping with parentheses
+- comparisons: `==`, `!=`, `>`, `>=`, `<`, `<=`
+- literals: string, number, boolean, `null`
+- field paths: `@.field`, `@.nested.field`
+- array correlation: `@.arrayField[?(...)]` with strict same-element semantics via `$elemMatch`
+- JsonPath wildcard `[*]` is accepted as a transparent projection sigil (stripped at parse time; equivalent to the same expression without `[*]`)
+- merge with attribute filtering in the same request:
+  - default: `AND`
+  - override: `filter.combineWithAttributes=OR`
+
+Not supported yet:
+
+- full JsonPath language/functions (only restricted subset above)
+- nested array filters inside array filters in a single expression
+- broader wildcard/function/script-style JsonPath constructs
+
+Maturity note:
+
+- the supported subset is intended for production use
+- behavior is intentionally constrained for predictable parsing and backend translation
+
+### JPA `filter=` support scope
+
+Key capability:
+
+- JPA clients can express complex grouped where-conditions using `filter=` with parentheses, `&&`, and `||` for non-array-correlation scenarios.
+
+Supported subset (JPA backends):
+
+- wrapper form: `$[?(...)]` (canonical), `[?(...)]` (bare wrapper, TMF630 shorthand), or `<arrayPath>[?(...)]` / `$.<arrayPath>[?(...)]` (sub-array correlation shorthand, rewritten to the canonical correlated form)
+- logical operators: `&&`, `||`
+- grouping with parentheses
+- comparisons: `==`, `!=`, `>`, `>=`, `<`, `<=`
+- literals: string, number, boolean, `null`
+- field paths: `@.field`, `@.nested.field` (subject to allowlist and nested-path configuration)
+- merge with attribute filtering in the same request:
+  - default: `AND`
+  - override: `filter.combineWithAttributes=OR`
+
+Not supported in JPA:
+
+- array-correlation patterns such as `@.arrayField[?(...)]`
+- these are intentionally rejected with `400 Bad Request`
+
+### When `filter=` throws `400 Bad Request`
+
+The library throws a filtering exception (mapped to HTTP `400`) for unsupported or invalid `filter=` usage, including:
+
+- expression is not a filter wrapper (must be `$[?(...)]`)
+- expression has invalid JsonPath syntax
+- unsupported operators/tokens are used
+- unsupported literal forms are used
+- null is used with unsupported operators (for example `> null`)
+- more than one `filter` parameter is sent
+- `filter.combineWithAttributes` has invalid value (must be `AND` or `OR`) or appears multiple times
+- unknown/disallowed field paths when unknown-field behavior is `REJECT`
+- nested path usage when nested paths are disabled
+- array-correlation usage on JPA backends
+- `filter=` exceeds configured max length
+- JsonPath filter feature is disabled by configuration
+
+## POC databases used
+
+The current proof-of-concept and integration coverage has been verified with these databases:
+
+- PostgreSQL `18.1-alpine` (via Testcontainers `jdbc:tc:postgresql:18.1-alpine:///db`) for JPA/SQL predicate and SQL reflection tests
+- H2 (in-memory) for lightweight JPA-based integration scenarios
+- MongoDB `8.0.5` (via Testcontainers `mongo:8.0.5`) for document-oriented filtering, including JsonPath array-correlation behavior
+- MariaDB `11.4.4` (via Testcontainers profile `it-mariadb`) for SQL/JPA compatibility validation
+- Microsoft SQL Server `2022-CU14-ubuntu-22.04` (via Testcontainers profile `it-mssql`) for SQL/JPA compatibility validation
+- Oracle XE `21-slim-faststart` (via Testcontainers profile `it-oracle`) for dedicated SQL/JPA validation
+- IBM DB2 `11.5.0.0a` (via Testcontainers profile `it-db2`) for dedicated SQL/JPA validation
+
+Notes:
+
+- JsonPath array-correlation in `filter=` is supported for Mongo/document backends.
+- The same array-correlation pattern is intentionally rejected for JPA backends (HTTP `400`).
+- MariaDB coverage is used as a practical compatibility indicator for the MySQL family due to shared lineage and behavior.
+- Microsoft SQL Server coverage is used as a practical compatibility indicator for Sybase-family behavior due to shared historical lineage.
+
 ## Build
 
 ```bash
-mvn clean verify
+mvn clean install
 ```
+
+`install` (rather than `verify`) is recommended because the toolkit is a
+multi-module project and the modules depend on each other transitively in
+the local Maven repository. `install` writes the built `-SNAPSHOT`
+artifacts to `~/.m2/repository`, making them resolvable from downstream
+projects on the same machine. `verify` runs all tests and integration
+tests but stops before installation, so a downstream project building
+against `2.0.1-SNAPSHOT` would not find the artifacts.
 
 ## License
 

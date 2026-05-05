@@ -47,6 +47,9 @@ public class JsonPathFilterPredicateBuilder {
   private static final Pattern FILTER_WRAPPER =
       Pattern.compile("^\\s*\\$\\s*\\[\\s*\\?\\s*\\((.*)\\)\\s*]\\s*$", Pattern.DOTALL);
 
+  private static final Pattern BARE_WRAPPER =
+      Pattern.compile("^\\s*\\[\\s*\\?\\s*\\((.*)\\)\\s*]\\s*$", Pattern.DOTALL);
+
   private final FieldPathResolver pathResolver;
   private final ValueConverter valueConverter;
   private final PredicateFactory predicateFactory;
@@ -90,8 +93,9 @@ public class JsonPathFilterPredicateBuilder {
       throw new TmfFilteringException("jsonPath filter expression is too long.");
     }
 
-    validateAsJsonPath(expression);
-    String inner = unwrapFilterExpression(expression);
+    String stripped = stripWildcards(expression);
+    validateAsJsonPath(stripped);
+    String inner = unwrapFilterExpression(stripped);
 
     Parser parser = new Parser(inner);
     Node rootNode = parser.parseExpression();
@@ -110,11 +114,124 @@ public class JsonPathFilterPredicateBuilder {
   }
 
   private String unwrapFilterExpression(String expression) {
-    Matcher matcher = FILTER_WRAPPER.matcher(expression);
-    if (!matcher.matches()) {
-      throw new TmfFilteringException("jsonPath expression must be a filter expression: $[?(...)].");
+    // Standard wrapper form: $[?(...)]
+    Matcher direct = FILTER_WRAPPER.matcher(expression);
+    if (direct.matches()) {
+      return direct.group(1);
     }
-    return matcher.group(1);
+    // TMF630 bare-wrapper shorthand: [?(...)]  (the `$.` prefix is omitted)
+    Matcher bare = BARE_WRAPPER.matcher(expression);
+    if (bare.matches()) {
+      return bare.group(1);
+    }
+    // TMF630 sub-array shorthand: <arrayPath>[?(...)] or $.<arrayPath>[?(...)]
+    // Rewrites to the canonical correlated-array filter form, equivalent to
+    //   $[?(@.<arrayPath>[?(<inner>)])]
+    String rewritten = trySubArrayShorthand(expression);
+    if (rewritten != null) {
+      return rewritten;
+    }
+    throw new TmfFilteringException(
+        "jsonPath expression must be a filter expression: $[?(...)], [?(...)], or <arrayPath>[?(...)].");
+  }
+
+  /**
+   * Strips canonical JsonPath {@code [*]} segments from the input as a transparent
+   * projection sigil. Mongo's BSON path-equality auto-projects across arrays, so
+   * {@code @.arr.field == 'X'} and {@code @.arr[*].field == 'X'} match the same
+   * documents. Accepting both forms aligns with canonical JsonPath tooling
+   * (jsonpath.com / Jayway evaluation) without changing what the toolkit actually
+   * matches.
+   *
+   * <p>Quoted string literals are preserved verbatim — a literal value of
+   * {@code '[*]'} inside a predicate is not treated as a projection sigil.
+   */
+  static String stripWildcards(String input) {
+    StringBuilder out = new StringBuilder(input.length());
+    boolean inQuotes = false;
+    int i = 0;
+    while (i < input.length()) {
+      char c = input.charAt(i);
+      if (inQuotes) {
+        out.append(c);
+        if (c == '\'') {
+          inQuotes = false;
+        }
+        i++;
+        continue;
+      }
+      if (c == '\'') {
+        out.append(c);
+        inQuotes = true;
+        i++;
+        continue;
+      }
+      if (c == '[' && i + 2 < input.length()
+          && input.charAt(i + 1) == '*'
+          && input.charAt(i + 2) == ']') {
+        i += 3;
+        continue;
+      }
+      out.append(c);
+      i++;
+    }
+    return out.toString();
+  }
+
+  static String trySubArrayShorthand(String expression) {
+    String s = expression.trim();
+    if (s.startsWith("$.")) {
+      s = s.substring(2);
+    }
+    int bracketStart = s.indexOf("[?(");
+    if (bracketStart <= 0) {
+      return null;
+    }
+    String arrayPath = s.substring(0, bracketStart).trim();
+    if (!isValidDottedIdentifier(arrayPath)) {
+      return null;
+    }
+    int contentStart = bracketStart + 3;
+    int parenDepth = 1;
+    int i = contentStart;
+    while (i < s.length() && parenDepth > 0) {
+      char c = s.charAt(i);
+      if (c == '(') {
+        parenDepth++;
+      } else if (c == ')') {
+        parenDepth--;
+        if (parenDepth == 0) {
+          break;
+        }
+      }
+      i++;
+    }
+    if (parenDepth != 0) {
+      return null;
+    }
+    String inner = s.substring(contentStart, i);
+    i++;
+    if (i >= s.length() || s.charAt(i) != ']') {
+      return null;
+    }
+    i++;
+    if (!s.substring(i).trim().isEmpty()) {
+      return null;
+    }
+    return "@." + arrayPath + "[?(" + inner + ")]";
+  }
+
+  static boolean isValidDottedIdentifier(String s) {
+    if (s.isEmpty() || s.startsWith(".") || s.endsWith(".") || s.contains("..")) {
+      return false;
+    }
+    for (int j = 0; j < s.length(); j++) {
+      char c = s.charAt(j);
+      if (!Character.isLetterOrDigit(c) && c != '_' && c != '.' && c != '-') {
+        return false;
+      }
+    }
+    return true;
   }
 
   private Optional<Predicate> toPredicate(
@@ -179,10 +296,7 @@ public class JsonPathFilterPredicateBuilder {
               settings,
               nestedAllowlistPrefix,
               allowNestedPaths);
-      if (nested.isEmpty()) {
-        return Optional.empty();
-      }
-      return Optional.of(buildElemMatchPredicate(resolvedArrayPath.collectionPath(), nested.get()));
+      return nested.map(p -> buildElemMatchPredicate(resolvedArrayPath.collectionPath(), p));
     }
 
     if (!(node instanceof ComparisonNode comparison)) {
@@ -536,21 +650,14 @@ public class JsonPathFilterPredicateBuilder {
         }
         if (i + 1 < input.length()) {
           String two = input.substring(i, i + 2);
-          if (two.equals("&&")) {
-            tokens.add(new Token(TokenType.AND, "&&"));
-            i += 2;
-            continue;
-          }
-          if (two.equals("||")) {
-            tokens.add(new Token(TokenType.OR, "||"));
-            i += 2;
-            continue;
-          }
-          if (two.equals("==")
-              || two.equals("!=")
-              || two.equals(">=")
-              || two.equals("<=")) {
-            tokens.add(new Token(TokenType.OPERATOR, two));
+          Token twoCharToken = switch (two) {
+            case "&&" -> new Token(TokenType.AND, "&&");
+            case "||" -> new Token(TokenType.OR, "||");
+            case "==", "!=", ">=", "<=" -> new Token(TokenType.OPERATOR, two);
+            default -> null;
+          };
+          if (twoCharToken != null) {
+            tokens.add(twoCharToken);
             i += 2;
             continue;
           }
@@ -596,7 +703,6 @@ public class JsonPathFilterPredicateBuilder {
         }
         if (ch == '\'' || ch == '"') {
           int start = i;
-          char quote = ch;
           i++;
           boolean escaped = false;
           while (i < input.length()) {
@@ -606,14 +712,14 @@ public class JsonPathFilterPredicateBuilder {
               i++;
               continue;
             }
-            if (c == quote && !escaped) {
+            if (c == ch && !escaped) {
               i++;
               break;
             }
             escaped = false;
             i++;
           }
-          if (i > input.length() || input.charAt(i - 1) != quote) {
+          if (i > input.length() || input.charAt(i - 1) != ch) {
             throw new TmfFilteringException("Unterminated string literal in jsonPath filter.");
           }
           tokens.add(new Token(TokenType.LITERAL, input.substring(start, i)));

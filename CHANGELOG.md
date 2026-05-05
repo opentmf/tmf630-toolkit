@@ -2,6 +2,95 @@
 
 All notable changes to `tmf630-toolkit` are documented in this file.
 
+## [2.0.1] - 2026-05-05
+
+### Changed
+- **Spring Boot baseline upgraded from 4.0.4 to 4.0.6.** Picked up via the
+  Spring Boot BOM. No source-level changes required in the toolkit; the
+  upgrade flows through to consuming projects' transitive dependency
+  versions.
+
+### Added
+- **Correlated sort for MongoDB-backed services.** A new opt-in module
+  `tmf630-toolkit-mongo-aggregation` adds support for sorting by values
+  taken from a *specific element* of an embedded array — the canonical
+  TMF "characteristics" pattern. Two equivalent sort grammars are
+  accepted on the wire:
+  - **JsonPath**, e.g. `?sort=$.characteristic[?(@.name == 'price')].value`.
+    Rich predicates with `&&`, `||`, comparison operators, multi-level
+    nesting. Compatible with canonical JsonPath syntax — `[*]` is
+    accepted as a transparent projection sigil so URLs remain
+    interoperable with external JsonPath tooling.
+  - **Simple-rich**, e.g. `?sort=characteristic[name=price].value`.
+    Equality only, bare-value default-key shorthand `arr[X]`,
+    aggregator functions `.min(field)` / `.max(field)`, and
+    type-coercion wrappers `.str(...)` / `.num(...)` / `.date(...)` for
+    sorting across mixed-type fields.
+  Plain comma-separated sort terms (`?sort=-createdOn,+id`) keep their
+  existing `find()` path with no behavior change. Correlated terms route
+  to a Mongo `Aggregation` pipeline.
+- **`TmfRichPageable` and `TmfSort` controller parameter types** in
+  `tmf630-toolkit-paging-sorting-core` for opt-in controllers that want
+  to accept correlated sort terms. `TmfRichPageable` extends Spring Data
+  `Pageable` and additionally exposes `tmfSort()` carrying both plain
+  and correlated terms — recommended for two-parameter
+  `(Predicate, TmfRichPageable)` controllers that match the standard
+  Spring Data shape. `TmfSort` alone is also exposed for
+  three-parameter `(Predicate, TmfSort, Pageable)` controllers. The
+  existing Spring Data `Sort` and plain `Pageable` parameter types are
+  unchanged — plain-only controllers keep working as-is and continue
+  to 400 on correlated terms. A one-line
+  `if (pageable.tmfSort().requiresAggregation())` (or
+  `sort.requiresAggregation()` in the three-param form) branch in the
+  controller selects between the existing `find()` path and the new
+  aggregation executor. Works seamlessly with `@Tmf630Response` for
+  full TMF630 response handling (`Content-Range`, `X-Total-Count`,
+  `X-Result-Count`, `200`/`206`/`416` status, `fields=` selection).
+- **Auto-configuration** for `Tmf630MongoCorrelatedSortExecutor` —
+  registered as a Spring `@Bean` automatically when `MongoTemplate` is
+  on the classpath. New configuration property
+  `opentmf.tmf630.mongo-aggregation.simple-rich.default-key` (default
+  `id`) controls the key inferred by simple-rich's bare-value bracket
+  shorthand for projects whose convention uses `name`, `code`, etc.
+- **Field-name resolution that respects each consumer's entity model.**
+  The toolkit consults Spring Data Mongo's `MappingMongoConverter` at
+  query-translation time and rewrites every Java field path to the
+  matching BSON name — including `@Field` overrides, custom
+  `FieldNamingStrategy`, and Spring Data's default `id → _id`
+  auto-promotion on nested classes. Predicates referencing `@.id == 'X'`
+  / `[id=X]` work whether the underlying BSON stores the field as `id`
+  or `_id`, with no `@Field("id")` annotation required anywhere in the
+  consumer's model.
+- **TMF630 `$.`-less JsonPath shorthand accepted in both `filter=` and
+  `?sort=`.** Per the TMF630 recommendation, the leading `$.` may be
+  omitted for simplicity. The toolkit now accepts all three of these
+  forms equivalently:
+  - **Filter**: `?filter=$[?(@.status == 'Pending')]` (canonical
+    wrapper), `?filter=[?(@.status == 'Pending')]` (bare wrapper),
+    and `?filter=statusChange[?(@.status == 'Pending')]` (sub-array
+    shorthand — rewritten internally to the canonical correlated
+    form `$[?(@.statusChange[?(@.status == 'Pending')])]`).
+  - **Sort**: `?sort=$.arr[?(@.id == 'X')].value` and
+    `?sort=arr[?(@.id == 'X')].value` parse to the same SortPath. The
+    classifier recognises any term containing `[?(...)]` or `[*]` as
+    JsonPath, even without the prefix.
+- Comprehensive design note at
+  [`docs/correlated-sort.md`](./docs/correlated-sort.md) — URL grammar
+  for both forms, semantics (null-sort behavior, tie-breaking, runtime
+  requirements), capability matrices, the consumer controller pattern,
+  and the entity-mapping gotchas that bite hand-written or generated
+  TMF models.
+
+### Notes
+- **MongoDB 4.0+** is required at runtime for the new aggregation path
+  (uses `$convert ... onError` for safe type coercion). The existing
+  `find()` path used by plain sorts is unaffected and works on whatever
+  MongoDB versions the toolkit already supported.
+- `tmf630-toolkit-mongo-aggregation` is **not** bundled into
+  `tmf630-toolkit-all`. Consumers explicitly add the dependency when
+  they want correlated sort. JPA-only and other non-Mongo services pay
+  no Mongo dependency cost.
+
 ## [2.0.0] - 2026-03-26
 
 ### Changed

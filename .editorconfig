@@ -7,19 +7,16 @@ end_of_line = lf
 insert_final_newline = true
 trim_trailing_whitespace = true
 
-# Show the Google line-length guide (formatting at 100 is enforced by GJF when you run format)
-ij_visual_guides = 100
-
-[*.xml]
-indent_style = space
-indent_size = 2
-
-[*.java]
+# indentation
 indent_style = space
 indent_size = 2
 tab_width = 2
 ij_continuation_indent_size = 4
 
+# Show the Google line-length guide (formatting at 100 is enforced by GJF when you run format)
+ij_visual_guides = 100
+
+[*.java]
 # Switch/case indentation (Google: cases indented inside switch)
 ij_java_indent_case_from_switch = true
 
