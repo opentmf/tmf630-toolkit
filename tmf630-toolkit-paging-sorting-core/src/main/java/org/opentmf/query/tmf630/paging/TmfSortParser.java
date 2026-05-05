@@ -19,16 +19,24 @@ public class TmfSortParser {
   }
 
   public Sort parse(List<String> sortParams) {
+    return parseInternal(sortParams, false).toPlainSort();
+  }
+
+  public TmfSort parseRich(List<String> sortParams) {
+    return parseInternal(sortParams, true);
+  }
+
+  private TmfSort parseInternal(List<String> sortParams, boolean acceptCorrelated) {
     if (sortParams == null || sortParams.isEmpty()) {
-      return Sort.unsorted();
+      return TmfSort.empty();
     }
 
-    List<Sort.Order> orders = new ArrayList<>();
+    List<TmfSortTerm> termList = new ArrayList<>();
     for (String sortParam : sortParams) {
       if (!StringUtils.hasText(sortParam)) {
         continue;
       }
-      String[] tokens = sortParam.split(",");
+      List<String> tokens = splitTopLevel(sortParam);
       for (String rawToken : tokens) {
         String token = rawToken.trim();
         if (token.isEmpty()) {
@@ -43,16 +51,28 @@ public class TmfSortParser {
           token = token.substring(1);
         }
 
-        String property = token.trim();
-        if (!StringUtils.hasText(property)) {
+        String expression = token.trim();
+        if (!StringUtils.hasText(expression)) {
           continue;
         }
-        validateProperty(property);
-        orders.add(new Sort.Order(direction, property));
+
+        TmfSortTerm.Kind kind = classify(expression);
+        if (kind != TmfSortTerm.Kind.PLAIN && !acceptCorrelated) {
+          throw new IllegalArgumentException(
+              "Correlated sort terms ("
+                  + kind.name().toLowerCase().replace('_', '-')
+                  + ") are not supported in this context: "
+                  + expression);
+        }
+
+        if (kind == TmfSortTerm.Kind.PLAIN) {
+          validateProperty(expression);
+        }
+        termList.add(new TmfSortTerm(direction, kind, expression));
       }
     }
 
-    return orders.isEmpty() ? Sort.unsorted() : Sort.by(orders);
+    return new TmfSort(termList);
   }
 
   private void validateProperty(String property) {
@@ -62,5 +82,57 @@ public class TmfSortParser {
     if (!allowlist.isEmpty() && !allowlist.contains(property)) {
       throw new IllegalArgumentException("Sort property is not allowed: " + property);
     }
+  }
+
+  static List<String> splitTopLevel(String input) {
+    List<String> parts = new ArrayList<>();
+    int depth = 0;
+    boolean inQuotes = false;
+    int start = 0;
+    for (int i = 0; i < input.length(); i++) {
+      char c = input.charAt(i);
+      if (inQuotes) {
+        if (c == '\'') {
+          inQuotes = false;
+        }
+        continue;
+      }
+      switch (c) {
+        case '\'' -> inQuotes = true;
+        case '[', '(' -> depth++;
+        case ']', ')' -> {
+          if (depth > 0) {
+            depth--;
+          }
+        }
+        case ',' -> {
+          if (depth == 0) {
+            parts.add(input.substring(start, i));
+            start = i + 1;
+          }
+        }
+        default -> {
+          // no-op
+        }
+      }
+    }
+    parts.add(input.substring(start));
+    return parts;
+  }
+
+  static TmfSortTerm.Kind classify(String token) {
+    if (token.startsWith("$.")) {
+      return TmfSortTerm.Kind.JSONPATH;
+    }
+    // The leading `$.` is optional per the TMF630 recommendation. JsonPath-specific
+    // constructs anywhere in the term — `[?(...)]` predicates or `[*]` projection —
+    // unambiguously identify a JSONPATH expression even without the prefix.
+    if (token.contains("[?(") || token.contains("[*]")) {
+      return TmfSortTerm.Kind.JSONPATH;
+    }
+    if (token.indexOf('[') >= 0) {
+      return TmfSortTerm.Kind.SIMPLE_RICH;
+    }
+    return TmfSortTerm.Kind.PLAIN;
   }
 }

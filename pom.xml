@@ -51,6 +51,7 @@
     <module>tmf630-toolkit-paging-sorting-autoconfigure</module>
     <module>tmf630-toolkit-attribute-filtering-core</module>
     <module>tmf630-toolkit-attribute-filtering-autoconfigure</module>
+    <module>tmf630-toolkit-mongo-aggregation</module>
     <module>tmf630-toolkit-all</module>
   </modules>
 
@@ -58,7 +59,7 @@
     <java.version>17</java.version>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <maven.compiler.release>${java.version}</maven.compiler.release>
-    <spring-boot.version>4.0.4</spring-boot.version>
+    <spring-boot.version>4.0.6</spring-boot.version>
     <json-path.version>3.0.0</json-path.version>
     <querydsl.version>5.1.0</querydsl.version>
     <maven.compiler.plugin.version>3.15.0</maven.compiler.plugin.version>
@@ -108,6 +109,11 @@
       <dependency>
         <groupId>org.opentmf.query</groupId>
         <artifactId>tmf630-toolkit-attribute-filtering-autoconfigure</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.opentmf.query</groupId>
+        <artifactId>tmf630-toolkit-mongo-aggregation</artifactId>
         <version>${project.version}</version>
       </dependency>
     </dependencies>

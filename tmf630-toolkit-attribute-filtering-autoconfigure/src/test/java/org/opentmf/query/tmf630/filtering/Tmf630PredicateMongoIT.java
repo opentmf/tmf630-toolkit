@@ -4,6 +4,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
@@ -157,6 +158,39 @@ class Tmf630PredicateMongoIT {
         countDocumentsByFilter(
             "$[?(@.externalReference[?(@.name == 'MARKET_ACCOUNT_ID' && @.id == 'OPCO-ORDER-012')])]");
     assertEquals(0, count);
+  }
+
+  @Test
+  void acceptsJsonPathWildcardAsTransparentProjection() {
+    // `[*]` is canonical JsonPath syntax for "all elements of this array." Mongo's
+    // BSON path-equality auto-projects across arrays, so the with- and without-[*]
+    // forms match the same documents. The toolkit strips `[*]` at parse time and
+    // the resulting query is byte-identical — proven here against a real Mongo
+    // container by counting documents both ways and asserting equality.
+    long withWildcard =
+        countDocumentsByFilter("$[?(@.externalReference[*].name == 'ORDER_REFERENCE')]");
+    long withoutWildcard =
+        countDocumentsByFilter("$[?(@.externalReference.name == 'ORDER_REFERENCE')]");
+
+    assertEquals(withoutWildcard, withWildcard);
+    assertTrue(withWildcard > 0, "Expected at least one matching document");
+  }
+
+  @Test
+  void acceptsBracketStarBeforeArrayCorrelationPredicate() {
+    // `arr[*][?(...)]` is the canonical "project-then-filter" JsonPath shape.
+    // After `[*]` is stripped, the expression is identical to `arr[?(...)]` —
+    // the toolkit's standard same-element correlation form translated to
+    // `$elemMatch` on Mongo.
+    long withWildcard =
+        countDocumentsByFilter(
+            "$[?(@.externalReference[*][?(@.name == 'ORDER_REFERENCE' && @.id == 'OPCO-ORDER-012')])]");
+    long withoutWildcard =
+        countDocumentsByFilter(
+            "$[?(@.externalReference[?(@.name == 'ORDER_REFERENCE' && @.id == 'OPCO-ORDER-012')])]");
+
+    assertEquals(withoutWildcard, withWildcard);
+    assertEquals(10, withWildcard);
   }
 
   @Test
