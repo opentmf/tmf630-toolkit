@@ -2,6 +2,34 @@
 
 All notable changes to `tmf630-toolkit` are documented in this file.
 
+## [2.0.2] - 2026-05-06
+
+### Fixed
+- **`Tmf630MongoAggregationAutoConfiguration` no longer breaks consumers that
+  pull the toolkit onto the classpath without a configured `MongoTemplate`
+  bean.** The autoconfiguration previously activated on
+  `@ConditionalOnClass(MongoTemplate.class)` alone, which would attempt to
+  wire `Tmf630MongoCorrelatedSortExecutor` even in JPA-only or test contexts
+  where no Mongo bean exists, failing application startup. The autoconfig
+  now also requires `@ConditionalOnBean(MongoTemplate.class)` and is ordered
+  after Spring Boot's `DataMongoAutoConfiguration` so the bean condition is
+  evaluated against a fully-populated context.
+- **Combining `?filter=<jsonPath>` with a correlated `?sort=` no longer
+  silently returns an empty page.** When a request routed through
+  `Tmf630MongoCorrelatedSortExecutor` (correlated sort term) and the filter
+  predicate referenced a property that Spring Data Mongo auto-promotes —
+  most notably any nested `id` field, which is stored as `_id` — the
+  executor's predicate serializer emitted the raw Java field name in the
+  generated `$match` stage. The plain `find()` path applied Spring Data's
+  field-name mapping and matched real documents; the aggregation path did
+  not, and matched zero documents. The executor's `NoRefDocumentSerializer`
+  now consults the active `MongoMappingContext` and translates each path
+  segment through `MongoPersistentProperty#getFieldName()`, applying the
+  same translation Spring Data applies on the `find()` path (`id` →
+  `_id`, plus any `@Field("…")` overrides). Filter and correlated sort now
+  see the same `$match` document regardless of which code path serializes
+  it.
+
 ## [2.0.1] - 2026-05-05
 
 ### Changed

@@ -29,15 +29,19 @@ public class Tmf630MongoCorrelatedSortExecutor {
     this.mongoTemplate = mongoTemplate;
     this.jsonPathParser = new JsonPathSortParser();
     this.simpleRichParser = new SimpleRichSortParser(defaultSimpleRichKey);
-    this.querySerializer = new NoRefDocumentSerializer();
-    this.fieldResolver = resolveFieldResolver(mongoTemplate);
+    MongoMappingContext mappingContext = resolveMappingContext(mongoTemplate);
+    this.querySerializer = new NoRefDocumentSerializer(mappingContext);
+    this.fieldResolver =
+        mappingContext != null
+            ? new MongoFieldResolver(mappingContext)
+            : MongoFieldResolver.passthrough();
   }
 
-  private static MongoFieldResolver resolveFieldResolver(MongoTemplate mongoTemplate) {
+  private static MongoMappingContext resolveMappingContext(MongoTemplate mongoTemplate) {
     if (mongoTemplate.getConverter().getMappingContext() instanceof MongoMappingContext ctx) {
-      return new MongoFieldResolver(ctx);
+      return ctx;
     }
-    return MongoFieldResolver.passthrough();
+    return null;
   }
 
   public <T> Page<T> findAll(
