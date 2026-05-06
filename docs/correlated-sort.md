@@ -71,9 +71,18 @@ The `paging-sorting-core` module ships:
 
 The `paging-sorting-autoconfigure` module ships:
 
-- **`Tmf630RichSortHandlerMethodArgumentResolver`** — binds `TmfSort`
-  as a controller parameter type. The existing resolver for
-  Spring Data `Sort` is untouched.
+- **`TmfRichPageableHandlerMethodArgumentResolver`** — binds
+  `TmfRichPageable` as a controller parameter type. This is the
+  recommended two-parameter shape `(Predicate, TmfRichPageable)`.
+- **`TmfRichSortHandlerMethodArgumentResolver`** — binds `TmfSort` as
+  a controller parameter type, supporting the three-parameter shape
+  `(Predicate, TmfSort, Pageable)`.
+
+Both rich resolvers are registered alongside the existing resolvers
+for Spring Data `Sort` and plain `Pageable`, which are untouched. The
+existing `TmfPageableHandlerMethodArgumentResolver` defers
+`TmfRichPageable` parameters to the rich resolver via a
+`supportsParameter` exclusion so the two never compete.
 
 ## Consumer pattern
 

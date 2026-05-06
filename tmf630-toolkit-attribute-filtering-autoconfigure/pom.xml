@@ -18,6 +18,16 @@
       <artifactId>tmf630-toolkit-attribute-filtering-core</artifactId>
     </dependency>
     <dependency>
+      <groupId>org.opentmf.query</groupId>
+      <artifactId>tmf630-toolkit-paging-sorting-autoconfigure</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.opentmf.query</groupId>
+      <artifactId>tmf630-toolkit-mongo-aggregation</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-autoconfigure</artifactId>
     </dependency>

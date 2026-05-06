@@ -144,10 +144,13 @@ Adding this dependency:
   is used).
 - Auto-registers a `Tmf630MongoCorrelatedSortExecutor` bean when a
   `MongoTemplate` is on the classpath.
-- Adds the `TmfSort` controller parameter binding (via the rich sort
-  resolver in `paging-sorting-autoconfigure`, which is registered
-  alongside the existing `Sort` resolver — plain-only controllers stay
-  unchanged).
+- Adds the `TmfRichPageable` controller parameter binding (the
+  recommended two-parameter shape — see [section 11](#11-correlated-sort-mongodb)).
+  `TmfSort` is also bound for the alternative three-parameter
+  `(Predicate, TmfSort, Pageable)` shape. Both are wired by the rich
+  resolvers in `paging-sorting-autoconfigure`, registered alongside the
+  existing `Sort` and plain `Pageable` resolvers — plain-only
+  controllers stay unchanged.
 
 JPA-only and other non-Mongo services should **not** add this
 dependency. The base toolkit's plain `Sort` resolver continues to 400
@@ -1355,6 +1358,36 @@ GET /api/products
 ```
 
 Result: `2, 1`.
+
+#### Example A.1: filter and sort that both target an auto-promoted `id` field
+
+A common TMF pattern is to filter `productOffering` documents whose
+`prodSpecCharValueUse` array contains an entry with a specific `id`,
+and sort by a value taken from that same entry. Realistic shape:
+
+```json
+{
+  "id": "PO-1",
+  "prodSpecCharValueUse": [
+    { "id": "RC_OFFER_TYPE", "productSpecCharacteristicValue": [{ "value": "Bronze" }] },
+    { "id": "RC_DURATION",   "productSpecCharacteristicValue": [{ "value": "12M" }] }
+  ]
+}
+```
+
+```http
+GET /api/productOffering
+  ?filter=prodSpecCharValueUse[?(@.id == 'RC_OFFER_TYPE')]
+  &sort=prodSpecCharValueUse[id=RC_OFFER_TYPE].productSpecCharacteristicValue.value
+  &limit=5
+```
+
+Returns documents whose array contains a `RC_OFFER_TYPE` entry,
+ordered by that entry's nested `value`. Both the filter and the sort
+target the nested `id` field; Spring Data Mongo auto-promotes nested
+`id` properties to BSON `_id` on write, and the toolkit applies the
+same mapping on both code paths so the request shape works whether or
+not a correlated sort is present.
 
 #### Example B: same sort, simple-rich form
 

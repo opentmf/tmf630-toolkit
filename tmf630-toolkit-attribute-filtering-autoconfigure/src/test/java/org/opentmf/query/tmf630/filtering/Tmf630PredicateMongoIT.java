@@ -89,7 +89,33 @@ class Tmf630PredicateMongoIT {
     for (JsonNode node : root) {
       documents.add(Document.parse(node.toString()));
     }
+    // Three extra docs scoped to a unique category, each carrying a single
+    // externalReference{name='SORT_KEY', id=01|02|03}. These exist so JsonPath-sort
+    // assertions have varying values to order by; their distinct category keeps them
+    // disjoint from every other test's filter.
+    documents.add(sortFixtureDoc("aa1", "01"));
+    documents.add(sortFixtureDoc("aa2", "03"));
+    documents.add(sortFixtureDoc("aa3", "02"));
     mongoTemplate.getDb().getCollection("mongo_search_entity").insertMany(documents);
+  }
+
+  private static Document sortFixtureDoc(String id, String sortKeyValue) {
+    // Nested externalReference.id is stored under BSON `_id` because Spring Data Mongo
+    // auto-promotes any `id` property — including on nested mapped classes — to `_id`.
+    // The correlated-sort executor's MongoFieldResolver applies the same translation,
+    // so the seed must use `_id` here for the JsonPath sort to find a value to order by.
+    // Each doc has TWO externalReference elements; only one matches name='SORT_KEY'.
+    // This mirrors realistic productOffering data where prodSpecCharValueUse holds
+    // multiple entries and only one corresponds to the requested characteristic id.
+    return new Document("_id", id)
+        .append("category", "FILTER_SORT_IT")
+        .append(
+            "externalReference",
+            List.of(
+                new Document("name", "OTHER").append("_id", "noise-" + id),
+                new Document("name", "SORT_KEY")
+                    .append("_id", "ref-" + id)
+                    .append("metadata", new Document("value", sortKeyValue))));
   }
 
   @Test
@@ -198,6 +224,97 @@ class Tmf630PredicateMongoIT {
     mockMvc
         .perform(get("/mongo-search").param("filter", "$.status"))
         .andExpect(status().isBadRequest());
+  }
+
+  @Test
+  void combinesArrayCorrelationFilterWithCorrelatedSortOnMongo() throws Exception {
+    // Reproduces the colleague's report: an array-correlation filter on the same
+    // field that the correlated sort traverses returns an empty page when the two
+    // are combined, even though each works in isolation. Mirrors her shape:
+    //   filter = prodSpecCharValueUse[?(@.id=='RC_OFFER_TYPE')]
+    //   sort   = prodSpecCharValueUse[id=RC_OFFER_TYPE].<...>.value
+    // Filter syntax: sub-array shorthand (bare wrapper). Sort syntax: simple-rich.
+    // Filter targets `id` (auto-promoted to `_id` in BSON storage). This is the
+    // crux of the colleague's report: her filter is `prodSpecCharValueUse[?(@.id=='RC_OFFER_TYPE')]`
+    // which depends on the serializer translating `id` → `_id` to match real data.
+    String filter =
+        "externalReference[?(@.id == 'ref-aa1' || @.id == 'ref-aa2' || @.id == 'ref-aa3')]";
+    String sortAsc = "externalReference[name=SORT_KEY].metadata.value";
+
+    // Sanity: the same filter on the same endpoint returns all 3 docs when sort is
+    // absent (find() path via Spring Data + standard QueryDSL Mongo serializer).
+    mockMvc
+        .perform(get("/mongo-search-paged").param("filter", filter))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.length()").value(3));
+
+    // The bug: with the correlated sort added, the filter silently matches nothing
+    // because the executor's NoRefDocumentSerializer skips the `id` → `_id`
+    // auto-promotion that Spring Data's wrapped serializer applies on the find()
+    // path. Same Predicate, two different BSON `$match` documents.
+    mockMvc
+        .perform(get("/mongo-search-paged").param("filter", filter).param("sort", "+" + sortAsc))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.length()").value(3))
+        .andExpect(jsonPath("$[0].id").value("aa1"))
+        .andExpect(jsonPath("$[1].id").value("aa3"))
+        .andExpect(jsonPath("$[2].id").value("aa2"));
+
+    mockMvc
+        .perform(get("/mongo-search-paged").param("filter", filter).param("sort", "-" + sortAsc))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.length()").value(3))
+        .andExpect(jsonPath("$[0].id").value("aa2"))
+        .andExpect(jsonPath("$[1].id").value("aa3"))
+        .andExpect(jsonPath("$[2].id").value("aa1"));
+  }
+
+  @Test
+  void combinesJsonPathFilterWithJsonPathSortOnMongo() throws Exception {
+    // Companion to combinesJsonPathFilterWithSortOnMongo, but the sort term itself
+    // is a correlated JsonPath expression — exercising the (Predicate, TmfRichPageable)
+    // controller routing through Tmf630MongoCorrelatedSortExecutor.
+    String filter = "$[?(@.category == 'FILTER_SORT_IT')]";
+    String sortAsc = "$.externalReference[?(@.name == 'SORT_KEY')].metadata.value";
+
+    mockMvc
+        .perform(get("/mongo-search-paged").param("filter", filter).param("sort", "+" + sortAsc))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.length()").value(3))
+        .andExpect(jsonPath("$[0].id").value("aa1"))
+        .andExpect(jsonPath("$[1].id").value("aa3"))
+        .andExpect(jsonPath("$[2].id").value("aa2"));
+
+    mockMvc
+        .perform(get("/mongo-search-paged").param("filter", filter).param("sort", "-" + sortAsc))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.length()").value(3))
+        .andExpect(jsonPath("$[0].id").value("aa2"))
+        .andExpect(jsonPath("$[1].id").value("aa3"))
+        .andExpect(jsonPath("$[2].id").value("aa1"));
+  }
+
+  @Test
+  void combinesJsonPathFilterWithSortOnMongo() throws Exception {
+    // Reproduces the colleague's report: combining ?filter=<jsonpath>&sort=<key> on the
+    // same Mongo endpoint must return populated, ordered results — not an empty page.
+    String hrefLow = "/tmf-api/serviceOrdering/v4/serviceOrder/6215245d7fce055f32210d79";
+    String hrefHigh = "/tmf-api/serviceOrdering/v4/serviceOrder/6215e8252c2b0673ea905954";
+    String filter = "$[?(@.href == '" + hrefLow + "' || @.href == '" + hrefHigh + "')]";
+
+    mockMvc
+        .perform(get("/mongo-search-paged").param("filter", filter).param("sort", "-href"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.length()").value(2))
+        .andExpect(jsonPath("$[0].href").value(hrefHigh))
+        .andExpect(jsonPath("$[1].href").value(hrefLow));
+
+    mockMvc
+        .perform(get("/mongo-search-paged").param("filter", filter).param("sort", "+href"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.length()").value(2))
+        .andExpect(jsonPath("$[0].href").value(hrefLow))
+        .andExpect(jsonPath("$[1].href").value(hrefHigh));
   }
 
   @SpringBootApplication(
