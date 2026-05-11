@@ -101,13 +101,41 @@ public final class AggregationKeyTranslator {
       String elementRef,
       MongoFieldResolver resolver,
       Class<?> elementType) {
+    return translatePerElement(leaf, elementRef, resolver, elementType, false);
+  }
+
+  /**
+   * Builds the per-element expression for a sort leaf. The {@code needsScalar}
+   * flag signals that the result is about to be fed into a scalar-only stage
+   * such as {@code $convert} (i.e. the leaf is wrapped in a {@code Coercion}).
+   * In that case, if the leaf's dotted path crosses a collection-typed
+   * intermediate, Mongo's expression-context path traversal auto-projects and
+   * returns an array — which breaks the wrapping {@code $convert}. We detect
+   * this via {@link MongoFieldResolver#hasArrayIntermediate} and wrap the path
+   * in {@code $arrayElemAt: [path, 0]} so the coercion sees a scalar.
+   *
+   * <p>The flag is intentionally false for direct sort-key emission: Mongo's
+   * {@code $sort} accepts an array as a sort key (using its first element for
+   * comparison), and that pre-existing behaviour is what makes uncoerced
+   * dotted-leaf sorts work today.
+   */
+  private static Object translatePerElement(
+      JsonPathSortAst.LeafExpression leaf,
+      String elementRef,
+      MongoFieldResolver resolver,
+      Class<?> elementType,
+      boolean needsScalar) {
     if (leaf instanceof JsonPathSortAst.FieldRef fr) {
       String resolvedPath = resolver.resolveBsonPath(elementType, fr.fieldPath());
-      return elementRef + "." + resolvedPath;
+      String pathExpr = elementRef + "." + resolvedPath;
+      if (needsScalar && resolver.hasArrayIntermediate(elementType, fr.fieldPath())) {
+        return new Document("$arrayElemAt", Arrays.asList(pathExpr, 0));
+      }
+      return pathExpr;
     }
     if (leaf instanceof JsonPathSortAst.Coercion c) {
       return convertWrap(
-          translatePerElement(c.inner(), elementRef, resolver, elementType), c.type());
+          translatePerElement(c.inner(), elementRef, resolver, elementType, true), c.type());
     }
     throw new IllegalStateException(
         "Aggregator may not appear nested inside another aggregator or per-element context: "

@@ -38,6 +38,8 @@ import org.opentmf.query.tmf630.filtering.predicate.ValueConverter;
  *   <li>Logical operators: {@code &&}, {@code ||}
  *   <li>Grouping with parentheses
  *   <li>Comparisons: {@code ==}, {@code !=}, {@code >}, {@code >=}, {@code <}, {@code <=}
+ *   <li>Unary negation {@code !@.field} — matches rows where the field is missing or
+ *       null (translated to {@code IS_NULL}). Useful for "absent field" filtering.
  *   <li>Field paths in comparison left-hand side: {@code @.field} or {@code @.nested.field}
  *   <li>Literals: single/double quoted strings, numbers, booleans, and {@code null}
  * </ul>
@@ -282,8 +284,16 @@ public class JsonPathFilterPredicateBuilder {
         throw new TmfFilteringException(
             "Array correlation in jsonPath filter is supported only for document databases.");
       }
-      ResolvedArrayPath resolvedArrayPath =
-          resolveArrayPath(rootEntity, rootPath, arrayMatchNode.arrayPath(), allowNestedPaths);
+      final ResolvedArrayPath resolvedArrayPath;
+      try {
+        resolvedArrayPath =
+            resolveArrayPath(rootEntity, rootPath, arrayMatchNode.arrayPath(), allowNestedPaths);
+      } catch (TmfFilteringException ex) {
+        if (settings.onUnknownJsonPathField() == UnknownParamBehavior.REJECT) {
+          throw ex;
+        }
+        return Optional.empty();
+      }
       String nestedAllowlistPrefix =
           allowlistPrefix + normalizeArrayPathForAllowlist(arrayMatchNode.arrayPath()) + ".";
       PathBuilder<?> elementRootPath = pathResolver.createRootPath(resolvedArrayPath.elementType());
@@ -305,7 +315,7 @@ public class JsonPathFilterPredicateBuilder {
 
     String effectiveFieldPath = allowlistPrefix + comparison.fieldPath();
     if (!isAllowedField(effectiveFieldPath, allowlist, settings.allowlistMode())) {
-      if (settings.onUnknownField() == UnknownParamBehavior.REJECT) {
+      if (settings.onUnknownJsonPathField() == UnknownParamBehavior.REJECT) {
         throw new TmfFilteringException("Unknown or disallowed field: " + effectiveFieldPath);
       }
       return Optional.empty();
@@ -315,7 +325,7 @@ public class JsonPathFilterPredicateBuilder {
     try {
       resolvedField = pathResolver.resolve(rootEntity, comparison.fieldPath(), allowNestedPaths);
     } catch (TmfFilteringException ex) {
-      if (settings.onUnknownField() == UnknownParamBehavior.REJECT) {
+      if (settings.onUnknownJsonPathField() == UnknownParamBehavior.REJECT) {
         throw ex;
       }
       return Optional.empty();
@@ -527,6 +537,19 @@ public class JsonPathFilterPredicateBuilder {
         return node;
       }
 
+      if (match(TokenType.NOT)) {
+        Token negatedField =
+            expect(TokenType.FIELD, "Expected @.fieldPath after '!' in jsonPath filter.");
+        if (negatedField.text().contains("[?(")) {
+          throw new TmfFilteringException(
+              "Negation of array-match expressions is not supported in jsonPath filter.");
+        }
+        return new ComparisonNode(
+            negatedField.text().substring(2),
+            ComparisonOperator.EQ,
+            new LiteralToken(LiteralKind.NULL, "null"));
+      }
+
       Token fieldToken = expect(TokenType.FIELD, "Expected @.fieldPath in jsonPath filter.");
       if (fieldToken.text().contains("[?(")) {
         return parseArrayMatch(fieldToken.text());
@@ -667,6 +690,11 @@ public class JsonPathFilterPredicateBuilder {
           i++;
           continue;
         }
+        if (ch == '!') {
+          tokens.add(new Token(TokenType.NOT, "!"));
+          i++;
+          continue;
+        }
         if (ch == '@') {
           int start = i;
           i++;
@@ -771,6 +799,7 @@ public class JsonPathFilterPredicateBuilder {
     RPAREN,
     AND,
     OR,
+    NOT,
     OPERATOR,
     FIELD,
     LITERAL,

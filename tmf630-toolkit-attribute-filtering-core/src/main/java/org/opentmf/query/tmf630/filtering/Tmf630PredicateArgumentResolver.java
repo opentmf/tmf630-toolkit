@@ -164,9 +164,15 @@ public class Tmf630PredicateArgumentResolver implements HandlerMethodArgumentRes
 
       if (operator.isMultiValueOperator()) {
         clauseCount = incrementClauseCount(clauseCount);
-        List<Object> typedValues = new ArrayList<>(values.length);
+        List<Object> typedValues = new ArrayList<>();
         for (String rawValue : values) {
-          typedValues.add(valueConverter.convert(rawValue, resolvedField.javaType(), resolvedField.fieldPath()));
+          for (String element : splitCsvForMultiValue(rawValue)) {
+            typedValues.add(
+                valueConverter.convert(element, resolvedField.javaType(), resolvedField.fieldPath()));
+          }
+        }
+        if (typedValues.size() > settings.limits().maxValuesPerKey()) {
+          throw new TmfFilteringException("Too many values for key: " + rawKey);
         }
         clause = predicateFactory.buildMulti(rootPath, resolvedField, operator, typedValues);
         result.and(clause);
@@ -258,5 +264,46 @@ public class Tmf630PredicateArgumentResolver implements HandlerMethodArgumentRes
       return null;
     }
     return annotation.root();
+  }
+
+  /**
+   * Splits a raw query-parameter value on unescaped commas for multi-value operators
+   * (TMF630 §4.4 {@code .in} / {@code .nin} / {@code .between}). A literal comma can be
+   * embedded with the {@code \,} escape. Empty elements are dropped so {@code "A,,B"}
+   * yields {@code ["A", "B"]}; a {@code null} raw value passes through as a single
+   * {@code null} so the value converter can apply its own null handling.
+   */
+  static List<String> splitCsvForMultiValue(String raw) {
+    if (raw == null) {
+      List<String> single = new ArrayList<>(1);
+      single.add(null);
+      return single;
+    }
+    if (raw.indexOf(',') < 0) {
+      return List.of(raw);
+    }
+    List<String> out = new ArrayList<>();
+    StringBuilder current = new StringBuilder(raw.length());
+    boolean escaped = false;
+    for (int i = 0; i < raw.length(); i++) {
+      char c = raw.charAt(i);
+      if (escaped) {
+        current.append(c);
+        escaped = false;
+      } else if (c == '\\') {
+        escaped = true;
+      } else if (c == ',') {
+        if (!current.isEmpty()) {
+          out.add(current.toString());
+          current.setLength(0);
+        }
+      } else {
+        current.append(c);
+      }
+    }
+    if (!current.isEmpty()) {
+      out.add(current.toString());
+    }
+    return out;
   }
 }

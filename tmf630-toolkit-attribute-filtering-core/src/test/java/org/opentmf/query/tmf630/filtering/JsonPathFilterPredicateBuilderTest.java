@@ -339,6 +339,83 @@ class JsonPathFilterPredicateBuilderTest {
   }
 
   @Test
+  void supportsUnaryNegationOnScalarField() {
+    FieldPathResolver pathResolver = new FieldPathResolver();
+    ValueConverter converter = new ValueConverter(new DefaultFormattingConversionService());
+    PredicateFactory factory = new PredicateFactory(false, 128);
+    JsonPathFilterPredicateBuilder builder =
+        new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
+
+    Predicate predicate =
+        builder.build(
+            Entity.class,
+            pathResolver.createRootPath(Entity.class),
+            "$[?(!@.name)]",
+            Set.of("name"),
+            settings(UnknownParamBehavior.REJECT, true));
+
+    assertNotNull(predicate);
+    assertTrue(predicate.toString().contains("name"));
+  }
+
+  @Test
+  void supportsUnaryNegationCombinedWithComparison() {
+    FieldPathResolver pathResolver = new FieldPathResolver();
+    ValueConverter converter = new ValueConverter(new DefaultFormattingConversionService());
+    PredicateFactory factory = new PredicateFactory(false, 128);
+    JsonPathFilterPredicateBuilder builder =
+        new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
+
+    Predicate predicate =
+        builder.build(
+            Entity.class,
+            pathResolver.createRootPath(Entity.class),
+            "$[?(!@.name && @.age > 0)]",
+            Set.of("name", "age"),
+            settings(UnknownParamBehavior.REJECT, true));
+
+    assertNotNull(predicate);
+  }
+
+  @Test
+  void unaryNegationRejectsArrayMatchForm() {
+    FieldPathResolver pathResolver = new FieldPathResolver();
+    ValueConverter converter = new ValueConverter(new DefaultFormattingConversionService());
+    PredicateFactory factory = new PredicateFactory(false, 128);
+    JsonPathFilterPredicateBuilder builder =
+        new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
+
+    assertThrows(
+        TmfFilteringException.class,
+        () ->
+            builder.build(
+                Entity.class,
+                pathResolver.createRootPath(Entity.class),
+                "$[?(!@.externalReference[?(@.id == 'X')])]",
+                Set.of("externalReference", "externalReference.id"),
+                settings(UnknownParamBehavior.REJECT, true)));
+  }
+
+  @Test
+  void neOperatorStillTokenizedAfterAddingNotToken() {
+    FieldPathResolver pathResolver = new FieldPathResolver();
+    ValueConverter converter = new ValueConverter(new DefaultFormattingConversionService());
+    PredicateFactory factory = new PredicateFactory(false, 128);
+    JsonPathFilterPredicateBuilder builder =
+        new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
+
+    Predicate predicate =
+        builder.build(
+            Entity.class,
+            pathResolver.createRootPath(Entity.class),
+            "$[?(@.name != 'abc')]",
+            Set.of("name"),
+            settings(UnknownParamBehavior.REJECT, true));
+
+    assertNotNull(predicate);
+  }
+
+  @Test
   void supportsNullEqAndNeComparisons() {
     FieldPathResolver pathResolver = new FieldPathResolver();
     ValueConverter converter = new ValueConverter(new DefaultFormattingConversionService());
@@ -424,7 +501,8 @@ class JsonPathFilterPredicateBuilderTest {
             settings.onUnknownField(),
             settings.onUnknownOperator(),
             settings.jsonPathFilterEnabled(),
-            10);
+            10,
+            settings.onUnknownJsonPathField());
 
     assertThrows(
         TmfFilteringException.class,
@@ -454,6 +532,95 @@ class JsonPathFilterPredicateBuilderTest {
             settings(UnknownParamBehavior.IGNORE, true));
 
     assertNull(predicate);
+  }
+
+  @Test
+  void unknownJsonPathFieldHonoursIndependentSettingFromAttributeFilter() {
+    // Proves the two settings are truly split: even though the legacy
+    // onUnknownField is REJECT (which is correct for query-param attribute
+    // filtering), the JSON Path filter consults onUnknownJsonPathField. With
+    // that set to IGNORE, an unknown leaf inside ?filter= must return an
+    // empty predicate instead of throwing.
+    FieldPathResolver pathResolver = new FieldPathResolver();
+    ValueConverter converter = new ValueConverter(new DefaultFormattingConversionService());
+    PredicateFactory factory = new PredicateFactory(false, 128);
+    JsonPathFilterPredicateBuilder builder =
+        new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
+
+    Tmf630FilterSettings splitSettings =
+        new Tmf630FilterSettings(
+            true,
+            CombineMode.OR,
+            true,
+            true,
+            false,
+            new PredicateLimits(50, 10, 128),
+            AllowlistMode.DENY_ALL,
+            UnknownParamBehavior.REJECT,
+            UnknownParamBehavior.REJECT,
+            true,
+            2048,
+            UnknownParamBehavior.IGNORE);
+
+    Predicate predicate =
+        builder.build(
+            Entity.class,
+            pathResolver.createRootPath(Entity.class),
+            "$[?(@.unknown == 'x')]",
+            Set.of("name", "age"),
+            splitSettings);
+
+    assertNull(predicate);
+  }
+
+  @Test
+  void unknownJsonPathArraySegmentHonoursIgnoreSetting() {
+    // The array-match branch in resolveArrayPath used to throw unconditionally
+    // when a segment didn't resolve to a real field. With
+    // onUnknownJsonPathField=IGNORE the array-match path should now return an
+    // empty predicate instead of bubbling the exception out as 400.
+    FieldPathResolver pathResolver = new FieldPathResolver();
+    ValueConverter converter = new ValueConverter(new DefaultFormattingConversionService());
+    PredicateFactory factory = new PredicateFactory(false, 128);
+    JsonPathFilterPredicateBuilder builder =
+        new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
+
+    Predicate predicate =
+        builder.build(
+            Entity.class,
+            pathResolver.createRootPath(Entity.class),
+            "$[?(@.nonExistentArray[?(@.id == 'X')])]",
+            Set.of(
+                "nonExistentArray",
+                "nonExistentArray.id",
+                "externalReference",
+                "externalReference.id"),
+            settings(UnknownParamBehavior.IGNORE, true));
+
+    assertNull(predicate);
+  }
+
+  @Test
+  void unknownJsonPathArraySegmentStillThrowsWhenConfiguredToReject() {
+    FieldPathResolver pathResolver = new FieldPathResolver();
+    ValueConverter converter = new ValueConverter(new DefaultFormattingConversionService());
+    PredicateFactory factory = new PredicateFactory(false, 128);
+    JsonPathFilterPredicateBuilder builder =
+        new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
+
+    assertThrows(
+        TmfFilteringException.class,
+        () ->
+            builder.build(
+                Entity.class,
+                pathResolver.createRootPath(Entity.class),
+                "$[?(@.nonExistentArray[?(@.id == 'X')])]",
+                Set.of(
+                    "nonExistentArray",
+                    "nonExistentArray.id",
+                    "externalReference",
+                    "externalReference.id"),
+                settings(UnknownParamBehavior.REJECT, true)));
   }
 
   @Test
@@ -698,6 +865,11 @@ class JsonPathFilterPredicateBuilderTest {
 
   private static Tmf630FilterSettings settings(
       UnknownParamBehavior unknownFieldBehavior, boolean jsonPathEnabled, boolean allowNestedPaths) {
+    // Mirror unknownFieldBehavior into both the legacy attribute-filter setting and
+    // the new JSON-path-specific setting. This preserves the previous behaviour for
+    // every existing test in this class: REJECT-flavoured tests still expect a 400
+    // on unknown JSON Path fields, IGNORE-flavoured tests still expect an empty
+    // result.
     return new Tmf630FilterSettings(
         true,
         CombineMode.OR,
@@ -709,7 +881,8 @@ class JsonPathFilterPredicateBuilderTest {
         unknownFieldBehavior,
         UnknownParamBehavior.REJECT,
         jsonPathEnabled,
-        2048);
+        2048,
+        unknownFieldBehavior);
   }
 
   private static class Entity {

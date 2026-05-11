@@ -11,7 +11,8 @@ public record Tmf630FilterSettings(
     UnknownParamBehavior onUnknownField,
     UnknownParamBehavior onUnknownOperator,
     boolean jsonPathFilterEnabled,
-    int jsonPathMaxLength) {
+    int jsonPathMaxLength,
+    UnknownParamBehavior onUnknownJsonPathField) {
 
   public boolean allowNestedPathsFor(Class<?> rootEntity) {
     if (hasAnnotation(rootEntity, "jakarta.persistence.Entity")

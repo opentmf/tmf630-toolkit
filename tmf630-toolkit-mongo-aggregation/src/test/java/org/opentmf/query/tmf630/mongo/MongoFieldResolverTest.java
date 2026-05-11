@@ -99,6 +99,41 @@ class MongoFieldResolverTest {
     assertEquals(Root.class, pt.getElementTypeAtPath(Root.class, "items"));
   }
 
+  @Test
+  void hasArrayIntermediateReturnsTrueWhenAnIntermediateSegmentIsCollection() {
+    // 'items' is List<Inner>; the path 'items.id' has 'items' as an intermediate
+    // collection-typed segment, so the translator must wrap in $arrayElemAt
+    // when this path is fed to a scalar-only stage like $convert.
+    assertEquals(true, resolver.hasArrayIntermediate(Root.class, "items.id"));
+  }
+
+  @Test
+  void hasArrayIntermediateReturnsFalseWhenIntermediatesAreScalarObjects() {
+    // 'inner' is a single Inner (not a list); dot-traversal yields a scalar.
+    assertEquals(false, resolver.hasArrayIntermediate(Root.class, "inner.id"));
+  }
+
+  @Test
+  void hasArrayIntermediateReturnsFalseWhenPathHasNoIntermediates() {
+    assertEquals(false, resolver.hasArrayIntermediate(Root.class, "id"));
+  }
+
+  @Test
+  void hasArrayIntermediateIgnoresFinalCollectionSegment() {
+    // 'items' alone (no trailing segment) has no INTERMEDIATE — only a final
+    // segment. The flag's contract is about intermediates, not the leaf.
+    assertEquals(false, resolver.hasArrayIntermediate(Root.class, "items"));
+  }
+
+  @Test
+  void hasArrayIntermediateFalseyForUnknownAndMissingContext() {
+    assertEquals(false, resolver.hasArrayIntermediate(Root.class, null));
+    assertEquals(false, resolver.hasArrayIntermediate(Root.class, ""));
+    assertEquals(false, resolver.hasArrayIntermediate(null, "items.id"));
+    MongoFieldResolver pt = MongoFieldResolver.passthrough();
+    assertEquals(false, pt.hasArrayIntermediate(Root.class, "items.id"));
+  }
+
   @Document
   static class Root {
     @Id String id;

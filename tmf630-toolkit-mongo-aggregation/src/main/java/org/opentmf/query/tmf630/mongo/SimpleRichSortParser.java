@@ -18,7 +18,68 @@ public final class SimpleRichSortParser {
     if (input == null) {
       throw new IllegalArgumentException("Sort expression must not be null");
     }
-    return new ParserState(input.trim(), defaultKey).parseSortPath();
+    return parseWithOuterCoercion(input.trim());
+  }
+
+  /**
+   * Accepts an outer coercion wrapper {@code num(...)}, {@code str(...)}, or
+   * {@code date(...)} enclosing an entire simple-rich expression. TMF630 §4.7
+   * permits the wrapper to sit either on the leaf segment or wrap the whole sort
+   * term. When present, the wrapped expression is parsed as usual and the
+   * resulting leaf is composed inside the coercion. Multiple nested outer
+   * wrappers compose recursively.
+   */
+  private JsonPathSortAst.SortPath parseWithOuterCoercion(String trimmed) {
+    JsonPathSortAst.CoercionType outerCoercion = detectOuterCoercion(trimmed);
+    if (outerCoercion == null) {
+      return new ParserState(trimmed, defaultKey).parseSortPath();
+    }
+    String inner = stripOuterCall(trimmed).trim();
+    JsonPathSortAst.SortPath innerPath = parseWithOuterCoercion(inner);
+    return new JsonPathSortAst.SortPath(
+        innerPath.hops(), new JsonPathSortAst.Coercion(outerCoercion, innerPath.leaf()));
+  }
+
+  private static JsonPathSortAst.CoercionType detectOuterCoercion(String s) {
+    if (s.length() < 5 || !s.endsWith(")")) {
+      return null;
+    }
+    JsonPathSortAst.CoercionType type;
+    int openIndex;
+    if (s.startsWith("num(")) {
+      type = JsonPathSortAst.CoercionType.NUM;
+      openIndex = 3;
+    } else if (s.startsWith("str(")) {
+      type = JsonPathSortAst.CoercionType.STR;
+      openIndex = 3;
+    } else if (s.startsWith("date(")) {
+      type = JsonPathSortAst.CoercionType.DATE;
+      openIndex = 4;
+    } else {
+      return null;
+    }
+    return outerCallSpansEntireExpression(s, openIndex) ? type : null;
+  }
+
+  private static boolean outerCallSpansEntireExpression(String s, int openIndex) {
+    int depth = 0;
+    for (int i = openIndex; i < s.length(); i++) {
+      char c = s.charAt(i);
+      if (c == '(') {
+        depth++;
+      } else if (c == ')') {
+        depth--;
+        if (depth == 0) {
+          return i == s.length() - 1;
+        }
+      }
+    }
+    return false;
+  }
+
+  private static String stripOuterCall(String s) {
+    int open = s.indexOf('(');
+    return s.substring(open + 1, s.length() - 1);
   }
 
   private static final class ParserState {

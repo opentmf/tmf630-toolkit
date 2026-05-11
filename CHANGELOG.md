@@ -2,6 +2,58 @@
 
 All notable changes to `tmf630-toolkit` are documented in this file.
 
+## [2.1.0] - 2026-05-11
+
+### Added
+- **Comma-separated value lists are now accepted for the multi-value
+  attribute-filter operators `.in`, `.nin`, and `.between`.** TMF630 §4.4
+  allows clients to OR-fold values either via repeated query parameters
+  (`?status.in=A&status.in=B`) or via a comma-separated list
+  (`?status.in=A,B`). The toolkit previously treated the comma form as a
+  single literal `"A,B"` and matched nothing. The resolver now expands each
+  raw value on unescaped commas, dropping empty components and honouring
+  `\,` as a literal-comma escape. The expanded total is re-checked against
+  `predicate.limits.max-values-per-key`. Mixing the two forms in a single
+  request (e.g. `?status.in=A,B&status.in=C`) is supported and yields
+  `["A", "B", "C"]`.
+- **JSON Path filter grammar now supports the unary negation form
+  `[?(!@.field)]`.** TMF630 Part 6 (Jayway parity) treats `!@.field` as a
+  filter that selects rows where the named field is missing or null. The
+  toolkit's parser previously rejected the `!` token outright with
+  `400 Bad Request "Unsupported token"`. Negation is translated to the
+  toolkit's existing `IS_NULL` predicate (i.e. matches `null` and missing
+  fields). Negation of the array-match subform — e.g.
+  `[?(!@.externalReference[?(@.id == 'X')])]` — remains unsupported and is
+  rejected with a clear error message.
+- **Simple-rich correlated sort now accepts the outer coercion wrapper form
+  `num(arr[id=X].leaf)` / `str(...)` / `date(...)`.** TMF630 §4.7 permits the
+  coercion function to sit either at the leaf segment (the previously
+  supported `arr[id=X].num(leaf)` form) or wrap the entire sort term. The
+  `SimpleRichSortParser` previously rejected the outer form with
+  `must contain at least one [...] hop`. Both forms now parse and produce
+  equivalent sort orderings on `Tmf630MongoCorrelatedSortExecutor`.
+  Outer wrappers compose recursively, so e.g. `num(str(arr[X].leaf))` is
+  accepted. The aggregation translator detects when a coerced leaf path
+  crosses a collection-typed intermediate and wraps the path in
+  `$arrayElemAt: [..., 0]` before `$convert` — without that projection,
+  Mongo's expression-context path traversal returns an array of values
+  that silently collapses to `null` inside `$convert` and breaks the sort.
+- **New setting `opentmf.tmf630.attribute-filtering.on-unknown-json-path-field`
+  (default `IGNORE`).** TMF630 Part 6 specifies that an unmatched JSON Path
+  inside `?filter=` is an empty result, not a validation error. The previous
+  unified `on-unknown-field` setting (default `REJECT`) — which is the right
+  default for attribute filtering, where unknown keys are usually client typos
+  — also gated the JSON Path filter, causing valid `?filter=$[?(@.optionalField
+  == 'X')]` requests to return `400 Bad Request "Unknown field path"` whenever
+  the field wasn't in the entity's allowlist or class. The two policies are
+  now independent: `on-unknown-field` continues to default to `REJECT` for
+  attribute filtering, while `on-unknown-json-path-field` defaults to `IGNORE`
+  for JSON Path filters (returning `200 OK` with an empty page, per spec).
+  The setting also covers the array-correlation subform — e.g.
+  `[?(@.unknownArray[?(@.id == 'X')])]` no longer 400s under the default
+  policy. Existing consumers that depend on the strict behaviour can opt back
+  in by setting the property explicitly to `REJECT`.
+
 ## [2.0.2] - 2026-05-06
 
 ### Fixed

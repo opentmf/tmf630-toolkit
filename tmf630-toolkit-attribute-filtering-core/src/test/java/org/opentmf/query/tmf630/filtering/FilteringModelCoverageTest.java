@@ -46,7 +46,8 @@ class FilteringModelCoverageTest {
             UnknownParamBehavior.REJECT,
             UnknownParamBehavior.IGNORE,
             true,
-            1234);
+            1234,
+            UnknownParamBehavior.REJECT);
 
     assertEquals(10, settings.limits().maxClauses());
     assertEquals(3, settings.limits().maxValuesPerKey());

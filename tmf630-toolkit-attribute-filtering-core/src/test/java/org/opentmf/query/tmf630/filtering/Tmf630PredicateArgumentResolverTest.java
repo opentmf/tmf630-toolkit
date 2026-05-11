@@ -1,10 +1,13 @@
 package org.opentmf.query.tmf630.filtering;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.lang.reflect.Method;
+import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.opentmf.query.tmf630.filtering.config.AllowlistMode;
@@ -114,7 +117,8 @@ class Tmf630PredicateArgumentResolverTest {
             UnknownParamBehavior.REJECT,
             UnknownParamBehavior.REJECT,
             true,
-            2048);
+            2048,
+            UnknownParamBehavior.REJECT);
     Tmf630PredicateArgumentResolver resolver =
         new Tmf630PredicateArgumentResolver(
             new ParamKeyParser(new OperatorRegistry(), true),
@@ -156,7 +160,8 @@ class Tmf630PredicateArgumentResolverTest {
             UnknownParamBehavior.IGNORE,
             UnknownParamBehavior.IGNORE,
             true,
-            2048);
+            2048,
+            UnknownParamBehavior.IGNORE);
 
     Tmf630PredicateArgumentResolver resolver =
         new Tmf630PredicateArgumentResolver(
@@ -198,7 +203,8 @@ class Tmf630PredicateArgumentResolverTest {
             UnknownParamBehavior.REJECT,
             UnknownParamBehavior.REJECT,
             true,
-            2048);
+            2048,
+            UnknownParamBehavior.REJECT);
 
     Tmf630PredicateArgumentResolver resolver =
         new Tmf630PredicateArgumentResolver(
@@ -272,7 +278,8 @@ class Tmf630PredicateArgumentResolverTest {
             UnknownParamBehavior.REJECT,
             UnknownParamBehavior.REJECT,
             true,
-            2048);
+            2048,
+            UnknownParamBehavior.REJECT);
     FieldPathResolver pathResolver = new FieldPathResolver();
     ValueConverter valueConverter = new ValueConverter(new DefaultFormattingConversionService());
     PredicateFactory predicateFactory = new PredicateFactory(false, 128);
@@ -314,7 +321,8 @@ class Tmf630PredicateArgumentResolverTest {
             UnknownParamBehavior.REJECT,
             UnknownParamBehavior.REJECT,
             true,
-            2048);
+            2048,
+            UnknownParamBehavior.REJECT);
     FieldPathResolver pathResolver = new FieldPathResolver();
     ValueConverter valueConverter = new ValueConverter(new DefaultFormattingConversionService());
     PredicateFactory predicateFactory = new PredicateFactory(false, 128);
@@ -361,6 +369,84 @@ class Tmf630PredicateArgumentResolverTest {
   }
 
   @Test
+  void splitsCsvOnMultiValueOperators() throws Exception {
+    Tmf630PredicateArgumentResolver resolver = newResolver(AllowlistMode.ALLOW_ALL);
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setParameter("name.in", "a,b,c");
+
+    Object predicate =
+        resolver.resolveArgument(
+            predicateParameter(),
+            null,
+            new ServletWebRequest(request),
+            null);
+
+    assertNotNull(predicate);
+    String rendered = predicate.toString();
+    assertTrue(rendered.contains("a"));
+    assertTrue(rendered.contains("b"));
+    assertTrue(rendered.contains("c"));
+  }
+
+  @Test
+  void csvSplitHonorsEscapedCommaAsLiteralInMultiValueOperators() {
+    assertEquals(List.of("A,B", "C"), Tmf630PredicateArgumentResolver.splitCsvForMultiValue("A\\,B,C"));
+  }
+
+  @Test
+  void csvSplitSkipsEmptyComponentsInMultiValueOperators() {
+    assertEquals(List.of("A", "B"), Tmf630PredicateArgumentResolver.splitCsvForMultiValue("A,,B,"));
+  }
+
+  @Test
+  void csvSplitPassesThroughNullAndCommaFreeValues() {
+    assertEquals(1, Tmf630PredicateArgumentResolver.splitCsvForMultiValue(null).size());
+    assertNull(Tmf630PredicateArgumentResolver.splitCsvForMultiValue(null).get(0));
+    assertEquals(List.of("solo"), Tmf630PredicateArgumentResolver.splitCsvForMultiValue("solo"));
+  }
+
+  @Test
+  void rejectsCsvExpansionThatExceedsMaxValuesPerKey() {
+    Tmf630FilterSettings settings =
+        new Tmf630FilterSettings(
+            true,
+            CombineMode.OR,
+            false,
+            false,
+            false,
+            new PredicateLimits(20, 2, 128),
+            AllowlistMode.ALLOW_ALL,
+            UnknownParamBehavior.REJECT,
+            UnknownParamBehavior.REJECT,
+            true,
+            2048,
+            UnknownParamBehavior.REJECT);
+    Tmf630PredicateArgumentResolver resolver =
+        new Tmf630PredicateArgumentResolver(
+            new ParamKeyParser(new OperatorRegistry(), true),
+            settings,
+            rootEntity -> Set.of(),
+            new FieldPathResolver(),
+            new ValueConverter(new DefaultFormattingConversionService()),
+            new PredicateFactory(false, 128),
+            new JsonPathFilterPredicateBuilder(
+                new FieldPathResolver(),
+                new ValueConverter(new DefaultFormattingConversionService()),
+                new PredicateFactory(false, 128)));
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setParameter("name.in", "a,b,c");
+
+    assertThrows(
+        TmfFilteringException.class,
+        () ->
+            resolver.resolveArgument(
+                predicateParameter(),
+                null,
+                new ServletWebRequest(request),
+                null));
+  }
+
+  @Test
   void rejectsWhenJsonPathFilterIsDisabled() {
 
     Tmf630FilterSettings settings =
@@ -375,7 +461,8 @@ class Tmf630PredicateArgumentResolverTest {
             UnknownParamBehavior.REJECT,
             UnknownParamBehavior.REJECT,
             false,
-            2048);
+            2048,
+            UnknownParamBehavior.REJECT);
     FieldPathResolver pathResolver = new FieldPathResolver();
     ValueConverter valueConverter = new ValueConverter(new DefaultFormattingConversionService());
     PredicateFactory predicateFactory = new PredicateFactory(false, 128);
@@ -414,7 +501,8 @@ class Tmf630PredicateArgumentResolverTest {
             UnknownParamBehavior.REJECT,
             UnknownParamBehavior.REJECT,
             true,
-            2048);
+            2048,
+            UnknownParamBehavior.REJECT);
 
     FieldAllowlistProvider allowlistProvider =
         rootEntity -> mode == AllowlistMode.ALLOW_ALL ? Set.of() : Set.of("name");
