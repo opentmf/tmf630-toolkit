@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.List;
 import org.bson.Document;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.mongodb.core.mapping.MongoMappingContext;
 
 class AggregationKeyTranslatorTest {
 
@@ -275,6 +276,73 @@ class AggregationKeyTranslatorTest {
             parser.parse("$.a[?(@.id == 'X')].deep.leaf"));
     Document letBody = doc.get("$let", Document.class);
     assertEquals("$$m0.deep.leaf", letBody.getString("in"));
+  }
+
+  @Test
+  void coercionWrapsArrayIntermediateInArrayElemAtToYieldScalarBeforeConvert() {
+    // Regression for the silent-drop bug: num(arr[X].myArray.value) where
+    // `myArray` is a collection-typed intermediate. Without the resolver-aware
+    // projection, Mongo's path expression `$$m0.myArray.value` returns an array
+    // and $convert(array, "double") yields null. With the resolver, the
+    // translator wraps the dotted path in `$arrayElemAt: [..., 0]` before the
+    // $convert, restoring numeric ordering.
+    MongoMappingContext ctx = new MongoMappingContext();
+    MongoFieldResolver resolver = new MongoFieldResolver(ctx);
+    SimpleRichSortParser sr = new SimpleRichSortParser("id");
+
+    Document doc =
+        AggregationKeyTranslator.translate(
+            sr.parse("outer[X].myArray.num(value)"), resolver, OuterEntity.class);
+
+    // Inner-wrapper form should still work (this is the control case).
+    assertTrue(doc.containsKey("$let") || doc.containsKey("$convert"));
+
+    Document doc2 =
+        AggregationKeyTranslator.translate(
+            sr.parse("num(outer[X].myArray.value)"), resolver, OuterEntity.class);
+    Document letBody2 = doc2.get("$let", Document.class);
+    Document convert2 = ((Document) letBody2.get("in")).get("$convert", Document.class);
+    Document input2 = (Document) convert2.get("input");
+    assertTrue(input2.containsKey("$arrayElemAt"));
+    List<?> elemArgs = input2.getList("$arrayElemAt", Object.class);
+    assertEquals("$$m0.myArray.value", elemArgs.get(0));
+    assertEquals(0, elemArgs.get(1));
+  }
+
+  @Test
+  void coercionDoesNotWrapWhenIntermediatesAreScalarObjects() {
+    // Sanity check: when the intermediate is a single-valued object, dot
+    // traversal yields a scalar already, so $arrayElemAt would break it.
+    MongoMappingContext ctx = new MongoMappingContext();
+    MongoFieldResolver resolver = new MongoFieldResolver(ctx);
+    SimpleRichSortParser sr = new SimpleRichSortParser("id");
+
+    Document doc =
+        AggregationKeyTranslator.translate(
+            sr.parse("num(outer[X].scalarInner.value)"), resolver, OuterEntity.class);
+    Document letBody = doc.get("$let", Document.class);
+    Document convert = ((Document) letBody.get("in")).get("$convert", Document.class);
+    assertEquals("$$m0.scalarInner.value", convert.get("input"));
+  }
+
+  @org.springframework.data.mongodb.core.mapping.Document
+  static class OuterEntity {
+    String id;
+    List<OuterElement> outer;
+  }
+
+  static class OuterElement {
+    String id;
+    List<InnerElement> myArray;
+    ScalarInner scalarInner;
+  }
+
+  static class InnerElement {
+    String value;
+  }
+
+  static class ScalarInner {
+    String value;
   }
 
   private Document extractCond(Document letDoc) {

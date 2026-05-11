@@ -96,7 +96,30 @@ class Tmf630PredicateMongoIT {
     documents.add(sortFixtureDoc("aa1", "01"));
     documents.add(sortFixtureDoc("aa2", "03"));
     documents.add(sortFixtureDoc("aa3", "02"));
+    documents.add(coerceFixtureDoc("co1", "3"));
+    documents.add(coerceFixtureDoc("co2", "20"));
+    documents.add(coerceFixtureDoc("co3", "100"));
+    documents.add(coerceFixtureDoc("co4", "500"));
     mongoTemplate.getDb().getCollection("mongo_search_entity").insertMany(documents);
+  }
+
+  private static Document coerceFixtureDoc(String id, String numericString) {
+    // ExternalReference element with name='COERCE' carries a `characteristics`
+    // array of {value: <numeric-string>} pairs. The path
+    // externalReference[name=COERCE].characteristics.value crosses an array
+    // intermediate (`characteristics`), which is the shape the colleague's
+    // pre-release audit identified as silently sorting in insertion order
+    // under the outer-wrapper form.
+    return new Document("_id", id)
+        .append("category", "COERCE_IT")
+        .append(
+            "externalReference",
+            List.of(
+                new Document("name", "COERCE")
+                    .append("_id", "coerce-ref-" + id)
+                    .append(
+                        "characteristics",
+                        List.of(new Document("value", numericString)))));
   }
 
   private static Document sortFixtureDoc(String id, String sortKeyValue) {
@@ -334,6 +357,40 @@ class Tmf630PredicateMongoIT {
         .andExpect(jsonPath("$[0].id").value("aa1"))
         .andExpect(jsonPath("$[1].id").value("aa3"))
         .andExpect(jsonPath("$[2].id").value("aa2"));
+  }
+
+  @Test
+  void outerNumWrapperWithArrayIntermediateSortsNumericallyLikeInnerForm() throws Exception {
+    // Regression for the silent-drop bug found during 2.1.0-SNAPSHOT pre-release
+    // testing. When the dotted leaf path of an outer-wrapper sort crosses an
+    // array-typed intermediate (here `characteristics`), Mongo's path expression
+    // auto-projects through the array and returns an array of values — which
+    // then makes the wrapping $convert yield null and silently breaks the sort.
+    // The translator must wrap such paths in $arrayElemAt before $convert so
+    // both the inner-wrapper and outer-wrapper forms produce identical numeric
+    // ordering. Lexicographic order of "3"/"20"/"100"/"500" is "100"<"20"<"3"<"500";
+    // numeric order is 3<20<100<500. The assertions below pin numeric ordering.
+    String filter = "$[?(@.category == 'COERCE_IT')]";
+    String innerSort = "externalReference[name=COERCE].characteristics.num(value)";
+    String outerSort = "num(externalReference[name=COERCE].characteristics.value)";
+
+    mockMvc
+        .perform(get("/mongo-search-paged").param("filter", filter).param("sort", "+" + innerSort))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.length()").value(4))
+        .andExpect(jsonPath("$[0].id").value("co1"))
+        .andExpect(jsonPath("$[1].id").value("co2"))
+        .andExpect(jsonPath("$[2].id").value("co3"))
+        .andExpect(jsonPath("$[3].id").value("co4"));
+
+    mockMvc
+        .perform(get("/mongo-search-paged").param("filter", filter).param("sort", "+" + outerSort))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.length()").value(4))
+        .andExpect(jsonPath("$[0].id").value("co1"))
+        .andExpect(jsonPath("$[1].id").value("co2"))
+        .andExpect(jsonPath("$[2].id").value("co3"))
+        .andExpect(jsonPath("$[3].id").value("co4"));
   }
 
   @SpringBootApplication(

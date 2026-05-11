@@ -78,6 +78,7 @@ public class MongoSearchEntity {
   public static class ExternalReference {
     private String id;
     private String name;
+    private List<Characteristic> characteristics;
 
     public String getId() {
       return id;
@@ -93,6 +94,26 @@ public class MongoSearchEntity {
 
     public void setName(String name) {
       this.name = name;
+    }
+
+    public List<Characteristic> getCharacteristics() {
+      return characteristics;
+    }
+
+    public void setCharacteristics(List<Characteristic> characteristics) {
+      this.characteristics = characteristics;
+    }
+  }
+
+  public static class Characteristic {
+    private String value;
+
+    public String getValue() {
+      return value;
+    }
+
+    public void setValue(String value) {
+      this.value = value;
     }
   }
 }

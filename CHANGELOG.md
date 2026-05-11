@@ -30,10 +30,14 @@ All notable changes to `tmf630-toolkit` are documented in this file.
   coercion function to sit either at the leaf segment (the previously
   supported `arr[id=X].num(leaf)` form) or wrap the entire sort term. The
   `SimpleRichSortParser` previously rejected the outer form with
-  `must contain at least one [...] hop`. The two forms now produce the
-  same AST and are evaluated identically by `Tmf630MongoCorrelatedSortExecutor`.
+  `must contain at least one [...] hop`. Both forms now parse and produce
+  equivalent sort orderings on `Tmf630MongoCorrelatedSortExecutor`.
   Outer wrappers compose recursively, so e.g. `num(str(arr[X].leaf))` is
-  accepted.
+  accepted. The aggregation translator detects when a coerced leaf path
+  crosses a collection-typed intermediate and wraps the path in
+  `$arrayElemAt: [..., 0]` before `$convert` — without that projection,
+  Mongo's expression-context path traversal returns an array of values
+  that silently collapses to `null` inside `$convert` and breaks the sort.
 - **New setting `opentmf.tmf630.attribute-filtering.on-unknown-json-path-field`
   (default `IGNORE`).** TMF630 Part 6 specifies that an unmatched JSON Path
   inside `?filter=` is an empty result, not a validation error. The previous
