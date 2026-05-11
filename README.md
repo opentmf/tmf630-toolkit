@@ -282,7 +282,15 @@ These are typically already present in your service. The toolkit does not pull t
 - `opentmf.tmf630.attribute-filtering.limits.max-values-per-key` (default: `20`)
 - `opentmf.tmf630.attribute-filtering.allowlist.mode` (default: `ALLOW_ALL`)
 - `opentmf.tmf630.attribute-filtering.allowlist.entities.<EntityName>=...`
-- `opentmf.tmf630.attribute-filtering.on-unknown-field` (`REJECT` or `IGNORE`)
+- `opentmf.tmf630.attribute-filtering.on-unknown-field` (`REJECT` or
+  `IGNORE`, default `REJECT`) — applies to attribute-style filters such as
+  `?status.eq=Launched` where an unknown key is usually a client typo.
+- `opentmf.tmf630.attribute-filtering.on-unknown-json-path-field`
+  (`REJECT` or `IGNORE`, default `IGNORE`) — applies to JSON Path
+  filters such as `?filter=$[?(@.optionalField == 'X')]`. Defaults to
+  `IGNORE` because TMF630 Part 6 specifies that an unmatched JSON Path
+  is an empty result rather than a validation error. Flip to `REJECT`
+  if you want the strict behaviour for both forms.
 - `opentmf.tmf630.attribute-filtering.on-unknown-operator` (`REJECT` or `IGNORE`)
 - `opentmf.tmf630.attribute-filtering.json-path-filter.enabled` (default: `true`)
 - `opentmf.tmf630.attribute-filtering.json-path-filter.max-length` (default: `2048`)
@@ -371,6 +379,7 @@ opentmf:
             - sex
       on-unknown-field: IGNORE
       on-unknown-operator: IGNORE
+      on-unknown-json-path-field: IGNORE
       json-path-filter:
         enabled: true
         max-length: 1024
@@ -685,8 +694,8 @@ If `implicit-eq-enabled=true`, `field=value` is also supported and treated as `f
 | `lt`            | less than                      | `birthdate.lt=2000-01-01`                                   |
 | `lte`           | less than or equal             | `birthdate.lte=2000-01-01`                                  |
 | `between`       | value range (2 values)         | `birthdate.between=1990-01-01&birthdate.between=1999-12-31` |
-| `in`            | in set (multi-value)           | `surname.in=Doe&surname.in=Brown`                           |
-| `nin`           | not in set (multi-value)       | `surname.nin=Smith&surname.nin=Jones`                       |
+| `in`            | in set (multi-value)           | `surname.in=Doe&surname.in=Brown` _or_ `surname.in=Doe,Brown` |
+| `nin`           | not in set (multi-value)       | `surname.nin=Smith&surname.nin=Jones` _or_ `surname.nin=Smith,Jones` |
 | `isnull`        | is null (no value)             | `name.isnull`                                               |
 | `isnotnull`     | is not null (no value)         | `surname.isnotnull`                                         |
 | `like`          | SQL like                       | `name.like=A%`                                              |
@@ -703,8 +712,14 @@ If `implicit-eq-enabled=true`, `field=value` is also supported and treated as `f
 Notes:
 
 - `regex` / `regexi` require `opentmf.tmf630.attribute-filtering.regex.enabled=true`.
-- `between`, `in`, `nin` are multi-value operators and should be sent as repeated query params.
+- `between`, `in`, `nin` are multi-value operators. Values can be provided
+  either as repeated query parameters (`?key.in=A&key.in=B`) or as a single
+  comma-separated list (`?key.in=A,B`). A literal comma inside a value can be
+  escaped with `\,`. The two forms can be mixed in one request.
 - unknown fields/operators are validated by `on-unknown-field` and `on-unknown-operator`.
+- JSON Path filters (`?filter=$[?(...)]`) use a separate policy
+  `on-unknown-json-path-field` (default `IGNORE`) so that unmatched paths
+  yield an empty result per TMF630 Part 6.
 
 #### Reserved parameter names
 
@@ -1579,6 +1594,20 @@ desc-last rule). Available coercions: `str` (string), `num`
 (double), `date` (BSON Date — accepts ISO-8601, numeric ms-since-epoch,
 ObjectId).
 
+Per TMF630 §4.7, the coercion wrapper may also enclose the entire
+sort term. The two forms produce the same aggregation pipeline:
+
+```http
+# Inner-wrapper form
+GET /api/products?sort=characteristic[name=value].num(value)
+
+# Outer-wrapper form (equivalent)
+GET /api/products?sort=num(characteristic[name=value].value)
+```
+
+Outer wrappers compose recursively, so `num(str(arr[X].leaf))` is
+also accepted.
+
 #### Example I: composing aggregator and coercion
 
 Both orderings parse and run, but produce different results on
@@ -1889,6 +1918,18 @@ $[?(@.price >= 10)]
 $[?(@.price < 100)]
 $[?(@.price <= 100)]
 ```
+
+#### Unary negation `!@.field`
+
+```
+$[?(!@.optionalField)]
+```
+
+Matches rows where the named field is missing or `null`. Useful for
+"absent attribute" filtering without needing to compare against
+`null` explicitly. Translates to the toolkit's `IS_NULL` predicate.
+Negation of array-match subforms — e.g. `!@.externalReference[?(...)]`
+— is not supported.
 
 #### Logical AND / OR
 

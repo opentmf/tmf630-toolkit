@@ -24,6 +24,7 @@ public class Tmf630AttributeFilteringProperties {
   private Allowlist allowlist = new Allowlist();
   private UnknownParamBehavior onUnknownField = UnknownParamBehavior.REJECT;
   private UnknownParamBehavior onUnknownOperator = UnknownParamBehavior.REJECT;
+  private UnknownParamBehavior onUnknownJsonPathField = UnknownParamBehavior.IGNORE;
 
   public Tmf630FilterSettings toSettings() {
     return new Tmf630FilterSettings(
@@ -37,7 +38,8 @@ public class Tmf630AttributeFilteringProperties {
         onUnknownField,
         onUnknownOperator,
         jsonPathFilter.enabled,
-        jsonPathFilter.maxLength);
+        jsonPathFilter.maxLength,
+        onUnknownJsonPathField);
   }
 
   public boolean isEnabled() {
@@ -126,6 +128,14 @@ public class Tmf630AttributeFilteringProperties {
 
   public void setOnUnknownOperator(UnknownParamBehavior onUnknownOperator) {
     this.onUnknownOperator = onUnknownOperator;
+  }
+
+  public UnknownParamBehavior getOnUnknownJsonPathField() {
+    return onUnknownJsonPathField;
+  }
+
+  public void setOnUnknownJsonPathField(UnknownParamBehavior onUnknownJsonPathField) {
+    this.onUnknownJsonPathField = onUnknownJsonPathField;
   }
 
   public static class Regex {

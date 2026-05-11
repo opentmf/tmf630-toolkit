@@ -105,7 +105,8 @@ class Tmf630ResolverOrderingPostProcessorTest {
             UnknownParamBehavior.IGNORE,
             UnknownParamBehavior.IGNORE,
             true,
-            2048);
+            2048,
+            UnknownParamBehavior.IGNORE);
     return new Tmf630PredicateArgumentResolver(
         new ParamKeyParser(new OperatorRegistry(), true),
         settings,

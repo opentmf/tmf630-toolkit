@@ -215,6 +215,80 @@ class SimpleRichSortParserTest {
   }
 
   @Test
+  void acceptsOuterNumWrapperAroundSimpleRichExpression() {
+    JsonPathSortAst.SortPath p = parser.parse("num(arr[X].value)");
+
+    assertEquals(1, p.hops().size());
+    assertEquals("arr", p.hops().get(0).arrayPath());
+    JsonPathSortAst.Coercion c = assertInstanceOf(JsonPathSortAst.Coercion.class, p.leaf());
+    assertEquals(JsonPathSortAst.CoercionType.NUM, c.type());
+    assertEquals("value", ((JsonPathSortAst.FieldRef) c.inner()).fieldPath());
+  }
+
+  @Test
+  void acceptsOuterStrWrapperAroundSimpleRichExpression() {
+    JsonPathSortAst.SortPath p = parser.parse("str(arr[X].value)");
+    JsonPathSortAst.Coercion c = (JsonPathSortAst.Coercion) p.leaf();
+    assertEquals(JsonPathSortAst.CoercionType.STR, c.type());
+  }
+
+  @Test
+  void acceptsOuterDateWrapperAroundSimpleRichExpression() {
+    JsonPathSortAst.SortPath p = parser.parse("date(arr[X].value)");
+    JsonPathSortAst.Coercion c = (JsonPathSortAst.Coercion) p.leaf();
+    assertEquals(JsonPathSortAst.CoercionType.DATE, c.type());
+  }
+
+  @Test
+  void acceptsOuterAndInnerWrapperComposingTogether() {
+    // Outer num wraps the inner str's result.
+    JsonPathSortAst.SortPath p = parser.parse("num(arr[X].str(value))");
+    JsonPathSortAst.Coercion outer = (JsonPathSortAst.Coercion) p.leaf();
+    assertEquals(JsonPathSortAst.CoercionType.NUM, outer.type());
+    JsonPathSortAst.Coercion inner = (JsonPathSortAst.Coercion) outer.inner();
+    assertEquals(JsonPathSortAst.CoercionType.STR, inner.type());
+    assertEquals("value", ((JsonPathSortAst.FieldRef) inner.inner()).fieldPath());
+  }
+
+  @Test
+  void acceptsRecursivelyNestedOuterWrappers() {
+    JsonPathSortAst.SortPath p = parser.parse("num(str(arr[X].value))");
+    JsonPathSortAst.Coercion outer = (JsonPathSortAst.Coercion) p.leaf();
+    assertEquals(JsonPathSortAst.CoercionType.NUM, outer.type());
+    JsonPathSortAst.Coercion inner = (JsonPathSortAst.Coercion) outer.inner();
+    assertEquals(JsonPathSortAst.CoercionType.STR, inner.type());
+  }
+
+  @Test
+  void acceptsOuterWrapperOnMultiHopExpression() {
+    JsonPathSortAst.SortPath p = parser.parse("num(a[X].b[Y].leaf)");
+    assertEquals(2, p.hops().size());
+    JsonPathSortAst.Coercion c = (JsonPathSortAst.Coercion) p.leaf();
+    assertEquals(JsonPathSortAst.CoercionType.NUM, c.type());
+    assertEquals("leaf", ((JsonPathSortAst.FieldRef) c.inner()).fieldPath());
+  }
+
+  @Test
+  void rejectsOuterWrapperOverBareDottedPathBecauseNoHopExists() {
+    // Outer wrapper alone is not enough — at least one [...] hop must still be
+    // present inside the wrapped expression.
+    assertThrows(IllegalArgumentException.class, () -> parser.parse("num(a.b.c)"));
+  }
+
+  @Test
+  void rejectsUnknownOuterWrapperFunction() {
+    // foo() is not in the recognised outer-coercion set, so the parser treats
+    // the whole expression as a single segment and the inner parsing complains
+    // about the missing [...] hop.
+    assertThrows(IllegalArgumentException.class, () -> parser.parse("foo(arr[X].value)"));
+  }
+
+  @Test
+  void rejectsUnbalancedOuterWrapper() {
+    assertThrows(IllegalArgumentException.class, () -> parser.parse("num(arr[X].value"));
+  }
+
+  @Test
   void allowsDottedKeyAndValueChars() {
     JsonPathSortAst.SortPath p = parser.parse("arr[name.subfield=foo-bar].v");
     JsonPathSortAst.ComparisonPredicate cp =

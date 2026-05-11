@@ -317,6 +317,25 @@ class Tmf630PredicateMongoIT {
         .andExpect(jsonPath("$[1].href").value(hrefHigh));
   }
 
+  @Test
+  void acceptsOuterNumWrapperOnSimpleRichSort() throws Exception {
+    // Simple-rich correlated sort with the coercion wrapper placed at the OUTER
+    // level (TMF630 §4.7 allows both forms). The toolkit previously rejected
+    // this form with "must contain at least one [...] hop"; it should now parse
+    // identically to the inner-wrapper form arr[X].num(leaf) and produce the
+    // same numeric ordering at the DB level.
+    String filter = "$[?(@.category == 'FILTER_SORT_IT')]";
+    String sortAsc = "num(externalReference[name=SORT_KEY].metadata.value)";
+
+    mockMvc
+        .perform(get("/mongo-search-paged").param("filter", filter).param("sort", "+" + sortAsc))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.length()").value(3))
+        .andExpect(jsonPath("$[0].id").value("aa1"))
+        .andExpect(jsonPath("$[1].id").value("aa3"))
+        .andExpect(jsonPath("$[2].id").value("aa2"));
+  }
+
   @SpringBootApplication(
       scanBasePackageClasses = MongoSearchController.class,
       exclude = {

@@ -35,7 +35,8 @@ class Tmf630PredicateArgumentResolverIT {
             UnknownParamBehavior.REJECT,
             UnknownParamBehavior.REJECT,
             true,
-            2048);
+            2048,
+            UnknownParamBehavior.REJECT);
 
     FieldAllowlistProvider allowlist = rootEntity -> Set.of("name", "age");
 

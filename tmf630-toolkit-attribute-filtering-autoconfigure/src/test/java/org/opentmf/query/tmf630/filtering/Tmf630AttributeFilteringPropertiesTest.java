@@ -23,6 +23,7 @@ class Tmf630AttributeFilteringPropertiesTest {
     properties.setAllowNestedPathsDocdb(true);
     properties.setOnUnknownField(UnknownParamBehavior.IGNORE);
     properties.setOnUnknownOperator(UnknownParamBehavior.IGNORE);
+    properties.setOnUnknownJsonPathField(UnknownParamBehavior.REJECT);
 
     Tmf630AttributeFilteringProperties.Regex regex = new Tmf630AttributeFilteringProperties.Regex();
     regex.setEnabled(true);
@@ -74,8 +75,18 @@ class Tmf630AttributeFilteringPropertiesTest {
     assertEquals(AllowlistMode.ALLOW_ALL, settings.allowlistMode());
     assertEquals(UnknownParamBehavior.IGNORE, settings.onUnknownField());
     assertEquals(UnknownParamBehavior.IGNORE, settings.onUnknownOperator());
+    assertEquals(UnknownParamBehavior.REJECT, settings.onUnknownJsonPathField());
+    assertEquals(UnknownParamBehavior.REJECT, properties.getOnUnknownJsonPathField());
     assertTrue(settings.jsonPathFilterEnabled());
     assertEquals(999, settings.jsonPathMaxLength());
+  }
+
+  @Test
+  void onUnknownJsonPathFieldDefaultsToIgnore() {
+    Tmf630AttributeFilteringProperties properties = new Tmf630AttributeFilteringProperties();
+    assertEquals(UnknownParamBehavior.IGNORE, properties.getOnUnknownJsonPathField());
+    assertEquals(
+        UnknownParamBehavior.IGNORE, properties.toSettings().onUnknownJsonPathField());
   }
 
 }
