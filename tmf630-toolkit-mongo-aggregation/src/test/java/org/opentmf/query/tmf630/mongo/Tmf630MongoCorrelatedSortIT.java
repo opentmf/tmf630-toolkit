@@ -62,7 +62,7 @@ class Tmf630MongoCorrelatedSortIT {
   }
 
   @Test
-  void sortsAscendingByCorrelatedPriceValueWithDocsLackingPriceFirst() {
+  void sortsAscendingByCorrelatedPriceValueWithDocsLackingPriceLast() {
     TmfSort sort =
         new TmfSort(
             List.of(
@@ -76,7 +76,10 @@ class Tmf630MongoCorrelatedSortIT {
 
     assertEquals(3, page.getTotalElements());
     List<String> ids = page.getContent().stream().map(Product::getId).toList();
-    assertEquals(List.of("3", "2", "1"), ids);
+    // Doc 3 has no `price` characteristic; the executor pairs every sort key with a
+    // _hasKey companion sorted ASC ahead of it, so missing keys land last regardless
+    // of direction.
+    assertEquals(List.of("2", "1", "3"), ids);
   }
 
   @Test
@@ -303,7 +306,7 @@ class Tmf630MongoCorrelatedSortIT {
   }
 
   @Test
-  void numCoercionFailureYieldsNullSortingNullFirstAscending() {
+  void numCoercionFailureYieldsNullSortingNullLastAscending() {
     mongoTemplate.dropCollection(Product.class);
     mongoTemplate.insertAll(
         List.of(
@@ -323,9 +326,11 @@ class Tmf630MongoCorrelatedSortIT {
         executor.findAll(Product.class, null, sort, PageRequest.of(0, 10));
 
     List<String> ids = page.getContent().stream().map(Product::getId).toList();
-    assertEquals("C", ids.get(0));
-    assertEquals("B", ids.get(1));
-    assertEquals("A", ids.get(2));
+    // C's value "abc" fails num() coercion → null sort key. With the _hasKey
+    // companion sort, null keys land last on ASC; B (50) < A (100) come first.
+    assertEquals("B", ids.get(0));
+    assertEquals("A", ids.get(1));
+    assertEquals("C", ids.get(2));
   }
 
   @Test
@@ -482,6 +487,56 @@ class Tmf630MongoCorrelatedSortIT {
     for (Product p : page.getContent()) {
       assertTrue(p.getId() != null && !p.getId().isEmpty());
     }
+  }
+
+  @Test
+  void plainSortAscPutsMissingFieldRowsLast() {
+    // Colleague's repro of the nulls-position divergence: a plain top-level sort
+    // term against a dataset where some rows omit the field. Mongo's BSON natural
+    // order would put the missing-field row first in ASC — the executor's
+    // _hasKey companion overrides this to nulls-last regardless of direction.
+    mongoTemplate.dropCollection(Product.class);
+    mongoTemplate.insertAll(
+        List.of(
+            new Product("apple", List.of(new Characteristic("price", 1)), "apple"),
+            new Product("zebra", List.of(new Characteristic("price", 1)), "zebra"),
+            new Product("missing", List.of(new Characteristic("price", 1)), null)));
+
+    TmfSort sort =
+        new TmfSort(
+            List.of(
+                new TmfSortTerm(Sort.Direction.ASC, TmfSortTerm.Kind.PLAIN, "description")));
+
+    Page<Product> page =
+        executor.findAll(Product.class, null, sort, PageRequest.of(0, 10));
+
+    assertEquals(
+        List.of("apple", "zebra", "missing"),
+        page.getContent().stream().map(Product::getId).toList());
+  }
+
+  @Test
+  void correlatedSortAscPutsRowsLackingMatchingArrayElementLast() {
+    // Colleague's repro of the correlated-form nulls-position divergence: rows
+    // where the predicate matches no element in the target array land last in
+    // ASC because the _hasKey companion is ASC ahead of the (null) sort key.
+    TmfSort sort =
+        new TmfSort(
+            List.of(
+                new TmfSortTerm(
+                    Sort.Direction.ASC,
+                    TmfSortTerm.Kind.SIMPLE_RICH,
+                    "characteristic[name=price].value")));
+
+    Page<Product> page =
+        executor.findAll(Product.class, null, sort, PageRequest.of(0, 10));
+
+    // Doc 3 carries `stock` and `color`/`size` characteristics but no `price`;
+    // the correlated filter returns no element, sort key resolves null, doc lands
+    // last in ASC.
+    assertEquals(
+        List.of("2", "1", "3"),
+        page.getContent().stream().map(Product::getId).toList());
   }
 
   @SpringBootApplication

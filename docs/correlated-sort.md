@@ -166,9 +166,17 @@ Recommended composition with an explicit existence filter:
 - The correlated key resolves to the **first** matching element's targeted
   scalar (mirrors `$first` in the aggregation). If no element matches, the
   resolved value is `null`.
-- Null/missing handling follows MongoDB's natural ordering:
-  - **Ascending** → non-matching documents sort **first** (top).
-  - **Descending** → non-matching documents sort **last** (bottom).
+- **Null / missing sort keys land last regardless of direction.** The
+  executor pairs every emitted sort key with a `_hasKeyN` companion
+  (`0` when the key resolves to a value, `1` otherwise — both MISSING
+  and explicit `null` collapse to `1` via `$ifNull`) and prepends it
+  ascending in the `$sort` document. This matches the
+  PostgreSQL / Oracle / Elasticsearch convention and keeps paginated
+  `?sort=field&limit=N` requests from returning a first page of
+  missing-field rows. (Before 2.1.1 the executor inherited Mongo's
+  BSON natural ordering — ASC put nulls first, DESC put them last —
+  which diverged from in-memory comparators that follow the
+  nulls-last convention.)
 - **No implicit filtering.** Callers who want only matching documents must
   pair the sort with an explicit `filter=`. This is by design: it keeps
   semantics predictable and avoids hiding a `$match` behind a sort.
@@ -345,8 +353,8 @@ V1 ships two small function families on top of the basic path grammar.
 | `arr.min(field)` | minimum value of `field` across `arr` | `$min: "$arr.field"` |
 
 `min` / `max` over an empty or missing array yield `null`, which then
-sorts per the null-sort rules in **Semantics** above (asc → top,
-desc → bottom).
+sorts per the null-sort rules in **Semantics** above (last regardless
+of direction).
 
 **Coercion wrappers** compose with aggregators or wrap raw fields, and
 guarantee a stable target type for the sort key:
@@ -390,8 +398,8 @@ they produce different results:
 
 `onError: null` is always emitted, so a malformed value on one document
 yields a `null` sort key for that document rather than aborting the whole
-aggregation. The existing null-sort rules then apply (asc → top,
-desc → bottom).
+aggregation. The existing null-sort rules then apply (last regardless
+of direction).
 
 ### Decisions baked in
 

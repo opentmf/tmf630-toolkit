@@ -3,6 +3,7 @@ package org.opentmf.query.tmf630.mongo;
 import com.querydsl.core.types.Predicate;
 import com.querydsl.mongodb.document.MongodbDocumentSerializer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import org.bson.Document;
 import org.opentmf.query.tmf630.paging.TmfSort;
@@ -53,35 +54,54 @@ public class Tmf630MongoCorrelatedSortExecutor {
 
     List<AggregationOperation> stages = new ArrayList<>(matchStages);
 
-    Document addFieldsDoc = new Document();
+    Document sortKeysDoc = new Document();
+    Document hasKeysDoc = new Document();
     List<String> syntheticKeys = new ArrayList<>();
     List<Sort.Order> sortOrders = new ArrayList<>();
     int counter = 0;
     for (TmfSortTerm term : sort.terms()) {
-      switch (term.kind()) {
-        case JSONPATH -> {
-          String key = "_sortKey" + counter++;
-          JsonPathSortAst.SortPath ast = jsonPathParser.parse(term.expression());
-          addFieldsDoc.append(
-              key, AggregationKeyTranslator.translate(ast, fieldResolver, entityClass));
-          syntheticKeys.add(key);
-          sortOrders.add(new Sort.Order(term.direction(), key));
-        }
-        case SIMPLE_RICH -> {
-          String key = "_sortKey" + counter++;
-          JsonPathSortAst.SortPath ast = simpleRichParser.parse(term.expression());
-          addFieldsDoc.append(
-              key, AggregationKeyTranslator.translate(ast, fieldResolver, entityClass));
-          syntheticKeys.add(key);
-          sortOrders.add(new Sort.Order(term.direction(), key));
-        }
-        case PLAIN -> sortOrders.add(new Sort.Order(term.direction(), term.expression()));
-      }
+      String sortKey = "_sortKey" + counter;
+      String hasKey = "_hasKey" + counter;
+      counter++;
+      Object sortKeyExpression =
+          switch (term.kind()) {
+            case JSONPATH -> AggregationKeyTranslator.translate(
+                jsonPathParser.parse(term.expression()), fieldResolver, entityClass);
+            case SIMPLE_RICH -> AggregationKeyTranslator.translate(
+                simpleRichParser.parse(term.expression()), fieldResolver, entityClass);
+            case PLAIN -> "$" + fieldResolver.resolveBsonPath(entityClass, term.expression());
+          };
+      sortKeysDoc.append(sortKey, sortKeyExpression);
+      // Companion key is computed in a separate $addFields stage so it can reference
+      // the just-emitted _sortKeyN. Within a single $addFields stage, expressions
+      // resolve against the input document and a sibling field reference comes back
+      // null — hence the two-stage split. $ifNull folds Mongo's MISSING (absent
+      // field) and explicit null together: $_sortKey0 evaluates to MISSING when the
+      // sort key expression resolves to undefined (e.g. a path through a doc that
+      // doesn't carry the field), and MISSING is not equal to null under $ne, which
+      // would otherwise let the row sneak into the present-key bucket.
+      hasKeysDoc.append(
+          hasKey,
+          new Document(
+              "$cond",
+              Arrays.asList(
+                  new Document(
+                      "$eq",
+                      Arrays.asList(
+                          new Document("$ifNull", Arrays.asList("$" + sortKey, null)), null)),
+                  1,
+                  0)));
+      syntheticKeys.add(sortKey);
+      syntheticKeys.add(hasKey);
+      sortOrders.add(new Sort.Order(Sort.Direction.ASC, hasKey));
+      sortOrders.add(new Sort.Order(term.direction(), sortKey));
     }
 
-    if (!addFieldsDoc.isEmpty()) {
-      Document addFieldsStage = new Document("$addFields", addFieldsDoc);
-      stages.add(ctx -> addFieldsStage);
+    if (!sortKeysDoc.isEmpty()) {
+      Document sortKeysStage = new Document("$addFields", sortKeysDoc);
+      Document hasKeysStage = new Document("$addFields", hasKeysDoc);
+      stages.add(ctx -> sortKeysStage);
+      stages.add(ctx -> hasKeysStage);
     }
 
     if (!sortOrders.isEmpty()) {

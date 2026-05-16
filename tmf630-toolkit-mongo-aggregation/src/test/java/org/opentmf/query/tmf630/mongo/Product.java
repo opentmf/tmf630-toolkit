@@ -9,12 +9,19 @@ public class Product {
 
   @Id private String id;
   private List<Characteristic> characteristic;
+  private String description;
 
   public Product() {}
 
   public Product(String id, List<Characteristic> characteristic) {
     this.id = id;
     this.characteristic = characteristic;
+  }
+
+  public Product(String id, List<Characteristic> characteristic, String description) {
+    this.id = id;
+    this.characteristic = characteristic;
+    this.description = description;
   }
 
   public String getId() {
@@ -31,5 +38,13 @@ public class Product {
 
   public void setCharacteristic(List<Characteristic> characteristic) {
     this.characteristic = characteristic;
+  }
+
+  public String getDescription() {
+    return description;
+  }
+
+  public void setDescription(String description) {
+    this.description = description;
   }
 }

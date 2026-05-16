@@ -2,6 +2,33 @@
 
 All notable changes to `tmf630-toolkit` are documented in this file.
 
+## [2.1.1] - 2026-05-16
+
+### Fixed
+- **Mongo correlated-sort executor now places rows with null / missing sort
+  keys last regardless of direction.** Previously, the executor delegated
+  null-position semantics to Mongo's default `$sort`, which uses BSON natural
+  order — rows with a null sort key landed *first* in ASC and *last* in DESC.
+  Paginated consumers issuing `?sort=field&limit=N` would see a first page
+  populated with rows missing the sort field, which rarely matches REST API
+  conventions. `Tmf630MongoCorrelatedSortExecutor` now derives a paired
+  `_hasKey` boolean for every sort term (PLAIN, JSONPATH, and SIMPLE_RICH) in
+  a follow-up `$addFields` stage and prepends it ascending in the `$sort`
+  document, so present-keyed rows always come before missing-keyed ones. The
+  guard expression uses `$ifNull` so that Mongo's MISSING (absent field) and
+  explicit `null` collapse to the same bucket. Affects the correlated grammar
+  (e.g. `?sort=arr[id=X].leaf` against rows where the predicate matches no
+  element) and plain top-level sort (e.g. `?sort=description` against rows
+  that omit the field). The two `$addFields` and trailing `$project` are
+  transparent to callers — synthetic keys never appear in the response.
+
+### Notes
+- The JPA backend continues to inherit the underlying database's
+  null-position default (PostgreSQL / Oracle: nulls last in ASC; MySQL /
+  H2 / SQL Server: nulls first in ASC). Bringing JPA into parity with
+  Mongo is deferred to a later release alongside JPA correlated-sort
+  support.
+
 ## [2.1.0] - 2026-05-11
 
 ### Added

@@ -94,14 +94,16 @@ class Tmf630CorrelatedSortHttpIT {
 
   @Test
   void jsonPathSingleLevelAscendingByCorrelatedPriceValue() throws Exception {
+    // Doc 3 has no `price` characteristic; the executor's nulls-last policy puts
+    // missing-key docs at the tail regardless of direction.
     mockMvc
         .perform(
             get("/products")
                 .param("sort", "$.characteristic[?(@.name == 'price')].value"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$[0].id").value("3"))
-        .andExpect(jsonPath("$[1].id").value("2"))
-        .andExpect(jsonPath("$[2].id").value("1"));
+        .andExpect(jsonPath("$[0].id").value("2"))
+        .andExpect(jsonPath("$[1].id").value("1"))
+        .andExpect(jsonPath("$[2].id").value("3"));
   }
 
   @Test
@@ -125,6 +127,8 @@ class Tmf630CorrelatedSortHttpIT {
             new Product("b", List.of(new Characteristic("cost", 10))),
             new Product("c", List.of(new Characteristic("color", "red")))));
 
+    // Doc `c` has neither `price` nor `cost`; predicate returns no element, sort
+    // key is null and the row lands last in ASC under the nulls-last policy.
     mockMvc
         .perform(
             get("/products")
@@ -132,9 +136,9 @@ class Tmf630CorrelatedSortHttpIT {
                     "sort",
                     "$.characteristic[?(@.name == 'price' || @.name == 'cost')].value"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$[0].id").value("c"))
-        .andExpect(jsonPath("$[1].id").value("a"))
-        .andExpect(jsonPath("$[2].id").value("b"));
+        .andExpect(jsonPath("$[0].id").value("a"))
+        .andExpect(jsonPath("$[1].id").value("b"))
+        .andExpect(jsonPath("$[2].id").value("c"));
   }
 
   @Test
@@ -146,9 +150,9 @@ class Tmf630CorrelatedSortHttpIT {
             new Product("b", List.of(new Characteristic("price", 10))),
             new Product("c", List.of(new Characteristic("price", 20)))));
 
-    // Same-element AND predicate. We don't have a richer characteristic in this fixture
-    // but we can verify the parser accepts the expression by combining the price check
-    // with itself — the result still distinguishes prices.
+    // Same-element AND predicate. Doc `a` has price=5 (filtered out by `value > 7`)
+    // so its sort key is null and lands last under the nulls-last policy. b (10) and
+    // c (20) sort ASC by value.
     mockMvc
         .perform(
             get("/products")
@@ -156,9 +160,9 @@ class Tmf630CorrelatedSortHttpIT {
                     "sort",
                     "$.characteristic[?(@.name == 'price' && @.value > 7)].value"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$[0].id").value("a"))
-        .andExpect(jsonPath("$[1].id").value("b"))
-        .andExpect(jsonPath("$[2].id").value("c"));
+        .andExpect(jsonPath("$[0].id").value("b"))
+        .andExpect(jsonPath("$[1].id").value("c"))
+        .andExpect(jsonPath("$[2].id").value("a"));
   }
 
   @Test
@@ -203,24 +207,26 @@ class Tmf630CorrelatedSortHttpIT {
 
   @Test
   void jsonPathWildcardIsAcceptedAsTransparentProjection() throws Exception {
+    // ASC with nulls last: 2 (18), 1 (20.5), 3 (no price → null).
     mockMvc
         .perform(
             get("/products")
                 .param("sort", "$.characteristic[?(@.name == 'price')][*].value"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$[0].id").value("3"))
-        .andExpect(jsonPath("$[2].id").value("1"));
+        .andExpect(jsonPath("$[0].id").value("2"))
+        .andExpect(jsonPath("$[2].id").value("3"));
   }
 
   // ---------- Simple-rich grammar ----------
 
   @Test
   void simpleRichExplicitKeyEqualsValue() throws Exception {
+    // ASC with nulls last: 2 (18), 1 (20.5), 3 (no price → null).
     mockMvc
         .perform(get("/products").param("sort", "characteristic[name=price].value"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$[0].id").value("3"))
-        .andExpect(jsonPath("$[2].id").value("1"));
+        .andExpect(jsonPath("$[0].id").value("2"))
+        .andExpect(jsonPath("$[2].id").value("3"));
   }
 
   @Test
@@ -380,7 +386,7 @@ class Tmf630CorrelatedSortHttpIT {
   }
 
   @Test
-  void simpleRichNumCoercionFailureYieldsNullSortingFirstAscending() throws Exception {
+  void simpleRichNumCoercionFailureYieldsNullSortingLastAscending() throws Exception {
     mongoTemplate.dropCollection(Product.class);
     mongoTemplate.insertAll(
         List.of(
@@ -388,14 +394,16 @@ class Tmf630CorrelatedSortHttpIT {
             new Product("b", List.of(new Characteristic("price", "50"))),
             new Product("c", List.of(new Characteristic("price", "abc")))));
 
+    // c's "abc" fails num() → null sort key, lands last under the nulls-last policy;
+    // b (50) < a (100) come first.
     mockMvc
         .perform(
             get("/products")
                 .param("sort", "+characteristic[name=price].num(value)"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$[0].id").value("c"))
-        .andExpect(jsonPath("$[1].id").value("b"))
-        .andExpect(jsonPath("$[2].id").value("a"));
+        .andExpect(jsonPath("$[0].id").value("b"))
+        .andExpect(jsonPath("$[1].id").value("a"))
+        .andExpect(jsonPath("$[2].id").value("c"));
   }
 
   @Test
@@ -552,23 +560,25 @@ class Tmf630CorrelatedSortHttpIT {
 
   @Test
   void tmfPageableJsonPathSortGoesThroughAggregationPath() throws Exception {
+    // ASC with nulls last: 2 (18), 1 (20.5), 3 (no price → null).
     mockMvc
         .perform(
             get("/products-rich")
                 .param("sort", "$.characteristic[?(@.name == 'price')].value"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$[0].id").value("3"))
-        .andExpect(jsonPath("$[1].id").value("2"))
-        .andExpect(jsonPath("$[2].id").value("1"));
+        .andExpect(jsonPath("$[0].id").value("2"))
+        .andExpect(jsonPath("$[1].id").value("1"))
+        .andExpect(jsonPath("$[2].id").value("3"));
   }
 
   @Test
   void tmfPageableSimpleRichSortGoesThroughAggregationPath() throws Exception {
+    // ASC with nulls last: 2 (18), 1 (20.5), 3 (no price → null).
     mockMvc
         .perform(get("/products-rich").param("sort", "characteristic[name=price].value"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$[0].id").value("3"))
-        .andExpect(jsonPath("$[2].id").value("1"));
+        .andExpect(jsonPath("$[0].id").value("2"))
+        .andExpect(jsonPath("$[2].id").value("3"));
   }
 
   @Test

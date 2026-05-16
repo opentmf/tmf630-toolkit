@@ -1360,7 +1360,7 @@ GET /api/products?sort=$.characteristic[?(@.name == 'price')].value
 For the dataset above the result order is:
 
 ```
-3 (no price → null sorts first asc), 2 (price 18), 1 (price 20.5)
+2 (price 18), 1 (price 20.5), 3 (no price → null sorts last regardless of direction)
 ```
 
 To exclude documents that don't have a `price` characteristic, pair
