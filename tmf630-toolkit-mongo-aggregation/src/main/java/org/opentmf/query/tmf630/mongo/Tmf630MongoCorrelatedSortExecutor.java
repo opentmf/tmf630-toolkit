@@ -69,7 +69,7 @@ public class Tmf630MongoCorrelatedSortExecutor {
                 jsonPathParser.parse(term.expression()), fieldResolver, entityClass);
             case SIMPLE_RICH -> AggregationKeyTranslator.translate(
                 simpleRichParser.parse(term.expression()), fieldResolver, entityClass);
-            case PLAIN -> "$" + fieldResolver.resolveBsonPath(entityClass, term.expression());
+            case PLAIN -> plainSortKeyExpression(entityClass, term.expression());
           };
       sortKeysDoc.append(sortKey, sortKeyExpression);
       // Companion key is computed in a separate $addFields stage so it can reference
@@ -125,6 +125,19 @@ public class Tmf630MongoCorrelatedSortExecutor {
     Aggregation dataAgg = Aggregation.newAggregation(stages);
     AggregationResults<T> result = mongoTemplate.aggregate(dataAgg, collectionName, entityClass);
     return new PageImpl<>(result.getMappedResults(), pageable, total);
+  }
+
+  private Object plainSortKeyExpression(Class<?> entityClass, String dottedJavaPath) {
+    String pathExpr = "$" + fieldResolver.resolveBsonPath(entityClass, dottedJavaPath);
+    // A plain dotted path whose intermediate segments include a collection-typed
+    // property auto-projects to an array under Mongo's expression context. Two
+    // such terms in one $sort trigger "cannot sort with keys that are parallel
+    // arrays" (BadValue, code 2). Reduce to the first element so each _sortKeyN
+    // stays scalar.
+    if (fieldResolver.hasArrayIntermediate(entityClass, dottedJavaPath)) {
+      return new Document("$arrayElemAt", Arrays.asList(pathExpr, 0));
+    }
+    return pathExpr;
   }
 
   private List<AggregationOperation> buildMatchStages(Predicate filter) {

@@ -43,11 +43,16 @@ public final class AggregationKeyTranslator {
         return wrapDocument(aggregated);
       }
       String varName = "m" + idx;
+      // needsScalar=true: this leaf becomes a synthetic _sortKeyN field. Mongo $sort
+      // rejects multi-key sort docs whose values are parallel arrays (BadValue code
+      // 2), so when the leaf path traverses a collection-typed intermediate (and
+      // therefore auto-projects to an array under expression-context evaluation),
+      // wrap it in $arrayElemAt to project the first element.
       return new Document(
           "$let",
           new Document()
               .append("vars", new Document(varName, new Document("$first", filterStage)))
-              .append("in", translatePerElement(leaf, "$$" + varName, resolver, elementType)));
+              .append("in", translatePerElement(leaf, "$$" + varName, resolver, elementType, true)));
     }
 
     String varName = "m" + idx;
@@ -106,18 +111,22 @@ public final class AggregationKeyTranslator {
 
   /**
    * Builds the per-element expression for a sort leaf. The {@code needsScalar}
-   * flag signals that the result is about to be fed into a scalar-only stage
-   * such as {@code $convert} (i.e. the leaf is wrapped in a {@code Coercion}).
-   * In that case, if the leaf's dotted path crosses a collection-typed
-   * intermediate, Mongo's expression-context path traversal auto-projects and
-   * returns an array — which breaks the wrapping {@code $convert}. We detect
-   * this via {@link MongoFieldResolver#hasArrayIntermediate} and wrap the path
-   * in {@code $arrayElemAt: [path, 0]} so the coercion sees a scalar.
+   * flag signals that the result is about to be fed into a scalar-only consumer
+   * — either a {@code $convert} wrapper from a leaf {@code Coercion}, or the
+   * synthetic {@code _sortKeyN} field emitted by
+   * {@link Tmf630MongoCorrelatedSortExecutor}. In both cases, if the leaf's
+   * dotted path crosses a collection-typed intermediate, Mongo's
+   * expression-context path traversal auto-projects and returns an array. That
+   * array breaks {@code $convert}, and it triggers Mongo's "cannot sort with
+   * keys that are parallel arrays" error (code 2, BadValue) whenever two or
+   * more such terms appear in the same multi-key {@code $sort}. We detect the
+   * shape via {@link MongoFieldResolver#hasArrayIntermediate} and wrap the
+   * path in {@code $arrayElemAt: [path, 0]} so the consumer sees a scalar.
    *
-   * <p>The flag is intentionally false for direct sort-key emission: Mongo's
-   * {@code $sort} accepts an array as a sort key (using its first element for
-   * comparison), and that pre-existing behaviour is what makes uncoerced
-   * dotted-leaf sorts work today.
+   * <p>The flag is false on the aggregator path ({@code translateAggregatedLeaf}
+   * → {@code $map.in}), where each per-element value is folded by {@code $min}
+   * / {@code $max} downstream and array-valued per-element results are accepted
+   * by the reducer.
    */
   private static Object translatePerElement(
       JsonPathSortAst.LeafExpression leaf,

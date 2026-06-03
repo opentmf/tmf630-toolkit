@@ -310,6 +310,48 @@ class AggregationKeyTranslatorTest {
   }
 
   @Test
+  void directSortKeyEmissionWrapsArrayIntermediateInArrayElemAtToYieldScalar() {
+    // Regression for the multi-term parallel-arrays bug: when two correlated
+    // sort terms each emit a leaf whose path traverses an inner collection-typed
+    // intermediate, Mongo's $sort rejects the multi-key sort doc with
+    // "cannot sort with keys that are parallel arrays" (BadValue, code 2). The
+    // translator now wraps the per-element leaf in $arrayElemAt for direct
+    // sort-key emission too (not only inside coercion), so each _sortKeyN stays
+    // scalar.
+    MongoMappingContext ctx = new MongoMappingContext();
+    MongoFieldResolver resolver = new MongoFieldResolver(ctx);
+    SimpleRichSortParser sr = new SimpleRichSortParser("id");
+
+    Document doc =
+        AggregationKeyTranslator.translate(
+            sr.parse("outer[X].myArray.value"), resolver, OuterEntity.class);
+
+    Document letBody = doc.get("$let", Document.class);
+    Document inExpr = (Document) letBody.get("in");
+    assertTrue(inExpr.containsKey("$arrayElemAt"));
+    List<?> elemArgs = inExpr.getList("$arrayElemAt", Object.class);
+    assertEquals("$$m0.myArray.value", elemArgs.get(0));
+    assertEquals(0, elemArgs.get(1));
+  }
+
+  @Test
+  void directSortKeyEmissionDoesNotWrapWhenLeafPathHasNoArrayIntermediate() {
+    // Sanity: when the leaf path crosses only scalar object intermediates, no
+    // $arrayElemAt wrap is added — the dotted path resolves to a scalar already
+    // and the wrap would either be a no-op or break valid expressions.
+    MongoMappingContext ctx = new MongoMappingContext();
+    MongoFieldResolver resolver = new MongoFieldResolver(ctx);
+    SimpleRichSortParser sr = new SimpleRichSortParser("id");
+
+    Document doc =
+        AggregationKeyTranslator.translate(
+            sr.parse("outer[X].scalarInner.value"), resolver, OuterEntity.class);
+
+    Document letBody = doc.get("$let", Document.class);
+    assertEquals("$$m0.scalarInner.value", letBody.get("in"));
+  }
+
+  @Test
   void coercionDoesNotWrapWhenIntermediatesAreScalarObjects() {
     // Sanity check: when the intermediate is a single-valued object, dot
     // traversal yields a scalar already, so $arrayElemAt would break it.

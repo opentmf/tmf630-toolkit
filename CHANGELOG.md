@@ -2,6 +2,29 @@
 
 All notable changes to `tmf630-toolkit` are documented in this file.
 
+## [2.1.2] - 2026-06-03
+
+### Fixed
+- **Multi-term Mongo correlated sort no longer fails with "parallel arrays".**
+  When `?sort=` carried two or more correlated terms whose leaf paths each
+  descended into a collection-typed intermediate (e.g.
+  `?sort=arr[id=A].sub.value,arr[id=B].sub.value` where `sub` is a list),
+  the executor emitted two synthetic `_sortKeyN` fields whose values
+  auto-projected to arrays under Mongo's expression-context path traversal.
+  Mongo's `$sort` rejected the multi-key sort document with
+  `cannot sort with keys that are parallel arrays` (BadValue, code 2),
+  surfacing as `500 Internal Server Error`. A single term worked because
+  Mongo internally reduces one array sort key, but the second array key
+  triggered the error. `AggregationKeyTranslator` now wraps the per-element
+  leaf in `$arrayElemAt: [..., 0]` whenever
+  `MongoFieldResolver.hasArrayIntermediate` flags a collection-typed segment,
+  so each synthetic sort key stays scalar. The same reduction is applied to
+  `PLAIN` terms in `Tmf630MongoCorrelatedSortExecutor` for symmetry.
+  Behaviour for single-term sort on a non-array-intermediate leaf is
+  unchanged; tests covering plain dotted leaves, aggregator (`min()` /
+  `max()`) reducers, and coercion (`num()` / `str()` / `date()`) continue
+  to pass without modification.
+
 ## [2.1.1] - 2026-05-16
 
 ### Fixed

@@ -463,9 +463,11 @@ class Tmf630MongoCorrelatedSortIT {
     Page<Order> page =
         executor.findAll(Order.class, null, sort, PageRequest.of(0, 10));
 
-    // Sort key for each doc is the auto-projected array of values from the matched
-    // serviceCharacteristic. With one element each, that's effectively the single
-    // value: "A-event" < "B-event" < "C-event".
+    // Sort key for each doc is the leaf path through serviceCharacteristic (a
+    // collection-typed intermediate). The translator wraps the per-element leaf
+    // in $arrayElemAt so the synthetic _sortKey0 stays scalar — first element of
+    // each Service's serviceCharacteristic[*].value is the kafkaEventId value:
+    // "A-event" < "B-event" < "C-event".
     assertEquals(
         List.of("A", "B", "C"),
         page.getContent().stream().map(Order::getId).toList());
@@ -537,6 +539,127 @@ class Tmf630MongoCorrelatedSortIT {
     assertEquals(
         List.of("2", "1", "3"),
         page.getContent().stream().map(Product::getId).toList());
+  }
+
+  @Test
+  void multipleCorrelatedTermsWithArrayIntermediateLeavesDoNotTriggerParallelArraysError() {
+    // Colleague's repro of the parallel-arrays bug: two correlated sort terms,
+    // each filtering the same outer array by a different predicate, and each
+    // descending into an inner collection-typed intermediate at the leaf
+    // (`service.serviceCharacteristic.value`). Without per-leaf scalar reduction
+    // both _sortKey0 and _sortKey1 carry auto-projected arrays, and Mongo
+    // refuses the multi-key $sort with "cannot sort with keys that are parallel
+    // arrays" (BadValue, code 2). The translator wraps each leaf in
+    // $arrayElemAt so both keys stay scalar.
+    mongoTemplate.dropCollection(Order.class);
+    mongoTemplate.insertAll(
+        List.of(
+            new Order(
+                "A",
+                List.of(
+                    new OrderItem(
+                        "RC_OFFER_TYPE",
+                        new Service(List.of(new Characteristic("type", "Z")))),
+                    new OrderItem(
+                        "STARTING_PRICE",
+                        new Service(List.of(new Characteristic("price", "200")))))),
+            new Order(
+                "B",
+                List.of(
+                    new OrderItem(
+                        "RC_OFFER_TYPE",
+                        new Service(List.of(new Characteristic("type", "X")))),
+                    new OrderItem(
+                        "STARTING_PRICE",
+                        new Service(List.of(new Characteristic("price", "300")))))),
+            new Order(
+                "C",
+                List.of(
+                    new OrderItem(
+                        "RC_OFFER_TYPE",
+                        new Service(List.of(new Characteristic("type", "Y")))),
+                    new OrderItem(
+                        "STARTING_PRICE",
+                        new Service(List.of(new Characteristic("price", "100"))))))));
+
+    TmfSort sort =
+        new TmfSort(
+            List.of(
+                new TmfSortTerm(
+                    Sort.Direction.ASC,
+                    TmfSortTerm.Kind.SIMPLE_RICH,
+                    "serviceOrderItem[id=RC_OFFER_TYPE].service.serviceCharacteristic.value"),
+                new TmfSortTerm(
+                    Sort.Direction.ASC,
+                    TmfSortTerm.Kind.SIMPLE_RICH,
+                    "serviceOrderItem[id=STARTING_PRICE].service.serviceCharacteristic.value")));
+
+    Page<Order> page =
+        executor.findAll(Order.class, null, sort, PageRequest.of(0, 10));
+
+    // First term values (RC_OFFER_TYPE): A=Z, B=X, C=Y → ASC sort: X, Y, Z → B, C, A
+    assertEquals(
+        List.of("B", "C", "A"),
+        page.getContent().stream().map(Order::getId).toList());
+  }
+
+  @Test
+  void multipleCorrelatedTermsResolveTieUsingSecondTerm() {
+    // Same multi-term shape as above, but with seed data that ties the first
+    // term so the second term decides the order. Confirms both keys are
+    // honoured by $sort rather than silently collapsed.
+    mongoTemplate.dropCollection(Order.class);
+    mongoTemplate.insertAll(
+        List.of(
+            new Order(
+                "A",
+                List.of(
+                    new OrderItem(
+                        "RC_OFFER_TYPE",
+                        new Service(List.of(new Characteristic("type", "X")))),
+                    new OrderItem(
+                        "STARTING_PRICE",
+                        new Service(List.of(new Characteristic("price", "200")))))),
+            new Order(
+                "B",
+                List.of(
+                    new OrderItem(
+                        "RC_OFFER_TYPE",
+                        new Service(List.of(new Characteristic("type", "X")))),
+                    new OrderItem(
+                        "STARTING_PRICE",
+                        new Service(List.of(new Characteristic("price", "100")))))),
+            new Order(
+                "C",
+                List.of(
+                    new OrderItem(
+                        "RC_OFFER_TYPE",
+                        new Service(List.of(new Characteristic("type", "Y")))),
+                    new OrderItem(
+                        "STARTING_PRICE",
+                        new Service(List.of(new Characteristic("price", "999"))))))));
+
+    TmfSort sort =
+        new TmfSort(
+            List.of(
+                new TmfSortTerm(
+                    Sort.Direction.ASC,
+                    TmfSortTerm.Kind.SIMPLE_RICH,
+                    "serviceOrderItem[id=RC_OFFER_TYPE].service.serviceCharacteristic.value"),
+                new TmfSortTerm(
+                    Sort.Direction.ASC,
+                    TmfSortTerm.Kind.SIMPLE_RICH,
+                    "serviceOrderItem[id=STARTING_PRICE].service.serviceCharacteristic.value")));
+
+    Page<Order> page =
+        executor.findAll(Order.class, null, sort, PageRequest.of(0, 10));
+
+    // First term: A=X, B=X, C=Y → A and B tie at X, C sorts after.
+    // Second term among A and B: A=200, B=100 → B before A.
+    // Final: B, A, C.
+    assertEquals(
+        List.of("B", "A", "C"),
+        page.getContent().stream().map(Order::getId).toList());
   }
 
   @SpringBootApplication
