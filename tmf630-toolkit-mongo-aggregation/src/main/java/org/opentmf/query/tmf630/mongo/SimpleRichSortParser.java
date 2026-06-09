@@ -154,22 +154,62 @@ public final class SimpleRichSortParser {
             explicitHops, new JsonPathSortAst.FieldRef(trailing));
       }
 
-      // Function call at the leaf. Pre-function segments are kept as naked array hops
-      // so the aggregator can iterate the right array; the function becomes the leaf.
-      List<JsonPathSortAst.ArrayHop> all = new ArrayList<>(explicitHops);
+      // Function call at the leaf. Two sub-cases:
+      //   1. The function chain contains an Aggregator (min/max). The aggregator
+      //      needs to $map across an array, so pre-function segments are
+      //      promoted to naked ArrayHops with AlwaysTruePredicate. The
+      //      translator then iterates the right array.
+      //   2. The function chain is pure Coercion (num/str/date). The translator
+      //      handles array intermediates inside Coercion(FieldRef) by emitting
+      //      $map+$convert+$min/$max at the leaf, so naked hops are unnecessary
+      //      AND counter-productive (they would crash on object intermediates
+      //      via $filter on a non-array). Pre-function segments are kept as
+      //      part of the leaf's FieldRef path instead.
       for (int i = 0; i < segments.size() - 1; i++) {
-        String segment = segments.get(i);
-        if (segment.indexOf('(') >= 0) {
+        if (segments.get(i).indexOf('(') >= 0) {
           throw new IllegalArgumentException(
-              "Function call segments are only allowed as the leaf, not as a naked array hop: "
-                  + segment);
+              "Function call segments are only allowed as the leaf, not before more path: "
+                  + segments.get(i));
         }
-        all.add(
-            new JsonPathSortAst.ArrayHop(
-                segment, JsonPathSortAst.AlwaysTruePredicate.INSTANCE));
       }
       JsonPathSortAst.LeafExpression leaf = parseLeafExpression(lastSegment);
-      return new JsonPathSortAst.SortPath(all, leaf);
+      if (segments.size() == 1) {
+        return new JsonPathSortAst.SortPath(explicitHops, leaf);
+      }
+      String prePath = String.join(".", segments.subList(0, segments.size() - 1));
+      if (containsAggregator(leaf)) {
+        List<JsonPathSortAst.ArrayHop> all = new ArrayList<>(explicitHops);
+        for (String segment : segments.subList(0, segments.size() - 1)) {
+          all.add(
+              new JsonPathSortAst.ArrayHop(
+                  segment, JsonPathSortAst.AlwaysTruePredicate.INSTANCE));
+        }
+        return new JsonPathSortAst.SortPath(all, leaf);
+      }
+      return new JsonPathSortAst.SortPath(explicitHops, prependPath(leaf, prePath));
+    }
+
+    private static boolean containsAggregator(JsonPathSortAst.LeafExpression leaf) {
+      if (leaf instanceof JsonPathSortAst.Aggregator) {
+        return true;
+      }
+      if (leaf instanceof JsonPathSortAst.Coercion c) {
+        return containsAggregator(c.inner());
+      }
+      return false;
+    }
+
+    private static JsonPathSortAst.LeafExpression prependPath(
+        JsonPathSortAst.LeafExpression leaf, String prefix) {
+      if (leaf instanceof JsonPathSortAst.FieldRef fr) {
+        return new JsonPathSortAst.FieldRef(prefix + "." + fr.fieldPath());
+      }
+      if (leaf instanceof JsonPathSortAst.Coercion c) {
+        return new JsonPathSortAst.Coercion(c.type(), prependPath(c.inner(), prefix));
+      }
+      throw new IllegalStateException(
+          "Aggregator must not reach prependPath (would have taken the naked-hop branch): "
+              + leaf);
     }
 
     private static List<String> splitDepthAware(String s) {

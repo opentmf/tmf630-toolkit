@@ -960,6 +960,141 @@ class Tmf630MongoCorrelatedSortIT {
         page.getContent().stream().map(Order::getId).toList());
   }
 
+  @Test
+  void numCoercionOverInnerArrayIntermediateSortsNumericallyNotLexically() {
+    // 2.1.3 fix for the colleague's Issue 2. The shape that exercises the fix is
+    // a path that crosses an INNER array intermediate AFTER the predicate-filtered
+    // outer hop — exactly the colleague's reproduction:
+    //   `$.prodSpecCharValueUse[?(@.id=='X')].productSpecCharacteristicValue[*].num(value)`
+    // mapped to our test entities as:
+    //   `$.serviceOrderItem[?(@.id=='X')].service.serviceCharacteristic[*].num(value)`
+    // The leaf path `service.serviceCharacteristic.value` auto-projects across
+    // `serviceCharacteristic` (List). The 2.1.2 shape took $min/$max of the raw
+    // strings then $convert, which collapses to the lex-extreme element
+    // converted. The 2.1.3 shape converts each element first, then reduces — so
+    // ["105.34", "12.2", "4.31"] becomes [105.34, 12.2, 4.31] then $min = 4.31.
+    mongoTemplate.dropCollection(Order.class);
+    mongoTemplate.insertAll(
+        List.of(
+            new Order(
+                "A",
+                List.of(
+                    new OrderItem(
+                        "X",
+                        new Service(
+                            List.of(
+                                new Characteristic("price", "105.34"),
+                                new Characteristic("price", "12.2"),
+                                new Characteristic("price", "4.31")))))),
+            new Order(
+                "B",
+                List.of(
+                    new OrderItem(
+                        "X",
+                        new Service(
+                            List.of(
+                                new Characteristic("price", "300"),
+                                new Characteristic("price", "200"),
+                                new Characteristic("price", "100")))))),
+            new Order(
+                "C",
+                List.of(
+                    new OrderItem(
+                        "X",
+                        new Service(
+                            List.of(
+                                new Characteristic("price", "50"),
+                                new Characteristic("price", "5"),
+                                new Characteristic("price", "500"))))))));
+
+    TmfSort sort =
+        new TmfSort(
+            List.of(
+                new TmfSortTerm(
+                    Sort.Direction.ASC,
+                    TmfSortTerm.Kind.JSONPATH,
+                    "$.serviceOrderItem[?(@.id == 'X')]"
+                        + ".service.serviceCharacteristic[*].num(value)")));
+
+    Page<Order> page =
+        executor.findAll(Order.class, null, sort, PageRequest.of(0, 10));
+
+    // ASC + per-element $convert + $min of converted values:
+    //   A: min(105.34, 12.2, 4.31) = 4.31
+    //   B: min(300, 200, 100)      = 100
+    //   C: min(50, 5, 500)         = 5
+    // ASC: A (4.31) < C (5) < B (100). Assert [A, C, B].
+    //
+    // 2.1.2 buggy translation would have computed:
+    //   A: $convert($min("105.34","12.2","4.31")) = $convert("105.34") = 105.34
+    //   B: $convert($min("100","200","300"))      = $convert("100")    = 100
+    //   C: $convert($min("5","50","500"))         = $convert("5")      = 5
+    // and produced [C, B, A] — visibly different from the assert.
+    assertEquals(
+        List.of("A", "C", "B"),
+        page.getContent().stream().map(Order::getId).toList());
+  }
+
+  @Test
+  void numCoercionOverInnerArrayIntermediateLeafFormMatchesOuterWrapForm() {
+    // Both grammar forms must give the same sort. Pre-2.1.3 they diverged
+    // structurally — the leaf-call form promoted pre-function dotted segments
+    // to a naked array hop (taking $first of the inner array and converting
+    // that single value); the outer-wrap form took $min of raw strings then
+    // $convert. 2.1.3 makes them produce the same SortPath which the translator
+    // handles uniformly via $map+$convert+$min.
+    mongoTemplate.dropCollection(Order.class);
+    mongoTemplate.insertAll(
+        List.of(
+            new Order(
+                "A",
+                List.of(
+                    new OrderItem(
+                        "X",
+                        new Service(
+                            List.of(
+                                new Characteristic("price", "105.34"),
+                                new Characteristic("price", "4.31")))))),
+            new Order(
+                "B",
+                List.of(
+                    new OrderItem(
+                        "X",
+                        new Service(
+                            List.of(
+                                new Characteristic("price", "100"),
+                                new Characteristic("price", "200"))))))));
+
+    TmfSort outerWrap =
+        new TmfSort(
+            List.of(
+                new TmfSortTerm(
+                    Sort.Direction.ASC,
+                    TmfSortTerm.Kind.JSONPATH,
+                    "num($.serviceOrderItem[?(@.id == 'X')]"
+                        + ".service.serviceCharacteristic[*].value)")));
+    TmfSort leafCall =
+        new TmfSort(
+            List.of(
+                new TmfSortTerm(
+                    Sort.Direction.ASC,
+                    TmfSortTerm.Kind.JSONPATH,
+                    "$.serviceOrderItem[?(@.id == 'X')]"
+                        + ".service.serviceCharacteristic[*].num(value)")));
+
+    Page<Order> outerPage =
+        executor.findAll(Order.class, null, outerWrap, PageRequest.of(0, 10));
+    Page<Order> leafPage =
+        executor.findAll(Order.class, null, leafCall, PageRequest.of(0, 10));
+
+    List<String> outerOrder = outerPage.getContent().stream().map(Order::getId).toList();
+    List<String> leafOrder = leafPage.getContent().stream().map(Order::getId).toList();
+    assertEquals(outerOrder, leafOrder);
+    // ASC by numeric min: A.min(4.31, 105.34) = 4.31; B.min(100, 200) = 100.
+    // 4.31 < 100 → A before B.
+    assertEquals(List.of("A", "B"), outerOrder);
+  }
+
   @SpringBootApplication
   static class TestApp {}
 }

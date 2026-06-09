@@ -259,20 +259,56 @@ public final class JsonPathSortParser {
             explicitHops, new JsonPathSortAst.FieldRef(trailing));
       }
 
-      List<JsonPathSortAst.ArrayHop> all = new ArrayList<>(explicitHops);
       for (int i = 0; i < segments.size() - 1; i++) {
-        String segment = segments.get(i);
-        if (segment.indexOf('(') >= 0) {
+        if (segments.get(i).indexOf('(') >= 0) {
           throw new IllegalArgumentException(
-              "Function call segments are only allowed as the leaf, not as a naked array hop: "
-                  + segment);
+              "Function call segments are only allowed as the leaf, not before more path: "
+                  + segments.get(i));
         }
-        all.add(
-            new JsonPathSortAst.ArrayHop(
-                segment, JsonPathSortAst.AlwaysTruePredicate.INSTANCE));
       }
       JsonPathSortAst.LeafExpression leaf = parseLeafExpression(lastSegment);
-      return new JsonPathSortAst.SortPath(all, leaf);
+      if (segments.size() == 1) {
+        return new JsonPathSortAst.SortPath(explicitHops, leaf);
+      }
+      String prePath = String.join(".", segments.subList(0, segments.size() - 1));
+      // Aggregator-containing leaves need naked array hops so $map can iterate
+      // the right collection. Pure Coercion leaves stay as a single FieldRef
+      // path; the translator handles array intermediates inside Coercion by
+      // emitting $map+$convert+$min/$max at the leaf. See SimpleRichSortParser
+      // for the rationale (kept in sync between the two grammars).
+      if (containsAggregator(leaf)) {
+        List<JsonPathSortAst.ArrayHop> all = new ArrayList<>(explicitHops);
+        for (String segment : segments.subList(0, segments.size() - 1)) {
+          all.add(
+              new JsonPathSortAst.ArrayHop(
+                  segment, JsonPathSortAst.AlwaysTruePredicate.INSTANCE));
+        }
+        return new JsonPathSortAst.SortPath(all, leaf);
+      }
+      return new JsonPathSortAst.SortPath(explicitHops, prependPath(leaf, prePath));
+    }
+
+    private static boolean containsAggregator(JsonPathSortAst.LeafExpression leaf) {
+      if (leaf instanceof JsonPathSortAst.Aggregator) {
+        return true;
+      }
+      if (leaf instanceof JsonPathSortAst.Coercion c) {
+        return containsAggregator(c.inner());
+      }
+      return false;
+    }
+
+    private static JsonPathSortAst.LeafExpression prependPath(
+        JsonPathSortAst.LeafExpression leaf, String prefix) {
+      if (leaf instanceof JsonPathSortAst.FieldRef fr) {
+        return new JsonPathSortAst.FieldRef(prefix + "." + fr.fieldPath());
+      }
+      if (leaf instanceof JsonPathSortAst.Coercion c) {
+        return new JsonPathSortAst.Coercion(c.type(), prependPath(c.inner(), prefix));
+      }
+      throw new IllegalStateException(
+          "Aggregator must not reach prependPath (would have taken the naked-hop branch): "
+              + leaf);
     }
 
     private static List<String> splitDepthAware(String s) {

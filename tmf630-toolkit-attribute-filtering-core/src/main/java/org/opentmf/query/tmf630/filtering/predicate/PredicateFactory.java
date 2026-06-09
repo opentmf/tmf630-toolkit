@@ -1,6 +1,8 @@
 package org.opentmf.query.tmf630.filtering.predicate;
 
+import com.querydsl.core.types.Ops;
 import com.querydsl.core.types.Predicate;
+import com.querydsl.core.types.dsl.Expressions;
 import com.querydsl.core.types.dsl.PathBuilder;
 import org.opentmf.query.tmf630.filtering.TmfFilteringException;
 import org.opentmf.query.tmf630.filtering.TmfOperator;
@@ -103,7 +105,18 @@ public class PredicateFactory {
   private Predicate regexIgnoreCase(
       PathBuilder<?> root, String fieldPath, Class<?> type, String pattern) {
     validateRegex(fieldPath, type, pattern);
-    return root.getString(fieldPath).lower().matches(pattern.toLowerCase());
+    // Use Ops.MATCHES_IC directly rather than `lower().matches(lower(pattern))`.
+    // QueryDSL's Mongo serializer translates MATCHES_IC into a $regex predicate
+    // with $options:"i"; the old form emitted a standalone Ops.LOWER call which
+    // the Mongo serializer rejects with `UnsupportedOperationException:
+    // Illegal operation lower(...)`. JPA serializers handle MATCHES_IC too
+    // (Hibernate translates it to `lower(field) LIKE lower(pattern)` or its
+    // regex equivalent depending on the dialect), so this is a backend-agnostic
+    // fix. Other case-insensitive operators (EQI/NEI/LIKEI/CONTAINSI/
+    // STARTS_WITHI/ENDS_WITHI) already use QueryDSL's built-in ignore-case
+    // builders that emit *_IC ops the Mongo serializer recognises.
+    return Expressions.predicate(
+        Ops.MATCHES_IC, root.getString(fieldPath), Expressions.constant(pattern));
   }
 
   private void validateRegex(String fieldPath, Class<?> type, String pattern) {

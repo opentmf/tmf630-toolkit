@@ -279,48 +279,69 @@ class AggregationKeyTranslatorTest {
   }
 
   @Test
-  void coercionFoldsArrayIntermediateWithReducerToYieldScalarBeforeConvert() {
-    // Regression for the silent-drop bug: num(arr[X].myArray.value) where
-    // `myArray` is a collection-typed intermediate. Without resolver-aware
-    // reduction, Mongo's path expression `$$m0.myArray.value` returns an array
-    // and $convert(array, "double") yields null. The translator folds the
-    // dotted path with the direction-aware reducer ($min for ASC, $max for DESC)
-    // before $convert, so a scalar is fed into the coercion. The 2.1.2 fix used
-    // $arrayElemAt:0 here, which silently picked the first element regardless
-    // of direction; 2.1.3 restores MongoDB's pre-2.1.2 native array-key sort
-    // semantics by using the reducer.
+  void coercionOverArrayIntermediateConvertsPerElementThenReducesByDirection() {
+    // 2.1.3 fix for the colleague's Issue 2: for num(arr[X].myArray.value) where
+    // `myArray` is a collection-typed intermediate, $convert must run per-element
+    // BEFORE $min/$max so that the reducer compares converted values. The 2.1.2
+    // shape (reduce raw values then convert) gave wrong answers for
+    // numeric-as-string data: $convert($min(["105.34","12.2","4.31"])) =
+    // $convert("105.34") = 105.34, not the documented numeric min 4.31. The new
+    // shape — $min/$max of $map(input, "$$e", $convert($$e)) — reduces numerically.
     MongoMappingContext ctx = new MongoMappingContext();
     MongoFieldResolver resolver = new MongoFieldResolver(ctx);
     SimpleRichSortParser sr = new SimpleRichSortParser("id");
 
-    Document doc =
-        AggregationKeyTranslator.translate(
-            sr.parse("outer[X].myArray.num(value)"), resolver, OuterEntity.class);
-
-    // Inner-wrapper form should still work (this is the control case).
-    assertTrue(doc.containsKey("$let") || doc.containsKey("$convert"));
-
-    Document doc2 =
+    // ASC: $min wraps the $map of per-element $convert.
+    Document docAsc =
         AggregationKeyTranslator.translate(
             sr.parse("num(outer[X].myArray.value)"),
             resolver,
             OuterEntity.class,
             AggregationKeyTranslator.MIN_REDUCER);
-    Document letBody2 = doc2.get("$let", Document.class);
-    Document convert2 = ((Document) letBody2.get("in")).get("$convert", Document.class);
-    Document input2 = (Document) convert2.get("input");
-    assertEquals("$$m0.myArray.value", input2.getString("$min"));
+    Document letBodyAsc = docAsc.get("$let", Document.class);
+    Document reducerAsc = (Document) letBodyAsc.get("in");
+    Document mapStageAsc = reducerAsc.get("$min", Document.class).get("$map", Document.class);
+    Document ifNullAsc = (Document) mapStageAsc.get("input");
+    assertEquals("$$m0.myArray.value", ifNullAsc.getList("$ifNull", Object.class).get(0));
+    assertEquals("e", mapStageAsc.getString("as"));
+    Document convertAsc = ((Document) mapStageAsc.get("in")).get("$convert", Document.class);
+    assertEquals("$$e", convertAsc.getString("input"));
+    assertEquals("double", convertAsc.getString("to"));
 
-    Document doc3 =
+    // DESC: same shape, $max instead of $min.
+    Document docDesc =
         AggregationKeyTranslator.translate(
             sr.parse("num(outer[X].myArray.value)"),
             resolver,
             OuterEntity.class,
             AggregationKeyTranslator.MAX_REDUCER);
-    Document letBody3 = doc3.get("$let", Document.class);
-    Document convert3 = ((Document) letBody3.get("in")).get("$convert", Document.class);
-    Document input3 = (Document) convert3.get("input");
-    assertEquals("$$m0.myArray.value", input3.getString("$max"));
+    Document letBodyDesc = docDesc.get("$let", Document.class);
+    Document reducerDesc = (Document) letBodyDesc.get("in");
+    assertTrue(reducerDesc.containsKey("$max"));
+  }
+
+  @Test
+  void leafFormCoercionOverArrayIntermediateBehavesIdenticallyToOuterWrap() {
+    // 2.1.3: the leaf-call form `outer[X].myArray.num(value)` no longer promotes
+    // `myArray` to a naked array hop. Both grammars produce the same SortPath and
+    // therefore the same translation — $min of $map per-element $convert.
+    MongoMappingContext ctx = new MongoMappingContext();
+    MongoFieldResolver resolver = new MongoFieldResolver(ctx);
+    SimpleRichSortParser sr = new SimpleRichSortParser("id");
+
+    Document leafForm =
+        AggregationKeyTranslator.translate(
+            sr.parse("outer[X].myArray.num(value)"),
+            resolver,
+            OuterEntity.class,
+            AggregationKeyTranslator.MIN_REDUCER);
+    Document outerForm =
+        AggregationKeyTranslator.translate(
+            sr.parse("num(outer[X].myArray.value)"),
+            resolver,
+            OuterEntity.class,
+            AggregationKeyTranslator.MIN_REDUCER);
+    assertEquals(outerForm, leafForm);
   }
 
   @Test

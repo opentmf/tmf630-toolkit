@@ -173,6 +173,30 @@ public final class AggregationKeyTranslator {
       Class<?> elementType,
       boolean needsScalar,
       String leafArrayReducerOp) {
+    // Coercion chain over a FieldRef that crosses an array intermediate: convert
+    // each element first, then reduce direction-aware. The naive "reduce raw
+    // values then convert" loses numeric semantics — for {"value": ["105.34",
+    // "12.2", "4.31"]} sorted by $.arr[?].num(value), $convert($min(strings))
+    // gives 105.34 (lex min) instead of the documented numeric min 4.31. Per-
+    // element $convert inside a $map preserves the type information across the
+    // array, after which $min/$max compares numerically. Behaviour for scalar
+    // leaves (no array intermediate) is unchanged.
+    if (needsScalar && leaf instanceof JsonPathSortAst.Coercion) {
+      JsonPathSortAst.FieldRef innermost = innermostFieldRef(leaf);
+      if (innermost != null
+          && resolver.hasArrayIntermediate(elementType, innermost.fieldPath())) {
+        String resolvedPath = resolver.resolveBsonPath(elementType, innermost.fieldPath());
+        String pathExpr = elementRef + "." + resolvedPath;
+        Document mapStage =
+            new Document(
+                "$map",
+                new Document()
+                    .append("input", new Document("$ifNull", List.of(pathExpr, List.of())))
+                    .append("as", "e")
+                    .append("in", buildCoercionChain(leaf, "$$e")));
+        return new Document(leafArrayReducerOp, mapStage);
+      }
+    }
     if (leaf instanceof JsonPathSortAst.FieldRef fr) {
       String resolvedPath = resolver.resolveBsonPath(elementType, fr.fieldPath());
       String pathExpr = elementRef + "." + resolvedPath;
@@ -189,6 +213,41 @@ public final class AggregationKeyTranslator {
     throw new IllegalStateException(
         "Aggregator may not appear nested inside another aggregator or per-element context: "
             + leaf);
+  }
+
+  /**
+   * Walks a {@link JsonPathSortAst.Coercion} chain to its innermost leaf and
+   * returns it iff that leaf is a {@link JsonPathSortAst.FieldRef}. Returns
+   * {@code null} when an {@link JsonPathSortAst.Aggregator} terminates the
+   * chain — those paths go through {@link #translateAggregatedLeaf} instead.
+   */
+  private static JsonPathSortAst.FieldRef innermostFieldRef(
+      JsonPathSortAst.LeafExpression leaf) {
+    JsonPathSortAst.LeafExpression cursor = leaf;
+    while (cursor instanceof JsonPathSortAst.Coercion c) {
+      cursor = c.inner();
+    }
+    return cursor instanceof JsonPathSortAst.FieldRef fr ? fr : null;
+  }
+
+  /**
+   * Builds the chain of {@code $convert} wrappers implied by a coercion-only
+   * leaf chain, with {@code elementRef} as the per-element placeholder. For
+   * {@code Coercion(NUM, FieldRef("..."))} this returns
+   * {@code $convert(elementRef, double)}; for nested coercions like
+   * {@code Coercion(NUM, Coercion(STR, FieldRef))} the wrappers compose
+   * outside-in.
+   */
+  private static Object buildCoercionChain(
+      JsonPathSortAst.LeafExpression leaf, String elementRef) {
+    if (leaf instanceof JsonPathSortAst.FieldRef) {
+      return elementRef;
+    }
+    if (leaf instanceof JsonPathSortAst.Coercion c) {
+      return convertWrap(buildCoercionChain(c.inner(), elementRef), c.type());
+    }
+    throw new IllegalStateException(
+        "Aggregator may not appear in a per-element coercion chain: " + leaf);
   }
 
   private static Document convertWrap(Object input, JsonPathSortAst.CoercionType type) {

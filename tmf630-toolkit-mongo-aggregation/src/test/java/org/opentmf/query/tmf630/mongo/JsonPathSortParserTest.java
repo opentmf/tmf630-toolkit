@@ -326,22 +326,40 @@ class JsonPathSortParserTest {
   }
 
   @Test
-  void promotesPreFunctionSegmentsToNakedArrayHops() {
-    // productSpecCharacteristicValue.num(value) — the inner array is consumed by a naked
-    // ArrayHop with AlwaysTruePredicate and the function call becomes the leaf, matching
-    // SimpleRich's shape so the translator handles both grammars uniformly.
+  void promotesPreFunctionSegmentsToNakedArrayHopsOnlyForAggregatorLeaves() {
+    // Aggregator (min/max) needs to $map across an array, so pre-function dotted
+    // segments are promoted to naked ArrayHops with AlwaysTruePredicate.
+    JsonPathSortAst.SortPath agg =
+        parser.parse(
+            "$.prodSpec[?(@.id == 'X')].productSpecCharacteristicValue.max(value)");
+    assertEquals(2, agg.hops().size());
+    assertEquals("prodSpec", agg.hops().get(0).arrayPath());
+    assertEquals("productSpecCharacteristicValue", agg.hops().get(1).arrayPath());
+    assertInstanceOf(
+        JsonPathSortAst.AlwaysTruePredicate.class, agg.hops().get(1).predicate());
+    JsonPathSortAst.Aggregator aggLeaf =
+        assertInstanceOf(JsonPathSortAst.Aggregator.class, agg.leaf());
+    assertEquals(JsonPathSortAst.AggregatorOp.MAX, aggLeaf.op());
+  }
+
+  @Test
+  void doesNotPromotePreFunctionSegmentsForCoercionOnlyLeaves() {
+    // Coercion-only leaves keep pre-function segments inside the FieldRef path;
+    // the translator emits $map+$convert+$min/$max for array-intermediate paths
+    // at the leaf, so naked hops are unnecessary AND would crash on object
+    // intermediates ($filter on a non-array). This is the 2.1.3 fix for the
+    // documented num() semantics ("coerces each value … numeric order").
     JsonPathSortAst.SortPath p =
         parser.parse(
             "$.prodSpec[?(@.id == 'X')].productSpecCharacteristicValue.num(value)");
-    assertEquals(2, p.hops().size());
+    assertEquals(1, p.hops().size());
     assertEquals("prodSpec", p.hops().get(0).arrayPath());
-    assertEquals("productSpecCharacteristicValue", p.hops().get(1).arrayPath());
-    assertInstanceOf(
-        JsonPathSortAst.AlwaysTruePredicate.class, p.hops().get(1).predicate());
     JsonPathSortAst.Coercion c =
         assertInstanceOf(JsonPathSortAst.Coercion.class, p.leaf());
     assertEquals(JsonPathSortAst.CoercionType.NUM, c.type());
-    assertEquals("value", ((JsonPathSortAst.FieldRef) c.inner()).fieldPath());
+    assertEquals(
+        "productSpecCharacteristicValue.value",
+        ((JsonPathSortAst.FieldRef) c.inner()).fieldPath());
   }
 
   @Test
@@ -419,28 +437,27 @@ class JsonPathSortParserTest {
   }
 
   @Test
-  void leafWrapAndOuterWrapAreInterchangeableForCoercion() {
-    // The two grammars produce identical SortPaths for single-cardinality data:
-    // outer wrap vs leaf wrap. Documents the user-facing equivalence so callers
-    // can pick the form they prefer.
+  void leafWrapAndOuterWrapProduceIdenticalAstForCoercion() {
+    // Since 2.1.3, the two grammars produce STRUCTURALLY IDENTICAL SortPaths
+    // — no naked hop in either case. Earlier the leaf-wrap form promoted the
+    // pre-function dotted segment to a naked hop, which gave different
+    // structure but worse semantics on multi-value array intermediates
+    // (first/last element converted instead of numeric extreme). Both forms
+    // now flow through the translator's $map+$convert+$min/$max path.
     JsonPathSortAst.SortPath leafForm =
         parser.parse(
             "$.prodSpec[?(@.id == 'X')].productSpecCharacteristicValue.num(value)");
     JsonPathSortAst.SortPath outerForm =
         parser.parse(
             "num($.prodSpec[?(@.id == 'X')].productSpecCharacteristicValue.value)");
-    // The shapes differ — outer wrap keeps a single FieldRef leaf; leaf wrap
-    // promotes the pre-function segment to a naked hop. Both translate to the
-    // same Mongo expression; this test pins the structural difference so a future
-    // refactor that "unifies" them is a conscious choice.
-    assertEquals(2, leafForm.hops().size());
-    assertEquals(1, outerForm.hops().size());
+    assertEquals(leafForm, outerForm);
+    assertEquals(1, leafForm.hops().size());
     JsonPathSortAst.Coercion leafCoercion =
         assertInstanceOf(JsonPathSortAst.Coercion.class, leafForm.leaf());
-    JsonPathSortAst.Coercion outerCoercion =
-        assertInstanceOf(JsonPathSortAst.Coercion.class, outerForm.leaf());
     assertEquals(JsonPathSortAst.CoercionType.NUM, leafCoercion.type());
-    assertEquals(JsonPathSortAst.CoercionType.NUM, outerCoercion.type());
+    assertEquals(
+        "productSpecCharacteristicValue.value",
+        ((JsonPathSortAst.FieldRef) leafCoercion.inner()).fieldPath());
   }
 
   @Test

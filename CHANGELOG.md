@@ -5,6 +5,39 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 ## [2.1.3] - 2026-06-09
 
 ### Fixed
+- **`?name.regexi=` no longer returns HTTP 500 on MongoDB backends.**
+  `PredicateFactory.regexIgnoreCase` built the predicate as
+  `root.getString(field).lower().matches(pattern.toLowerCase())`, which emits
+  a standalone `Ops.LOWER` call. The QueryDSL Mongo serializer
+  (`MongodbDocumentSerializer`) does not implement `LOWER` and threw
+  `UnsupportedOperationException: Illegal operation lower(...)` at query
+  execution. The fix routes through `Ops.MATCHES_IC` directly via
+  `Expressions.predicate(Ops.MATCHES_IC, field, constant)` — the Mongo
+  serializer translates that op to a `$regex` query with `$options:"i"`, and
+  JPA serializers translate it idiomatically too. The other case-insensitive
+  operators (`eqi` / `nei` / `likei` / `containsi` / `startswithi` /
+  `endswithi`) were never affected — they already used QueryDSL's
+  `equalsIgnoreCase` / `likeIgnoreCase` / etc. builders, which emit
+  `*_IC` ops the Mongo serializer recognises. A roundtrip test now pins all
+  seven case-insensitive operators as Mongo-serializable.
+- **`num()` / `str()` / `date()` over a multi-value array intermediate now
+  converts each element BEFORE reducing, matching documented semantics.**
+  When a coercion wraps a leaf path that crosses a collection-typed
+  intermediate (e.g. `$.arr[?].sub.num(value)` where `sub` is a list of
+  string-stored numerics like `["105.34", "12.2", "4.31"]`), the 2.1.2/2.1.3
+  shape was `$convert($min(array))` — it took the lex-extreme element first
+  and then converted, giving 105.34 instead of the documented numeric min
+  4.31. The new shape is `$min/$max of $map(input, "$$e", $convert($$e))` —
+  every element is coerced first, then the converted values are reduced
+  direction-aware. The naked-hop AST shape that earlier turned
+  `arr[id=X].sub.num(value)` into hops=[(arr, id==X), (sub, AlwaysTrue)] +
+  Coercion(NUM, FieldRef("value")) is suppressed when the leaf chain is
+  pure Coercion — pre-function dotted segments are now kept as part of the
+  FieldRef path so the new translator branch applies uniformly to both
+  grammar forms. Aggregator-containing leaves (`min(value)`, `max(value)`,
+  `num(min(value))`) still promote pre-function segments to naked hops as
+  before, because the aggregator's `$map` needs to iterate the right array.
+  Single-element inner arrays are unaffected.
 - **JSONPath `?filter=` now tolerates a trailing projection suffix on the
   sub-array shorthand form.** DPC-style consumers construct filter URLs by
   reusing their sort-URL templates, leaving a trailing projection suffix

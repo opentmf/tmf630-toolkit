@@ -11,7 +11,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import com.mongodb.DBObject;
 import com.querydsl.core.types.Predicate;
 import com.querydsl.core.types.Path;
+import com.querydsl.core.types.dsl.PathBuilder;
 import com.querydsl.mongodb.MongodbSerializer;
+import org.opentmf.query.tmf630.filtering.predicate.ResolvedField;
 import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -358,6 +360,67 @@ class JsonPathFilterPredicateBuilderTest {
             settings(UnknownParamBehavior.REJECT, true));
 
     assertNotNull(predicate);
+  }
+
+  @Test
+  void caseInsensitiveOperatorsAllSerializeThroughMongoDocumentSerializer() {
+    // 2.1.3 fix for the regexi-on-Mongo HTTP 500. The old regexIgnoreCase used
+    // `lower().matches(lower(pattern))`, which emits a standalone Ops.LOWER that
+    // querydsl-mongodb rejects (`UnsupportedOperationException: Illegal operation
+    // lower(...)`). The fix routes through Ops.MATCHES_IC, which the Mongo
+    // serializer translates to $regex with $options:"i". Pin every advertised
+    // case-insensitive operator as Mongo-serializable so regexi never regresses
+    // again, and the colleague's broader claim (eqi/nei/likei/containsi/
+    // startswithi/endswithi all fail) is also disproved here and pinned.
+    FieldPathResolver pathResolver = new FieldPathResolver();
+    PredicateFactory factory = new PredicateFactory(true, 128);
+    @SuppressWarnings("unchecked")
+    PathBuilder<Entity> root = (PathBuilder<Entity>) pathResolver.createRootPath(Entity.class);
+    ResolvedField field = pathResolver.resolve(Entity.class, "name", false);
+    NoRefMongoSerializer serializer = new NoRefMongoSerializer();
+
+    TmfOperator[] ops = {
+      TmfOperator.EQI,
+      TmfOperator.NEI,
+      TmfOperator.LIKEI,
+      TmfOperator.CONTAINSI,
+      TmfOperator.STARTS_WITHI,
+      TmfOperator.ENDS_WITHI,
+      TmfOperator.REGEXI
+    };
+    for (TmfOperator op : ops) {
+      String value = op == TmfOperator.REGEXI ? ".*bun.*" : "abc";
+      Predicate predicate = factory.build(root, field, op, value);
+      Object serialized = serializer.handle(predicate);
+      assertNotNull(serialized, op.suffix() + " serialized null");
+    }
+  }
+
+  @Test
+  void regexiSerializesToMongoCaseInsensitiveRegex() {
+    // Spot-check that regexi specifically produces a case-insensitive Mongo
+    // regex query — not just "doesn't throw." The exact BSON shape is
+    // {"$regex": "...", "$options": "i"} (or a Pattern with the CASE_INSENSITIVE
+    // flag depending on the Mongo driver), so we assert the field name appears
+    // in the rendered string and the matcher carries the case-insensitivity
+    // signal (`"i"` option flag).
+    FieldPathResolver pathResolver = new FieldPathResolver();
+    PredicateFactory factory = new PredicateFactory(true, 128);
+    @SuppressWarnings("unchecked")
+    PathBuilder<Entity> root = (PathBuilder<Entity>) pathResolver.createRootPath(Entity.class);
+    ResolvedField field = pathResolver.resolve(Entity.class, "name", false);
+
+    Predicate predicate = factory.build(root, field, TmfOperator.REGEXI, "^bun.*");
+    DBObject query = (DBObject) new NoRefMongoSerializer().handle(predicate);
+
+    String rendered = query.toString();
+    assertTrue(rendered.contains("name"), rendered);
+    // Driver renders Pattern with embedded flag as `^bun.*` plus separate options;
+    // accept any of the common renderings the Mongo Java driver uses.
+    assertTrue(
+        rendered.contains("CASE_INSENSITIVE") || rendered.contains("\"i\"")
+            || rendered.contains("'i'") || rendered.contains("options=i"),
+        "Expected case-insensitive option flag in: " + rendered);
   }
 
   @Test
