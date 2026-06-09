@@ -5,6 +5,23 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 ## [2.1.3] - 2026-06-09
 
 ### Fixed
+- **JSONPath `?filter=` now tolerates a trailing projection suffix on the
+  sub-array shorthand form.** DPC-style consumers construct filter URLs by
+  reusing their sort-URL templates, leaving a trailing projection suffix
+  like `.productSpecCharacteristicValue[*].value` after the filter's
+  `[?(...)]`. The projection has no semantic effect on the matched row set
+  — that's fully determined by the predicate — so 2.1.3 strips the suffix
+  in `JsonPathFilterPredicateBuilder.trySubArrayShorthand` and proceeds
+  with the standard rewrite to `@.<arrayPath>[?(...)]`. Stripping happens
+  only when the suffix is a pure dotted path (after `stripWildcards`
+  removes `[*]`); a suffix containing nested `[?(...)]` predicates,
+  bracket index access (`[0]`, `[0:5]`), or non-identifier characters is
+  still rejected with the standard "must be a filter expression" error
+  so the caller learns to rewrite rather than silently losing a nested
+  filter. The double-quoted predicate literal claim in the same report
+  (`@.id == "X"` vs `@.id == 'X'`) was already supported in 2.1.2 — the
+  tokenizer accepts both — and a regression test pinning the behaviour
+  inside the sub-array shorthand form is added.
 - **Restored MongoDB's native array-key sort semantics broken by 2.1.2.** The
   2.1.2 parallel-arrays fix wrapped every leaf whose path crosses a
   collection-typed intermediate in `$arrayElemAt: [path, 0]` to keep

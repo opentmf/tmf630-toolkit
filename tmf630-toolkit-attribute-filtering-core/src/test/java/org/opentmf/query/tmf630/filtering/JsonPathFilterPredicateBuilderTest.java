@@ -255,8 +255,30 @@ class JsonPathFilterPredicateBuilderTest {
     assertNull(JsonPathFilterPredicateBuilder.trySubArrayShorthand("foo[?(@.x == 'y']"));
     // Missing closing `]` after the matching `)`
     assertNull(JsonPathFilterPredicateBuilder.trySubArrayShorthand("foo[?(@.x == 'y')"));
-    // Trailing content after the closing `]`
-    assertNull(JsonPathFilterPredicateBuilder.trySubArrayShorthand("foo[?(@.x == 'y')].extra"));
+    // Pure projection suffix (dotted path with no further [?()] or [n]) is
+    // tolerated and discarded — the filter semantics are fully determined by the
+    // predicate. DPC-style consumers append sort-template projections to filter
+    // URLs and rely on the toolkit to ignore them.
+    assertEquals(
+        "@.foo[?(@.x == 'y')]",
+        JsonPathFilterPredicateBuilder.trySubArrayShorthand("foo[?(@.x == 'y')].extra"));
+    assertEquals(
+        "@.foo[?(@.x == 'y')]",
+        JsonPathFilterPredicateBuilder.trySubArrayShorthand(
+            "foo[?(@.x == 'y')].extra.deeper.leaf"));
+    assertEquals(
+        "@.foo[?(@.x == 'y')]",
+        JsonPathFilterPredicateBuilder.trySubArrayShorthand("$.foo[?(@.x == 'y')].extra"));
+    // Trailing content that contains another [?()] is NOT a pure projection —
+    // rejected to keep nested filtering off this surface.
+    assertNull(
+        JsonPathFilterPredicateBuilder.trySubArrayShorthand(
+            "foo[?(@.x == 'y')].sub[?(@.z == 'q')]"));
+    // Trailing index access — [0] — is also rejected.
+    assertNull(
+        JsonPathFilterPredicateBuilder.trySubArrayShorthand("foo[?(@.x == 'y')].sub[0]"));
+    // Trailing content that doesn't start with a `.` — malformed; rejected.
+    assertNull(JsonPathFilterPredicateBuilder.trySubArrayShorthand("foo[?(@.x == 'y')]extra"));
   }
 
   @Test
@@ -336,6 +358,87 @@ class JsonPathFilterPredicateBuilderTest {
             settings(UnknownParamBehavior.REJECT, true));
 
     assertNotNull(predicate);
+  }
+
+  @Test
+  void doubleQuotedLiteralsWorkInsideSubArrayShorthand() {
+    // The colleague's report claimed double quotes are rejected in sub-array
+    // shorthand. They are not — the same tokenizer handles both `'...'` and
+    // `"..."` regardless of which wrapper form unwrapped the expression. This
+    // test pins that, and is the test the report says should be added.
+    FieldPathResolver pathResolver = new FieldPathResolver();
+    ValueConverter converter = new ValueConverter(new DefaultFormattingConversionService());
+    PredicateFactory factory = new PredicateFactory(false, 128);
+    JsonPathFilterPredicateBuilder builder =
+        new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
+
+    Predicate predicateBare =
+        builder.build(
+            Entity.class,
+            pathResolver.createRootPath(Entity.class),
+            "externalReference[?(@.name == \"abc\")]",
+            Set.of("externalReference", "externalReference.name"),
+            settings(UnknownParamBehavior.REJECT, true));
+    assertNotNull(predicateBare);
+
+    Predicate predicateWithDollarPrefix =
+        builder.build(
+            Entity.class,
+            pathResolver.createRootPath(Entity.class),
+            "$.externalReference[?(@.name == \"abc\")]",
+            Set.of("externalReference", "externalReference.name"),
+            settings(UnknownParamBehavior.REJECT, true));
+    assertNotNull(predicateWithDollarPrefix);
+  }
+
+  @Test
+  void subArrayShorthandToleratesTrailingProjectionSuffix() {
+    // Colleague-reported defect: DPC-style consumers reuse sort-URL templates
+    // when constructing filter URLs, leaving a trailing projection like
+    // `.productSpecCharacteristicValue.value` after the filter's `[?(...)]`.
+    // The projection has no semantic effect on the matched row set, which is
+    // fully determined by the predicate, so the parser strips it. Double quotes
+    // and [*] wildcards in the suffix are both handled by upstream normalisation
+    // (the tokenizer and stripWildcards respectively).
+    FieldPathResolver pathResolver = new FieldPathResolver();
+    ValueConverter converter = new ValueConverter(new DefaultFormattingConversionService());
+    PredicateFactory factory = new PredicateFactory(false, 128);
+    JsonPathFilterPredicateBuilder builder =
+        new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
+
+    // Exact shape from the colleague's repro — double quotes + [*] wildcard +
+    // trailing projection — must build successfully.
+    Predicate predicate =
+        builder.build(
+            Entity.class,
+            pathResolver.createRootPath(Entity.class),
+            "$.externalReference[?(@.name == \"abc\")].nested[*].value",
+            Set.of("externalReference", "externalReference.name"),
+            settings(UnknownParamBehavior.REJECT, true));
+    assertNotNull(predicate);
+  }
+
+  @Test
+  void subArrayShorthandRejectsTrailingNestedPredicate() {
+    // A trailing `[?(...)]` is NOT a pure projection — it implies a nested
+    // filter, which the sub-array shorthand does not support. Reject with the
+    // standard "must be a filter expression" error so the caller knows to
+    // rewrite, rather than silently dropping the nested filter.
+    FieldPathResolver pathResolver = new FieldPathResolver();
+    ValueConverter converter = new ValueConverter(new DefaultFormattingConversionService());
+    PredicateFactory factory = new PredicateFactory(false, 128);
+    JsonPathFilterPredicateBuilder builder =
+        new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
+
+    assertThrows(
+        TmfFilteringException.class,
+        () ->
+            builder.build(
+                Entity.class,
+                pathResolver.createRootPath(Entity.class),
+                "$.externalReference[?(@.name == 'abc')].sub[?(@.kind == 'X')]",
+                Set.of("externalReference", "externalReference.name"),
+                settings(UnknownParamBehavior.REJECT, true)));
   }
 
   @Test

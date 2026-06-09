@@ -217,10 +217,42 @@ public class JsonPathFilterPredicateBuilder {
       return null;
     }
     i++;
-    if (!s.substring(i).trim().isEmpty()) {
+    if (!isPureProjectionSuffix(s.substring(i))) {
       return null;
     }
     return "@." + arrayPath + "[?(" + inner + ")]";
+  }
+
+  /**
+   * Returns true when {@code tail} is empty or a "pure projection suffix" — a
+   * leading {@code .} followed by a valid dotted identifier with no further
+   * {@code [?(...)]} predicates and no bracket forms ({@code [n]}, {@code [n:m]}).
+   * DPC-style clients construct {@code ?filter=} URLs by reusing their
+   * {@code ?sort=} templates, leaving a trailing projection like
+   * {@code .productSpecCharacteristicValue.value} after the filter's
+   * {@code [?(...)]}. The projection has no semantic effect on the filter — the
+   * matched row set is fully determined by the predicate — so the parser
+   * tolerates the suffix and discards it. Nested predicates or index accesses
+   * in the suffix are rejected; the sub-array shorthand does not support
+   * multi-level filtering on this surface.
+   *
+   * <p>{@code [*]} wildcards in the suffix are already removed by
+   * {@link #stripWildcards} upstream, so this check only needs to recognise
+   * a plain dotted identifier remainder.
+   */
+  static boolean isPureProjectionSuffix(String tail) {
+    String t = tail.trim();
+    if (t.isEmpty()) {
+      return true;
+    }
+    if (!t.startsWith(".")) {
+      return false;
+    }
+    String body = t.substring(1);
+    if (body.indexOf('[') >= 0) {
+      return false;
+    }
+    return isValidDottedIdentifier(body);
   }
 
   static boolean isValidDottedIdentifier(String s) {
