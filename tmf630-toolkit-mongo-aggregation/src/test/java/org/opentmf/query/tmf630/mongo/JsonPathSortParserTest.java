@@ -409,6 +409,84 @@ class JsonPathSortParserTest {
   }
 
   @Test
+  void doubleQuotedPredicateLiteralAcceptedEquivalentlyToSingleQuoted() {
+    // The colleague's 2.1.3 follow-up: the filter tokenizer accepts both `'` and
+    // `"` as string-literal delimiters; the sort parser only accepted `'`. Same
+    // predicate @.id == "X" was therefore valid in ?filter= but rejected in
+    // ?sort=. Now both produce identical SortPaths.
+    JsonPathSortAst.SortPath singleQ =
+        parser.parse("$.arr[?(@.id == 'X')].value");
+    JsonPathSortAst.SortPath doubleQ =
+        parser.parse("$.arr[?(@.id == \"X\")].value");
+    assertEquals(singleQ, doubleQ);
+  }
+
+  @Test
+  void doubleQuotedLiteralStringValuePreservedVerbatim() {
+    JsonPathSortAst.SortPath p =
+        parser.parse("$.arr[?(@.name == \"abc def\")].value");
+    JsonPathSortAst.ComparisonPredicate cp =
+        (JsonPathSortAst.ComparisonPredicate) p.hops().get(0).predicate();
+    assertEquals("abc def", ((JsonPathSortAst.StringLiteral) cp.literal()).value());
+  }
+
+  @Test
+  void mixedQuoteStylesParseCorrectly() {
+    // The two quote styles must be independent: a `'` opening a literal must NOT
+    // be closed by a `"`. The opening char acts as the close sentinel.
+    JsonPathSortAst.SortPath p =
+        parser.parse("$.arr[?(@.id == 'X' && @.name == \"Y\")].value");
+    JsonPathSortAst.AndPredicate ap =
+        (JsonPathSortAst.AndPredicate) p.hops().get(0).predicate();
+    JsonPathSortAst.ComparisonPredicate left =
+        (JsonPathSortAst.ComparisonPredicate) ap.left();
+    JsonPathSortAst.ComparisonPredicate right =
+        (JsonPathSortAst.ComparisonPredicate) ap.right();
+    assertEquals("X", ((JsonPathSortAst.StringLiteral) left.literal()).value());
+    assertEquals("Y", ((JsonPathSortAst.StringLiteral) right.literal()).value());
+  }
+
+  @Test
+  void doubleQuotedStringContainingSingleQuoteIsPreserved() {
+    // The literal contains a `'` that must NOT terminate the `"..."` string.
+    JsonPathSortAst.SortPath p =
+        parser.parse("$.arr[?(@.name == \"with'apostrophe\")].value");
+    JsonPathSortAst.ComparisonPredicate cp =
+        (JsonPathSortAst.ComparisonPredicate) p.hops().get(0).predicate();
+    assertEquals(
+        "with'apostrophe",
+        ((JsonPathSortAst.StringLiteral) cp.literal()).value());
+  }
+
+  @Test
+  void stripWildcardsPreservesSquareStarInsideDoubleQuotedLiteral() {
+    // Regression: stripWildcards must NOT remove [*] inside a "..." literal,
+    // just as it doesn't inside a '...' literal. The opening quote (single or
+    // double) opens a quote-active region until the same opening char repeats.
+    JsonPathSortAst.SortPath p =
+        parser.parse("$.arr[?(@.label == \"[*]\")].value");
+    JsonPathSortAst.ComparisonPredicate cp =
+        (JsonPathSortAst.ComparisonPredicate) p.hops().get(0).predicate();
+    assertEquals("[*]", ((JsonPathSortAst.StringLiteral) cp.literal()).value());
+  }
+
+  @Test
+  void outerWrapDetectionSkipsParenInsideDoubleQuotedStringLiteral() {
+    // Mirror of outerWrapDetectionSkipsParenInsideStringLiteral but with the
+    // unbalanced parens inside a "..." literal. The depth counter must skip the
+    // quoted region regardless of which quote style opened it.
+    JsonPathSortAst.SortPath outer =
+        parser.parse("num($.arr[?(@.id == \"with(paren\")].value)");
+    JsonPathSortAst.Coercion num =
+        assertInstanceOf(JsonPathSortAst.Coercion.class, outer.leaf());
+    assertEquals(JsonPathSortAst.CoercionType.NUM, num.type());
+    JsonPathSortAst.ComparisonPredicate cp =
+        (JsonPathSortAst.ComparisonPredicate) outer.hops().get(0).predicate();
+    assertEquals(
+        "with(paren", ((JsonPathSortAst.StringLiteral) cp.literal()).value());
+  }
+
+  @Test
   void outerWrapDetectionSkipsParenInsideStringLiteral() {
     // The outer-wrap detection walks parentheses depth-aware. A '(' inside a string
     // literal must NOT participate in the depth count, otherwise an inner quoted

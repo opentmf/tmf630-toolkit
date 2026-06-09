@@ -26,21 +26,21 @@ public final class JsonPathSortParser {
    */
   static String stripWildcards(String input) {
     StringBuilder out = new StringBuilder(input.length());
-    boolean inQuotes = false;
+    char activeQuote = 0;
     int i = 0;
     while (i < input.length()) {
       char c = input.charAt(i);
-      if (inQuotes) {
+      if (activeQuote != 0) {
         out.append(c);
-        if (c == '\'') {
-          inQuotes = false;
+        if (c == activeQuote) {
+          activeQuote = 0;
         }
         i++;
         continue;
       }
-      if (c == '\'') {
+      if (c == '\'' || c == '"') {
         out.append(c);
-        inQuotes = true;
+        activeQuote = c;
         i++;
         continue;
       }
@@ -103,14 +103,17 @@ public final class JsonPathSortParser {
 
   private static boolean outerCallSpansEntireExpression(String s, int openIndex) {
     int depth = 0;
-    boolean inQuotes = false;
+    char activeQuote = 0;
     for (int i = openIndex; i < s.length(); i++) {
       char c = s.charAt(i);
-      if (c == '\'') {
-        inQuotes = !inQuotes;
+      if (activeQuote != 0) {
+        if (c == activeQuote) {
+          activeQuote = 0;
+        }
         continue;
       }
-      if (inQuotes) {
+      if (c == '\'' || c == '"') {
+        activeQuote = c;
         continue;
       }
       if (c == '(') {
@@ -444,9 +447,10 @@ public final class JsonPathSortParser {
         throw new IllegalArgumentException("Expected literal at end of input: " + input);
       }
       char c = input.charAt(pos);
-      if (c == '\'') {
+      if (c == '\'' || c == '"') {
+        char openQuote = c;
         consume(1);
-        int end = input.indexOf('\'', pos);
+        int end = input.indexOf(openQuote, pos);
         if (end < 0) {
           throw new IllegalArgumentException("Unterminated string literal in: " + input);
         }

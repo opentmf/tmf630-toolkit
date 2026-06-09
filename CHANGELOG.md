@@ -5,6 +5,20 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 ## [2.1.3] - 2026-06-09
 
 ### Fixed
+- **JSONPath `?sort=` now accepts double-quoted predicate literals, matching
+  the filter parser.** The sort grammar's three quote-aware scanners
+  (`JsonPathSortParser.readLiteral`, `stripWildcards`, and
+  `outerCallSpansEntireExpression`) hard-coded `'` as the only string-literal
+  delimiter and treated `"` as an unexpected character — so the identical
+  predicate `@.id == "X"` was valid in `?filter=` (after the 2.1.3 filter
+  fixes) but rejected with HTTP 400 in `?sort=`. The scanners now treat
+  `"` as an equivalent delimiter and use the opening quote char as the close
+  sentinel, so `'X"` does not terminate at the `"` (and vice versa). This is
+  purely additive — single-quoted inputs are unaffected — and aligns the
+  toolkit with canonical JSONPath (Jayway). The same change carries through
+  to the wildcard-stripping pass (`[*]` inside `"..."` is preserved as a
+  literal, just as it already was inside `'...'`) and the outer-wrap paren
+  counter (parens inside `"..."` are excluded from the depth count).
 - **`?name.regexi=` no longer returns HTTP 500 on MongoDB backends.**
   `PredicateFactory.regexIgnoreCase` built the predicate as
   `root.getString(field).lower().matches(pattern.toLowerCase())`, which emits
