@@ -10,7 +10,7 @@ public final class JsonPathSortParser {
     if (input == null) {
       throw new IllegalArgumentException("Sort expression must not be null");
     }
-    return new ParserState(stripWildcards(input.trim())).parseSortPath();
+    return parseWithOuterWrap(stripWildcards(input.trim()));
   }
 
   /**
@@ -56,6 +56,96 @@ public final class JsonPathSortParser {
     return out.toString();
   }
 
+  /**
+   * Accepts an outer function call {@code num(...)}, {@code str(...)}, {@code date(...)},
+   * {@code min(...)}, or {@code max(...)} enclosing an entire JSONPath sort expression.
+   * When present, the wrapped expression is parsed as usual and the resulting leaf is
+   * wrapped in the corresponding {@code Coercion} or {@code Aggregator} node. Multiple
+   * nested outer wrappers compose recursively. Mirrors the equivalent SimpleRich form
+   * so the two grammars compose identically once translated.
+   */
+  private JsonPathSortAst.SortPath parseWithOuterWrap(String trimmed) {
+    OuterCall outer = detectOuterCall(trimmed);
+    if (outer == null) {
+      return new ParserState(trimmed).parseSortPath();
+    }
+    String inner = trimmed.substring(outer.openIndex() + 1, trimmed.length() - 1).trim();
+    JsonPathSortAst.SortPath innerPath = parseWithOuterWrap(inner);
+    return new JsonPathSortAst.SortPath(innerPath.hops(), outer.wrap(innerPath.leaf()));
+  }
+
+  private static OuterCall detectOuterCall(String s) {
+    if (s.length() < 5 || !s.endsWith(")")) {
+      return null;
+    }
+    OuterCallKind kind;
+    int openIndex;
+    if (s.startsWith("num(")) {
+      kind = OuterCallKind.NUM;
+      openIndex = 3;
+    } else if (s.startsWith("str(")) {
+      kind = OuterCallKind.STR;
+      openIndex = 3;
+    } else if (s.startsWith("min(")) {
+      kind = OuterCallKind.MIN;
+      openIndex = 3;
+    } else if (s.startsWith("max(")) {
+      kind = OuterCallKind.MAX;
+      openIndex = 3;
+    } else if (s.startsWith("date(")) {
+      kind = OuterCallKind.DATE;
+      openIndex = 4;
+    } else {
+      return null;
+    }
+    return outerCallSpansEntireExpression(s, openIndex) ? new OuterCall(kind, openIndex) : null;
+  }
+
+  private static boolean outerCallSpansEntireExpression(String s, int openIndex) {
+    int depth = 0;
+    boolean inQuotes = false;
+    for (int i = openIndex; i < s.length(); i++) {
+      char c = s.charAt(i);
+      if (c == '\'') {
+        inQuotes = !inQuotes;
+        continue;
+      }
+      if (inQuotes) {
+        continue;
+      }
+      if (c == '(') {
+        depth++;
+      } else if (c == ')') {
+        depth--;
+        if (depth == 0) {
+          return i == s.length() - 1;
+        }
+      }
+    }
+    return false;
+  }
+
+  private enum OuterCallKind {
+    NUM,
+    STR,
+    DATE,
+    MIN,
+    MAX
+  }
+
+  private record OuterCall(OuterCallKind kind, int openIndex) {
+
+    JsonPathSortAst.LeafExpression wrap(JsonPathSortAst.LeafExpression inner) {
+      return switch (kind) {
+        case NUM -> new JsonPathSortAst.Coercion(JsonPathSortAst.CoercionType.NUM, inner);
+        case STR -> new JsonPathSortAst.Coercion(JsonPathSortAst.CoercionType.STR, inner);
+        case DATE -> new JsonPathSortAst.Coercion(JsonPathSortAst.CoercionType.DATE, inner);
+        case MIN -> new JsonPathSortAst.Aggregator(JsonPathSortAst.AggregatorOp.MIN, inner);
+        case MAX -> new JsonPathSortAst.Aggregator(JsonPathSortAst.AggregatorOp.MAX, inner);
+      };
+    }
+  }
+
   private static final class ParserState {
 
     private final String input;
@@ -89,6 +179,13 @@ public final class JsonPathSortParser {
           }
           expect(".");
         } else {
+          // A dotted identifier may be followed by a single balanced parenthesised group
+          // forming a function-call leaf: `num(value)`, `productSpec.num(value)`,
+          // `num(min(value))`, etc. We consume the parens here so `splitTrailing` can
+          // decide whether the trailing path is a plain dotted reference or a function
+          // call wrapping a leaf expression.
+          String trailingCall = readBalancedFunctionCall();
+          String trailing = dottedId + trailingCall;
           if (hops.isEmpty()) {
             throw new IllegalArgumentException(
                 "JsonPath sort term must contain at least one [?(...)] correlation predicate: "
@@ -99,9 +196,143 @@ public final class JsonPathSortParser {
             throw new IllegalArgumentException(
                 "Unexpected trailing input in sort expression: " + input.substring(pos));
           }
-          return new JsonPathSortAst.SortPath(hops, new JsonPathSortAst.FieldRef(dottedId));
+          return splitTrailing(hops, trailing);
         }
       }
+    }
+
+    private String readBalancedFunctionCall() {
+      if (pos >= input.length() || input.charAt(pos) != '(') {
+        return "";
+      }
+      int start = pos;
+      int depth = 1;
+      pos++;
+      while (pos < input.length() && depth > 0) {
+        char c = input.charAt(pos);
+        if (c == '(') {
+          depth++;
+        } else if (c == ')') {
+          depth--;
+        }
+        pos++;
+      }
+      if (depth != 0) {
+        throw new IllegalArgumentException(
+            "Unbalanced parentheses in trailing leaf in: " + input);
+      }
+      return input.substring(start, pos);
+    }
+
+    /**
+     * Decides the AST shape of the trailing path, mirroring {@link SimpleRichSortParser}:
+     *
+     * <ul>
+     *   <li>If the trailing path contains no function call, the entire dotted path becomes
+     *       a single {@link JsonPathSortAst.FieldRef}. Mongo's expression-context path
+     *       traversal naturally projects across array intermediates from there.
+     *   <li>If the trailing path ends in a function call (e.g. {@code productSpec.num(value)}),
+     *       every pre-function dotted segment becomes a naked {@link JsonPathSortAst.ArrayHop}
+     *       with {@link JsonPathSortAst.AlwaysTruePredicate}, and the function call itself
+     *       becomes the leaf. This is the same shape SimpleRich emits, so the translator
+     *       handles both grammars uniformly.
+     * </ul>
+     */
+    private JsonPathSortAst.SortPath splitTrailing(
+        List<JsonPathSortAst.ArrayHop> explicitHops, String trailing) {
+      List<String> segments = splitDepthAware(trailing);
+      if (segments.isEmpty() || (segments.size() == 1 && segments.get(0).isEmpty())) {
+        throw new IllegalArgumentException(
+            "Sort path is missing a trailing leaf field after the final hop: " + input);
+      }
+      String lastSegment = segments.get(segments.size() - 1);
+
+      if (lastSegment.indexOf('(') < 0) {
+        for (int i = 0; i < segments.size() - 1; i++) {
+          if (segments.get(i).indexOf('(') >= 0) {
+            throw new IllegalArgumentException(
+                "Function call segments are only allowed as the leaf, not before more path: "
+                    + segments.get(i));
+          }
+        }
+        return new JsonPathSortAst.SortPath(
+            explicitHops, new JsonPathSortAst.FieldRef(trailing));
+      }
+
+      List<JsonPathSortAst.ArrayHop> all = new ArrayList<>(explicitHops);
+      for (int i = 0; i < segments.size() - 1; i++) {
+        String segment = segments.get(i);
+        if (segment.indexOf('(') >= 0) {
+          throw new IllegalArgumentException(
+              "Function call segments are only allowed as the leaf, not as a naked array hop: "
+                  + segment);
+        }
+        all.add(
+            new JsonPathSortAst.ArrayHop(
+                segment, JsonPathSortAst.AlwaysTruePredicate.INSTANCE));
+      }
+      JsonPathSortAst.LeafExpression leaf = parseLeafExpression(lastSegment);
+      return new JsonPathSortAst.SortPath(all, leaf);
+    }
+
+    private static List<String> splitDepthAware(String s) {
+      List<String> parts = new ArrayList<>();
+      int depth = 0;
+      int start = 0;
+      for (int i = 0; i < s.length(); i++) {
+        char c = s.charAt(i);
+        if (c == '(') {
+          depth++;
+        } else if (c == ')') {
+          if (depth == 0) {
+            throw new IllegalArgumentException("Unbalanced ')' in segment: " + s);
+          }
+          depth--;
+        } else if (c == '.' && depth == 0) {
+          parts.add(s.substring(start, i));
+          start = i + 1;
+        }
+      }
+      if (depth != 0) {
+        throw new IllegalArgumentException("Unbalanced '(' in segment: " + s);
+      }
+      parts.add(s.substring(start));
+      return parts;
+    }
+
+    private static JsonPathSortAst.LeafExpression parseLeafExpression(String text) {
+      String trimmed = text.trim();
+      if (trimmed.isEmpty()) {
+        throw new IllegalArgumentException("Empty leaf expression");
+      }
+      int paren = trimmed.indexOf('(');
+      if (paren < 0) {
+        return new JsonPathSortAst.FieldRef(trimmed);
+      }
+      if (!trimmed.endsWith(")")) {
+        throw new IllegalArgumentException(
+            "Function call must end with ')' in leaf expression: " + trimmed);
+      }
+      String fnName = trimmed.substring(0, paren);
+      String inner = trimmed.substring(paren + 1, trimmed.length() - 1);
+      JsonPathSortAst.LeafExpression innerExpr = parseLeafExpression(inner);
+      return switch (fnName) {
+        case "max" -> new JsonPathSortAst.Aggregator(
+            JsonPathSortAst.AggregatorOp.MAX, innerExpr);
+        case "min" -> new JsonPathSortAst.Aggregator(
+            JsonPathSortAst.AggregatorOp.MIN, innerExpr);
+        case "str" -> new JsonPathSortAst.Coercion(
+            JsonPathSortAst.CoercionType.STR, innerExpr);
+        case "num" -> new JsonPathSortAst.Coercion(
+            JsonPathSortAst.CoercionType.NUM, innerExpr);
+        case "date" -> new JsonPathSortAst.Coercion(
+            JsonPathSortAst.CoercionType.DATE, innerExpr);
+        default ->
+            throw new IllegalArgumentException(
+                "Unknown function '"
+                    + fnName
+                    + "' in leaf; supported: max, min, str, num, date");
+      };
     }
 
     JsonPathSortAst.Predicate parseOr() {

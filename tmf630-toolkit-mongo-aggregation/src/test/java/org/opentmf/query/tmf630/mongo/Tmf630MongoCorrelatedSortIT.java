@@ -464,10 +464,10 @@ class Tmf630MongoCorrelatedSortIT {
         executor.findAll(Order.class, null, sort, PageRequest.of(0, 10));
 
     // Sort key for each doc is the leaf path through serviceCharacteristic (a
-    // collection-typed intermediate). The translator wraps the per-element leaf
-    // in $arrayElemAt so the synthetic _sortKey0 stays scalar — first element of
-    // each Service's serviceCharacteristic[*].value is the kafkaEventId value:
-    // "A-event" < "B-event" < "C-event".
+    // collection-typed intermediate). The translator folds the per-element leaf
+    // with $min (ASC) so the synthetic _sortKey0 stays scalar — uppercase ASCII
+    // letters sort before lowercase, so $min of ["A-event", "red"] is "A-event",
+    // and similarly "B-event" and "C-event" win for B and C.
     assertEquals(
         List.of("A", "B", "C"),
         page.getContent().stream().map(Order::getId).toList());
@@ -549,8 +549,8 @@ class Tmf630MongoCorrelatedSortIT {
     // (`service.serviceCharacteristic.value`). Without per-leaf scalar reduction
     // both _sortKey0 and _sortKey1 carry auto-projected arrays, and Mongo
     // refuses the multi-key $sort with "cannot sort with keys that are parallel
-    // arrays" (BadValue, code 2). The translator wraps each leaf in
-    // $arrayElemAt so both keys stay scalar.
+    // arrays" (BadValue, code 2). The translator folds each leaf with $min /
+    // $max (direction-aware) so both keys stay scalar.
     mongoTemplate.dropCollection(Order.class);
     mongoTemplate.insertAll(
         List.of(
@@ -659,6 +659,304 @@ class Tmf630MongoCorrelatedSortIT {
     // Final: B, A, C.
     assertEquals(
         List.of("B", "A", "C"),
+        page.getContent().stream().map(Order::getId).toList());
+  }
+
+  @Test
+  void jsonPathLeafLevelNumCoercionSortsStringValuesNumerically() {
+    // The DNext scenario: Characteristic.value is stored as a String even though the
+    // value semantically represents a number ("105.34", "12.2", "4.31"). A bare leaf
+    // sort would compare them alphabetically — "105.34" < "12.2" < "4.31" — putting
+    // the largest value first. Wrapping the leaf in num() coerces each value via
+    // $convert(input, "double", onError:null), giving the expected numeric order.
+    mongoTemplate.dropCollection(Product.class);
+    mongoTemplate.insertAll(
+        List.of(
+            new Product("1", List.of(new Characteristic("price", "105.34"))),
+            new Product("2", List.of(new Characteristic("price", "12.2"))),
+            new Product("3", List.of(new Characteristic("price", "4.31")))));
+
+    TmfSort sort =
+        new TmfSort(
+            List.of(
+                new TmfSortTerm(
+                    Sort.Direction.ASC,
+                    TmfSortTerm.Kind.JSONPATH,
+                    "$.characteristic[?(@.name == 'price')].num(value)")));
+
+    Page<Product> page =
+        executor.findAll(Product.class, null, sort, PageRequest.of(0, 10));
+
+    assertEquals(
+        List.of("3", "2", "1"),
+        page.getContent().stream().map(Product::getId).toList());
+  }
+
+  @Test
+  void jsonPathOuterNumWrapProducesIdenticalOrderToLeafForm() {
+    // Outer-wrap form is the symmetric alternative to the leaf-call form. Both
+    // translate to the same Mongo expression once the path is single-element. This
+    // test pins the equivalence on real data so a future divergence in semantics
+    // surfaces immediately.
+    mongoTemplate.dropCollection(Product.class);
+    mongoTemplate.insertAll(
+        List.of(
+            new Product("1", List.of(new Characteristic("price", "105.34"))),
+            new Product("2", List.of(new Characteristic("price", "12.2"))),
+            new Product("3", List.of(new Characteristic("price", "4.31")))));
+
+    TmfSort outerWrap =
+        new TmfSort(
+            List.of(
+                new TmfSortTerm(
+                    Sort.Direction.ASC,
+                    TmfSortTerm.Kind.JSONPATH,
+                    "num($.characteristic[?(@.name == 'price')].value)")));
+
+    Page<Product> page =
+        executor.findAll(Product.class, null, outerWrap, PageRequest.of(0, 10));
+
+    assertEquals(
+        List.of("3", "2", "1"),
+        page.getContent().stream().map(Product::getId).toList());
+  }
+
+  @Test
+  void multipleJsonPathTermsWithCoercedLeavesAllowSortWithoutParallelArraysError() {
+    // The 2.1.2 parallel-arrays fix made multi-key $sort safe when leaves cross
+    // array intermediates. This test pins that the new JSONPath grammar for
+    // coercion does not regress that fix: two correlated JSONPath terms, each
+    // with a num() leaf, must both produce scalar sort keys.
+    mongoTemplate.dropCollection(Product.class);
+    mongoTemplate.insertAll(
+        List.of(
+            new Product(
+                "A",
+                List.of(
+                    new Characteristic("price", "10"),
+                    new Characteristic("tax", "5"))),
+            new Product(
+                "B",
+                List.of(
+                    new Characteristic("price", "5"),
+                    new Characteristic("tax", "20"))),
+            new Product(
+                "C",
+                List.of(
+                    new Characteristic("price", "10"),
+                    new Characteristic("tax", "1")))));
+
+    TmfSort sort =
+        new TmfSort(
+            List.of(
+                new TmfSortTerm(
+                    Sort.Direction.ASC,
+                    TmfSortTerm.Kind.JSONPATH,
+                    "$.characteristic[?(@.name == 'price')].num(value)"),
+                new TmfSortTerm(
+                    Sort.Direction.ASC,
+                    TmfSortTerm.Kind.JSONPATH,
+                    "$.characteristic[?(@.name == 'tax')].num(value)")));
+
+    Page<Product> page =
+        executor.findAll(Product.class, null, sort, PageRequest.of(0, 10));
+
+    // First term: A=10, B=5, C=10. ASC → B sorts first (price=5); A and C tie at 10.
+    // Second term among A and C: A.tax=5, C.tax=1 → C before A.
+    // Final order: B, C, A.
+    assertEquals(
+        List.of("B", "C", "A"),
+        page.getContent().stream().map(Product::getId).toList());
+  }
+
+  @Test
+  void multiElementInnerArraySortsByMinElementForAscending() {
+    // 2.1.2 regression: the parallel-arrays fix replaced Mongo's native array-key
+    // $sort semantics (min element for ASC, max for DESC) with $arrayElemAt:[X, 0]
+    // — silently switching ordering to "first matching element". The colleague
+    // re-broke their downstream tests on 2.1.2 and had to work around it.
+    //
+    // Seed where the smallest element is NOT at index 0 for each Order, AND the
+    // first-element ordering differs from the min-element ordering:
+    //   A: ["80", "30"] → first="80", min="30"
+    //   B: ["50", "70"] → first="50", min="50"
+    // ASC by first: B(50), A(80). ASC by min: A(30), B(50). Asserting [A, B]
+    // pins the FIXED behaviour; the 2.1.2 code would have produced [B, A].
+    mongoTemplate.dropCollection(Order.class);
+    mongoTemplate.insertAll(
+        List.of(
+            new Order(
+                "A",
+                List.of(
+                    new OrderItem(
+                        "X",
+                        new Service(
+                            List.of(
+                                new Characteristic("price", "80"),
+                                new Characteristic("price", "30")))))),
+            new Order(
+                "B",
+                List.of(
+                    new OrderItem(
+                        "X",
+                        new Service(
+                            List.of(
+                                new Characteristic("price", "50"),
+                                new Characteristic("price", "70"))))))));
+
+    TmfSort sort =
+        new TmfSort(
+            List.of(
+                new TmfSortTerm(
+                    Sort.Direction.ASC,
+                    TmfSortTerm.Kind.SIMPLE_RICH,
+                    "serviceOrderItem[X].service.serviceCharacteristic.value")));
+
+    Page<Order> page =
+        executor.findAll(Order.class, null, sort, PageRequest.of(0, 10));
+
+    assertEquals(
+        List.of("A", "B"),
+        page.getContent().stream().map(Order::getId).toList());
+  }
+
+  @Test
+  void multiElementInnerArraySortsByMaxElementForDescending() {
+    // DESC mirror. Seed designed so MAX and FIRST-element orderings differ:
+    //   A: ["10", "70"] → first="10", max="70"
+    //   B: ["30", "50"] → first="30", max="50"
+    //   C: ["20", "40"] → first="20", max="40"
+    // DESC by first: B(30), C(20), A(10). DESC by max: A(70), B(50), C(40).
+    // Asserting [A, B, C] pins the fix; the 2.1.2 code would have produced
+    // [B, C, A].
+    mongoTemplate.dropCollection(Order.class);
+    mongoTemplate.insertAll(
+        List.of(
+            new Order(
+                "A",
+                List.of(
+                    new OrderItem(
+                        "X",
+                        new Service(
+                            List.of(
+                                new Characteristic("price", "10"),
+                                new Characteristic("price", "70")))))),
+            new Order(
+                "B",
+                List.of(
+                    new OrderItem(
+                        "X",
+                        new Service(
+                            List.of(
+                                new Characteristic("price", "30"),
+                                new Characteristic("price", "50")))))),
+            new Order(
+                "C",
+                List.of(
+                    new OrderItem(
+                        "X",
+                        new Service(
+                            List.of(
+                                new Characteristic("price", "20"),
+                                new Characteristic("price", "40"))))))));
+
+    TmfSort sort =
+        new TmfSort(
+            List.of(
+                new TmfSortTerm(
+                    Sort.Direction.DESC,
+                    TmfSortTerm.Kind.SIMPLE_RICH,
+                    "serviceOrderItem[X].service.serviceCharacteristic.value")));
+
+    Page<Order> page =
+        executor.findAll(Order.class, null, sort, PageRequest.of(0, 10));
+
+    assertEquals(
+        List.of("A", "B", "C"),
+        page.getContent().stream().map(Order::getId).toList());
+  }
+
+  @Test
+  void multiTermAscSortWithMultiElementArraysStaysScalarAndUsesMin() {
+    // Belt-and-suspenders: re-prove the parallel-arrays fix still holds with
+    // the 2.1.3 reducer change. Two correlated ASC terms, each whose leaf
+    // crosses an inner collection-typed intermediate with multiple elements.
+    // Both _sortKeyN values must stay scalar (no parallel-arrays crash) AND
+    // must be the MIN element of their respective auto-projected arrays.
+    //
+    // Seed designed so first-element ordering and min-element ordering DIFFER:
+    //   A: type=["P", "M"], price=["300", "100"]
+    //   B: type=["Q", "L"], price=["400", "150"]
+    //   C: type=["R", "K"], price=["500", "200"]
+    // ASC by first-of-type: A(P), B(Q), C(R) → [A, B, C].
+    // ASC by min-of-type:   C(K), B(L), A(M) → [C, B, A].
+    // Asserting [C, B, A] pins the fix; 2.1.2 would have produced [A, B, C].
+    mongoTemplate.dropCollection(Order.class);
+    mongoTemplate.insertAll(
+        List.of(
+            new Order(
+                "A",
+                List.of(
+                    new OrderItem(
+                        "RC_OFFER_TYPE",
+                        new Service(
+                            List.of(
+                                new Characteristic("type", "P"),
+                                new Characteristic("type", "M")))),
+                    new OrderItem(
+                        "STARTING_PRICE",
+                        new Service(
+                            List.of(
+                                new Characteristic("price", "300"),
+                                new Characteristic("price", "100")))))),
+            new Order(
+                "B",
+                List.of(
+                    new OrderItem(
+                        "RC_OFFER_TYPE",
+                        new Service(
+                            List.of(
+                                new Characteristic("type", "Q"),
+                                new Characteristic("type", "L")))),
+                    new OrderItem(
+                        "STARTING_PRICE",
+                        new Service(
+                            List.of(
+                                new Characteristic("price", "400"),
+                                new Characteristic("price", "150")))))),
+            new Order(
+                "C",
+                List.of(
+                    new OrderItem(
+                        "RC_OFFER_TYPE",
+                        new Service(
+                            List.of(
+                                new Characteristic("type", "R"),
+                                new Characteristic("type", "K")))),
+                    new OrderItem(
+                        "STARTING_PRICE",
+                        new Service(
+                            List.of(
+                                new Characteristic("price", "500"),
+                                new Characteristic("price", "200"))))))));
+
+    TmfSort sort =
+        new TmfSort(
+            List.of(
+                new TmfSortTerm(
+                    Sort.Direction.ASC,
+                    TmfSortTerm.Kind.SIMPLE_RICH,
+                    "serviceOrderItem[id=RC_OFFER_TYPE].service.serviceCharacteristic.value"),
+                new TmfSortTerm(
+                    Sort.Direction.ASC,
+                    TmfSortTerm.Kind.SIMPLE_RICH,
+                    "serviceOrderItem[id=STARTING_PRICE].service.serviceCharacteristic.value")));
+
+    Page<Order> page =
+        executor.findAll(Order.class, null, sort, PageRequest.of(0, 10));
+
+    assertEquals(
+        List.of("C", "B", "A"),
         page.getContent().stream().map(Order::getId).toList());
   }
 

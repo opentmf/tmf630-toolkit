@@ -274,6 +274,205 @@ class JsonPathSortParserTest {
     assertEquals("value", ((JsonPathSortAst.FieldRef) p.leaf()).fieldPath());
   }
 
+  @Test
+  void parsesLeafLevelNumCoercion() {
+    // The motivating case: DNext stores Characteristic.value as String even when its
+    // valueType is "number". A bare leaf would sort alphabetically; the num() wrap
+    // forces numeric sort, mirroring SimpleRich's num(value) form.
+    JsonPathSortAst.SortPath p =
+        parser.parse("$.arr[?(@.id == 'X')].num(value)");
+    assertEquals(1, p.hops().size());
+    JsonPathSortAst.Coercion c =
+        assertInstanceOf(JsonPathSortAst.Coercion.class, p.leaf());
+    assertEquals(JsonPathSortAst.CoercionType.NUM, c.type());
+    assertEquals("value", ((JsonPathSortAst.FieldRef) c.inner()).fieldPath());
+  }
+
+  @Test
+  void parsesLeafLevelStrAndDateCoercions() {
+    JsonPathSortAst.Coercion str =
+        (JsonPathSortAst.Coercion) parser.parse("$.arr[?(@.id == 'X')].str(value)").leaf();
+    assertEquals(JsonPathSortAst.CoercionType.STR, str.type());
+
+    JsonPathSortAst.Coercion date =
+        (JsonPathSortAst.Coercion) parser.parse("$.arr[?(@.id == 'X')].date(value)").leaf();
+    assertEquals(JsonPathSortAst.CoercionType.DATE, date.type());
+  }
+
+  @Test
+  void parsesLeafLevelMinAndMaxAggregators() {
+    JsonPathSortAst.Aggregator min =
+        (JsonPathSortAst.Aggregator) parser.parse("$.arr[?(@.id == 'X')].min(value)").leaf();
+    assertEquals(JsonPathSortAst.AggregatorOp.MIN, min.op());
+
+    JsonPathSortAst.Aggregator max =
+        (JsonPathSortAst.Aggregator) parser.parse("$.arr[?(@.id == 'X')].max(value)").leaf();
+    assertEquals(JsonPathSortAst.AggregatorOp.MAX, max.op());
+  }
+
+  @Test
+  void parsesNestedFunctionLeafExpression() {
+    // num(min(value)) — coerce the per-element min to a number. Tests recursive
+    // parseLeafExpression handling.
+    JsonPathSortAst.SortPath p =
+        parser.parse("$.arr[?(@.id == 'X')].num(min(value))");
+    JsonPathSortAst.Coercion num =
+        assertInstanceOf(JsonPathSortAst.Coercion.class, p.leaf());
+    assertEquals(JsonPathSortAst.CoercionType.NUM, num.type());
+    JsonPathSortAst.Aggregator min =
+        assertInstanceOf(JsonPathSortAst.Aggregator.class, num.inner());
+    assertEquals(JsonPathSortAst.AggregatorOp.MIN, min.op());
+    assertEquals("value", ((JsonPathSortAst.FieldRef) min.inner()).fieldPath());
+  }
+
+  @Test
+  void promotesPreFunctionSegmentsToNakedArrayHops() {
+    // productSpecCharacteristicValue.num(value) — the inner array is consumed by a naked
+    // ArrayHop with AlwaysTruePredicate and the function call becomes the leaf, matching
+    // SimpleRich's shape so the translator handles both grammars uniformly.
+    JsonPathSortAst.SortPath p =
+        parser.parse(
+            "$.prodSpec[?(@.id == 'X')].productSpecCharacteristicValue.num(value)");
+    assertEquals(2, p.hops().size());
+    assertEquals("prodSpec", p.hops().get(0).arrayPath());
+    assertEquals("productSpecCharacteristicValue", p.hops().get(1).arrayPath());
+    assertInstanceOf(
+        JsonPathSortAst.AlwaysTruePredicate.class, p.hops().get(1).predicate());
+    JsonPathSortAst.Coercion c =
+        assertInstanceOf(JsonPathSortAst.Coercion.class, p.leaf());
+    assertEquals(JsonPathSortAst.CoercionType.NUM, c.type());
+    assertEquals("value", ((JsonPathSortAst.FieldRef) c.inner()).fieldPath());
+  }
+
+  @Test
+  void plainDottedLeafStaysSingleFieldRef() {
+    // Regression: when the trailing path has no function calls, the entire dotted
+    // suffix remains a single FieldRef so the existing parallel-arrays fix in
+    // AggregationKeyTranslator continues to apply via hasArrayIntermediate.
+    JsonPathSortAst.SortPath p =
+        parser.parse(
+            "$.prodSpec[?(@.id == 'X')].productSpecCharacteristicValue.value");
+    assertEquals(1, p.hops().size());
+    assertEquals(
+        "productSpecCharacteristicValue.value",
+        ((JsonPathSortAst.FieldRef) p.leaf()).fieldPath());
+  }
+
+  @Test
+  void parsesOuterCoercionWrapAroundEntireExpression() {
+    // num($.arr[?()].value) — outer wrap form, symmetric with SimpleRich. Hops are
+    // unchanged; the resulting leaf is wrapped in Coercion(NUM).
+    JsonPathSortAst.SortPath outer =
+        parser.parse("num($.arr[?(@.id == 'X')].value)");
+    JsonPathSortAst.SortPath inner =
+        parser.parse("$.arr[?(@.id == 'X')].num(value)");
+    assertEquals(inner, outer);
+  }
+
+  @Test
+  void parsesOuterAggregatorWrapAroundEntireExpression() {
+    JsonPathSortAst.SortPath outer =
+        parser.parse("max($.arr[?(@.id == 'X')].value)");
+    JsonPathSortAst.Aggregator agg =
+        assertInstanceOf(JsonPathSortAst.Aggregator.class, outer.leaf());
+    assertEquals(JsonPathSortAst.AggregatorOp.MAX, agg.op());
+    assertEquals("value", ((JsonPathSortAst.FieldRef) agg.inner()).fieldPath());
+  }
+
+  @Test
+  void parsesOuterStrAndDateWraps() {
+    JsonPathSortAst.Coercion str =
+        (JsonPathSortAst.Coercion) parser.parse("str($.arr[?(@.id == 'X')].value)").leaf();
+    assertEquals(JsonPathSortAst.CoercionType.STR, str.type());
+
+    JsonPathSortAst.Coercion date =
+        (JsonPathSortAst.Coercion) parser.parse("date($.arr[?(@.id == 'X')].value)").leaf();
+    assertEquals(JsonPathSortAst.CoercionType.DATE, date.type());
+  }
+
+  @Test
+  void outerWrapDetectionSkipsParenInsideStringLiteral() {
+    // The outer-wrap detection walks parentheses depth-aware. A '(' inside a string
+    // literal must NOT participate in the depth count, otherwise an inner quoted
+    // unbalanced paren would silently disable outer-wrap detection.
+    JsonPathSortAst.SortPath outer =
+        parser.parse("num($.arr[?(@.id == 'with(paren')].value)");
+    JsonPathSortAst.Coercion num =
+        assertInstanceOf(JsonPathSortAst.Coercion.class, outer.leaf());
+    assertEquals(JsonPathSortAst.CoercionType.NUM, num.type());
+    JsonPathSortAst.ComparisonPredicate cp =
+        (JsonPathSortAst.ComparisonPredicate) outer.hops().get(0).predicate();
+    assertEquals(
+        "with(paren", ((JsonPathSortAst.StringLiteral) cp.literal()).value());
+  }
+
+  @Test
+  void parsesNestedOuterWrap() {
+    // num(min($.arr[?()].value)) — outer wraps compose recursively.
+    JsonPathSortAst.SortPath p =
+        parser.parse("num(min($.arr[?(@.id == 'X')].value))");
+    JsonPathSortAst.Coercion num =
+        assertInstanceOf(JsonPathSortAst.Coercion.class, p.leaf());
+    JsonPathSortAst.Aggregator min =
+        assertInstanceOf(JsonPathSortAst.Aggregator.class, num.inner());
+    assertEquals(JsonPathSortAst.AggregatorOp.MIN, min.op());
+  }
+
+  @Test
+  void leafWrapAndOuterWrapAreInterchangeableForCoercion() {
+    // The two grammars produce identical SortPaths for single-cardinality data:
+    // outer wrap vs leaf wrap. Documents the user-facing equivalence so callers
+    // can pick the form they prefer.
+    JsonPathSortAst.SortPath leafForm =
+        parser.parse(
+            "$.prodSpec[?(@.id == 'X')].productSpecCharacteristicValue.num(value)");
+    JsonPathSortAst.SortPath outerForm =
+        parser.parse(
+            "num($.prodSpec[?(@.id == 'X')].productSpecCharacteristicValue.value)");
+    // The shapes differ — outer wrap keeps a single FieldRef leaf; leaf wrap
+    // promotes the pre-function segment to a naked hop. Both translate to the
+    // same Mongo expression; this test pins the structural difference so a future
+    // refactor that "unifies" them is a conscious choice.
+    assertEquals(2, leafForm.hops().size());
+    assertEquals(1, outerForm.hops().size());
+    JsonPathSortAst.Coercion leafCoercion =
+        assertInstanceOf(JsonPathSortAst.Coercion.class, leafForm.leaf());
+    JsonPathSortAst.Coercion outerCoercion =
+        assertInstanceOf(JsonPathSortAst.Coercion.class, outerForm.leaf());
+    assertEquals(JsonPathSortAst.CoercionType.NUM, leafCoercion.type());
+    assertEquals(JsonPathSortAst.CoercionType.NUM, outerCoercion.type());
+  }
+
+  @Test
+  void rejectsUnknownLeafFunctionName() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> parser.parse("$.arr[?(@.id == 'X')].cast(value)"));
+  }
+
+  @Test
+  void rejectsLeafFunctionWithoutClosingParen() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> parser.parse("$.arr[?(@.id == 'X')].num(value"));
+  }
+
+  @Test
+  void rejectsTrailingInputAfterFunctionLeaf() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> parser.parse("$.arr[?(@.id == 'X')].num(value)extra"));
+  }
+
+  @Test
+  void rejectsFunctionCallInIntermediateSegment() {
+    // num(value).field — function call before a more-path is rejected. The user
+    // should put the function at the leaf or use the outer-wrap form.
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> parser.parse("$.arr[?(@.id == 'X')].num(value).extra"));
+  }
+
   private JsonPathSortAst.ComparisonOperator opOf(String expr) {
     return ((JsonPathSortAst.ComparisonPredicate) parser.parse(expr).hops().get(0).predicate())
         .op();

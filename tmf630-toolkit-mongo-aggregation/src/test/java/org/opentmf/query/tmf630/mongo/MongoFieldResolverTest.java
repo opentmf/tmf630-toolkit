@@ -102,8 +102,9 @@ class MongoFieldResolverTest {
   @Test
   void hasArrayIntermediateReturnsTrueWhenAnIntermediateSegmentIsCollection() {
     // 'items' is List<Inner>; the path 'items.id' has 'items' as an intermediate
-    // collection-typed segment, so the translator must wrap in $arrayElemAt
-    // when this path is fed to a scalar-only stage like $convert.
+    // collection-typed segment, so the translator must fold it with $min / $max
+    // (direction-aware) when this path is fed to a scalar-only stage like
+    // $convert or a synthetic _sortKeyN field.
     assertEquals(true, resolver.hasArrayIntermediate(Root.class, "items.id"));
   }
 

@@ -2,6 +2,71 @@
 
 All notable changes to `tmf630-toolkit` are documented in this file.
 
+## [2.1.3] - 2026-06-09
+
+### Fixed
+- **Restored MongoDB's native array-key sort semantics broken by 2.1.2.** The
+  2.1.2 parallel-arrays fix wrapped every leaf whose path crosses a
+  collection-typed intermediate in `$arrayElemAt: [path, 0]` to keep
+  `_sortKeyN` scalar. That kept the multi-key `$sort` working, but it
+  silently switched ordering from MongoDB's pre-2.1.2 behaviour (the
+  array-valued sort key was reduced to its minimum element for ASC and its
+  maximum element for DESC implicitly by `$sort`) to "first matching element
+  regardless of direction." Downstream consumers who relied on the
+  min/max-by-direction semantics had to work around the change. The 2.1.3
+  fix replaces `$arrayElemAt: [path, 0]` with `{$min: path}` for ASC terms
+  and `{$max: path}` for DESC terms — both fold the auto-projected array to
+  a scalar (so the parallel-arrays fix is fully preserved) AND restore the
+  pre-2.1.2 ordering. Direction is plumbed from
+  `Tmf630MongoCorrelatedSortExecutor` (which already inspects
+  `term.direction()`) down through `AggregationKeyTranslator.translate` via
+  a new `leafArrayReducerOp` parameter (constants `MIN_REDUCER` / `MAX_REDUCER`
+  on the translator). The same reducer applies to `PLAIN` sort terms via
+  `plainSortKeyExpression` and to coercion-wrapped leaves
+  (`num(arr[X].sub.value)` etc.) for consistency. Intermediate hop selection
+  — the `$first` of the predicate-filtered array — is unchanged: only the
+  final leaf reduction differs.
+
+### Added
+- **JSONPath sort terms now accept coercion (`num()` / `str()` / `date()`) and
+  aggregator (`min()` / `max()`) wrappers**, matching the SimpleRich grammar
+  byte-for-byte. Two forms are accepted and produce equivalent translations:
+  a leaf-level call (e.g.
+  `?sort=$.characteristic[?(@.name=='price')].num(value)`) and an outer wrap
+  enclosing the entire expression (e.g.
+  `?sort=num($.characteristic[?(@.name=='price')].value)`). Pre-function
+  dotted segments are promoted to naked array hops with `AlwaysTruePredicate`,
+  exactly as SimpleRich does, so the existing translator handles both grammars
+  uniformly. Behaviour for plain dotted leaves (no function call) is unchanged
+  — the entire trailing path stays a single `FieldRef` and Mongo's
+  expression-context auto-traversal continues to handle object intermediates
+  naturally. The 2.1.2 parallel-arrays fix continues to apply: coerced leaves
+  whose paths cross collection intermediates are still wrapped in
+  `$arrayElemAt: [..., 0]` so multi-key `$sort` stays scalar.
+
+### Why
+- Downstream consumers (notably DNext, an internal TMF implementation suite)
+  store `Characteristic.value` as `String` even when its `valueType` is
+  `"number"`, so a bare sort against price-like characteristics ordered the
+  values alphabetically: `"105.34" < "12.2" < "4.31"` instead of the expected
+  numeric order. SimpleRich already exposes `num(value)`; the JSONPath
+  grammar did not, forcing callers to switch dialects mid-application. The
+  two grammars now compose identically and the choice is purely stylistic.
+
+### Not changed
+- **JSONPath filter coercion is deliberately not added.** The filter pipeline
+  compiles a QueryDSL `Predicate` that is shared between Hibernate (JPA) and
+  querydsl-mongodb backends. Hibernate can express `cast(value as decimal)`
+  via `Expressions.numberTemplate`, but the Mongo find-language has no
+  equivalent — supporting filter coercion on Mongo would require either
+  bypassing querydsl-mongodb for some terms (carrying parallel predicate
+  worlds), encoding `$expr`/`$toDouble` via a custom serializer, or accepting
+  backend-asymmetric behaviour. Each option leaks backend awareness into the
+  filter contract, defeats indexes, and locks the URL grammar into a
+  workaround for an upstream schema choice. The sort path's `num()` wrapper
+  remains the supported affordance for numeric ordering of string-typed
+  characteristic values.
+
 ## [2.1.2] - 2026-06-03
 
 ### Fixed

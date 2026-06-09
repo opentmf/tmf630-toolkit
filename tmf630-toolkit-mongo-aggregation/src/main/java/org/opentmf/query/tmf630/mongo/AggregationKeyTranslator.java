@@ -6,15 +6,42 @@ import org.bson.Document;
 
 public final class AggregationKeyTranslator {
 
+  /** Mongo aggregation operator used to fold an array-valued leaf to a scalar. */
+  public static final String MIN_REDUCER = "$min";
+
+  /** Mongo aggregation operator used to fold an array-valued leaf to a scalar. */
+  public static final String MAX_REDUCER = "$max";
+
   private AggregationKeyTranslator() {}
 
   public static Document translate(JsonPathSortAst.SortPath sortPath) {
-    return translate(sortPath, MongoFieldResolver.passthrough(), null);
+    return translate(sortPath, MongoFieldResolver.passthrough(), null, MIN_REDUCER);
   }
 
   public static Document translate(
       JsonPathSortAst.SortPath sortPath, MongoFieldResolver resolver, Class<?> rootEntity) {
-    return translateHop(sortPath.hops(), 0, sortPath.leaf(), resolver, rootEntity);
+    return translate(sortPath, resolver, rootEntity, MIN_REDUCER);
+  }
+
+  /**
+   * Translates a parsed sort path to a Mongo aggregation expression suitable for use
+   * as a synthetic {@code _sortKeyN} field.
+   *
+   * <p>{@code leafArrayReducerOp} controls how a leaf path that crosses a
+   * collection-typed intermediate is folded back to a scalar. Pass {@link #MIN_REDUCER}
+   * for ASC sort terms and {@link #MAX_REDUCER} for DESC, mirroring MongoDB's native
+   * array-key {@code $sort} semantics (which used to apply implicitly before 2.1.2
+   * wrapped the leaf as a scalar to fix the parallel-arrays crash). The reducer is
+   * only applied when {@link MongoFieldResolver#hasArrayIntermediate} flags the leaf
+   * path; for purely scalar leaves the expression stays unchanged.
+   */
+  public static Document translate(
+      JsonPathSortAst.SortPath sortPath,
+      MongoFieldResolver resolver,
+      Class<?> rootEntity,
+      String leafArrayReducerOp) {
+    return translateHop(
+        sortPath.hops(), 0, sortPath.leaf(), resolver, rootEntity, leafArrayReducerOp);
   }
 
   private static Document translateHop(
@@ -22,7 +49,8 @@ public final class AggregationKeyTranslator {
       int idx,
       JsonPathSortAst.LeafExpression leaf,
       MongoFieldResolver resolver,
-      Class<?> currentEntity) {
+      Class<?> currentEntity,
+      String leafArrayReducerOp) {
     JsonPathSortAst.ArrayHop hop = hops.get(idx);
     String resolvedArrayPath = resolver.resolveBsonPath(currentEntity, hop.arrayPath());
     Class<?> elementType = resolver.getElementTypeAtPath(currentEntity, hop.arrayPath());
@@ -47,12 +75,17 @@ public final class AggregationKeyTranslator {
       // rejects multi-key sort docs whose values are parallel arrays (BadValue code
       // 2), so when the leaf path traverses a collection-typed intermediate (and
       // therefore auto-projects to an array under expression-context evaluation),
-      // wrap it in $arrayElemAt to project the first element.
+      // fold it with $min (ASC) or $max (DESC). Both produce a scalar — preserving
+      // the parallel-arrays fix — and restore MongoDB's native array-key sort
+      // semantics that applied implicitly up to 2.1.1.
       return new Document(
           "$let",
           new Document()
               .append("vars", new Document(varName, new Document("$first", filterStage)))
-              .append("in", translatePerElement(leaf, "$$" + varName, resolver, elementType, true)));
+              .append(
+                  "in",
+                  translatePerElement(
+                      leaf, "$$" + varName, resolver, elementType, true, leafArrayReducerOp)));
     }
 
     String varName = "m" + idx;
@@ -60,7 +93,9 @@ public final class AggregationKeyTranslator {
         "$let",
         new Document()
             .append("vars", new Document(varName, new Document("$first", filterStage)))
-            .append("in", translateHop(hops, idx + 1, leaf, resolver, elementType)));
+            .append(
+                "in",
+                translateHop(hops, idx + 1, leaf, resolver, elementType, leafArrayReducerOp)));
   }
 
   private static boolean containsAggregator(JsonPathSortAst.LeafExpression leaf) {
@@ -106,7 +141,7 @@ public final class AggregationKeyTranslator {
       String elementRef,
       MongoFieldResolver resolver,
       Class<?> elementType) {
-    return translatePerElement(leaf, elementRef, resolver, elementType, false);
+    return translatePerElement(leaf, elementRef, resolver, elementType, false, MIN_REDUCER);
   }
 
   /**
@@ -120,8 +155,11 @@ public final class AggregationKeyTranslator {
    * array breaks {@code $convert}, and it triggers Mongo's "cannot sort with
    * keys that are parallel arrays" error (code 2, BadValue) whenever two or
    * more such terms appear in the same multi-key {@code $sort}. We detect the
-   * shape via {@link MongoFieldResolver#hasArrayIntermediate} and wrap the
-   * path in {@code $arrayElemAt: [path, 0]} so the consumer sees a scalar.
+   * shape via {@link MongoFieldResolver#hasArrayIntermediate} and fold the path
+   * with {@code leafArrayReducerOp} ({@code $min} for ASC, {@code $max} for DESC)
+   * so the consumer sees a scalar AND ordering matches MongoDB's pre-2.1.2
+   * native array-key {@code $sort} behaviour (which used to apply implicitly when
+   * the leaf was emitted as an array).
    *
    * <p>The flag is false on the aggregator path ({@code translateAggregatedLeaf}
    * → {@code $map.in}), where each per-element value is folded by {@code $min}
@@ -133,18 +171,20 @@ public final class AggregationKeyTranslator {
       String elementRef,
       MongoFieldResolver resolver,
       Class<?> elementType,
-      boolean needsScalar) {
+      boolean needsScalar,
+      String leafArrayReducerOp) {
     if (leaf instanceof JsonPathSortAst.FieldRef fr) {
       String resolvedPath = resolver.resolveBsonPath(elementType, fr.fieldPath());
       String pathExpr = elementRef + "." + resolvedPath;
       if (needsScalar && resolver.hasArrayIntermediate(elementType, fr.fieldPath())) {
-        return new Document("$arrayElemAt", Arrays.asList(pathExpr, 0));
+        return new Document(leafArrayReducerOp, pathExpr);
       }
       return pathExpr;
     }
     if (leaf instanceof JsonPathSortAst.Coercion c) {
       return convertWrap(
-          translatePerElement(c.inner(), elementRef, resolver, elementType, true), c.type());
+          translatePerElement(c.inner(), elementRef, resolver, elementType, true, leafArrayReducerOp),
+          c.type());
     }
     throw new IllegalStateException(
         "Aggregator may not appear nested inside another aggregator or per-element context: "

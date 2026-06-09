@@ -279,13 +279,16 @@ class AggregationKeyTranslatorTest {
   }
 
   @Test
-  void coercionWrapsArrayIntermediateInArrayElemAtToYieldScalarBeforeConvert() {
+  void coercionFoldsArrayIntermediateWithReducerToYieldScalarBeforeConvert() {
     // Regression for the silent-drop bug: num(arr[X].myArray.value) where
-    // `myArray` is a collection-typed intermediate. Without the resolver-aware
-    // projection, Mongo's path expression `$$m0.myArray.value` returns an array
-    // and $convert(array, "double") yields null. With the resolver, the
-    // translator wraps the dotted path in `$arrayElemAt: [..., 0]` before the
-    // $convert, restoring numeric ordering.
+    // `myArray` is a collection-typed intermediate. Without resolver-aware
+    // reduction, Mongo's path expression `$$m0.myArray.value` returns an array
+    // and $convert(array, "double") yields null. The translator folds the
+    // dotted path with the direction-aware reducer ($min for ASC, $max for DESC)
+    // before $convert, so a scalar is fed into the coercion. The 2.1.2 fix used
+    // $arrayElemAt:0 here, which silently picked the first element regardless
+    // of direction; 2.1.3 restores MongoDB's pre-2.1.2 native array-key sort
+    // semantics by using the reducer.
     MongoMappingContext ctx = new MongoMappingContext();
     MongoFieldResolver resolver = new MongoFieldResolver(ctx);
     SimpleRichSortParser sr = new SimpleRichSortParser("id");
@@ -299,46 +302,78 @@ class AggregationKeyTranslatorTest {
 
     Document doc2 =
         AggregationKeyTranslator.translate(
-            sr.parse("num(outer[X].myArray.value)"), resolver, OuterEntity.class);
+            sr.parse("num(outer[X].myArray.value)"),
+            resolver,
+            OuterEntity.class,
+            AggregationKeyTranslator.MIN_REDUCER);
     Document letBody2 = doc2.get("$let", Document.class);
     Document convert2 = ((Document) letBody2.get("in")).get("$convert", Document.class);
     Document input2 = (Document) convert2.get("input");
-    assertTrue(input2.containsKey("$arrayElemAt"));
-    List<?> elemArgs = input2.getList("$arrayElemAt", Object.class);
-    assertEquals("$$m0.myArray.value", elemArgs.get(0));
-    assertEquals(0, elemArgs.get(1));
+    assertEquals("$$m0.myArray.value", input2.getString("$min"));
+
+    Document doc3 =
+        AggregationKeyTranslator.translate(
+            sr.parse("num(outer[X].myArray.value)"),
+            resolver,
+            OuterEntity.class,
+            AggregationKeyTranslator.MAX_REDUCER);
+    Document letBody3 = doc3.get("$let", Document.class);
+    Document convert3 = ((Document) letBody3.get("in")).get("$convert", Document.class);
+    Document input3 = (Document) convert3.get("input");
+    assertEquals("$$m0.myArray.value", input3.getString("$max"));
   }
 
   @Test
-  void directSortKeyEmissionWrapsArrayIntermediateInArrayElemAtToYieldScalar() {
-    // Regression for the multi-term parallel-arrays bug: when two correlated
-    // sort terms each emit a leaf whose path traverses an inner collection-typed
-    // intermediate, Mongo's $sort rejects the multi-key sort doc with
-    // "cannot sort with keys that are parallel arrays" (BadValue, code 2). The
-    // translator now wraps the per-element leaf in $arrayElemAt for direct
-    // sort-key emission too (not only inside coercion), so each _sortKeyN stays
-    // scalar.
+  void directSortKeyEmissionFoldsArrayIntermediateWithMinForAsc() {
+    // Regression for the 2.1.2 silent semantics change: ASC sort against a leaf
+    // crossing a collection-typed intermediate must use Mongo's $min so the
+    // smallest element acts as the sort key — matching MongoDB's pre-2.1.2
+    // native array-key $sort semantics and the ordering the colleague's
+    // pre-2.1.2 reproductions relied on. The 2.1.2 fix replaced this with
+    // $arrayElemAt:0, which silently switched ordering to "first matching
+    // element" regardless of direction.
     MongoMappingContext ctx = new MongoMappingContext();
     MongoFieldResolver resolver = new MongoFieldResolver(ctx);
     SimpleRichSortParser sr = new SimpleRichSortParser("id");
 
     Document doc =
         AggregationKeyTranslator.translate(
-            sr.parse("outer[X].myArray.value"), resolver, OuterEntity.class);
+            sr.parse("outer[X].myArray.value"),
+            resolver,
+            OuterEntity.class,
+            AggregationKeyTranslator.MIN_REDUCER);
 
     Document letBody = doc.get("$let", Document.class);
     Document inExpr = (Document) letBody.get("in");
-    assertTrue(inExpr.containsKey("$arrayElemAt"));
-    List<?> elemArgs = inExpr.getList("$arrayElemAt", Object.class);
-    assertEquals("$$m0.myArray.value", elemArgs.get(0));
-    assertEquals(0, elemArgs.get(1));
+    assertEquals("$$m0.myArray.value", inExpr.getString("$min"));
   }
 
   @Test
-  void directSortKeyEmissionDoesNotWrapWhenLeafPathHasNoArrayIntermediate() {
+  void directSortKeyEmissionFoldsArrayIntermediateWithMaxForDesc() {
+    // Mirror of the ASC case — DESC sort must use $max so the largest element
+    // acts as the sort key. The two reducers preserve the parallel-arrays fix
+    // (both produce scalars) while restoring direction-aware ordering.
+    MongoMappingContext ctx = new MongoMappingContext();
+    MongoFieldResolver resolver = new MongoFieldResolver(ctx);
+    SimpleRichSortParser sr = new SimpleRichSortParser("id");
+
+    Document doc =
+        AggregationKeyTranslator.translate(
+            sr.parse("outer[X].myArray.value"),
+            resolver,
+            OuterEntity.class,
+            AggregationKeyTranslator.MAX_REDUCER);
+
+    Document letBody = doc.get("$let", Document.class);
+    Document inExpr = (Document) letBody.get("in");
+    assertEquals("$$m0.myArray.value", inExpr.getString("$max"));
+  }
+
+  @Test
+  void directSortKeyEmissionDoesNotFoldWhenLeafPathHasNoArrayIntermediate() {
     // Sanity: when the leaf path crosses only scalar object intermediates, no
-    // $arrayElemAt wrap is added — the dotted path resolves to a scalar already
-    // and the wrap would either be a no-op or break valid expressions.
+    // reducer wrap is added — the dotted path resolves to a scalar already and
+    // wrapping it would either be a no-op or break valid expressions.
     MongoMappingContext ctx = new MongoMappingContext();
     MongoFieldResolver resolver = new MongoFieldResolver(ctx);
     SimpleRichSortParser sr = new SimpleRichSortParser("id");

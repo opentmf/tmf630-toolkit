@@ -159,6 +159,43 @@ Recommended composition with an explicit existence filter:
 &sort=$.characteristic[?(@.name == 'price')].value
 ```
 
+### Function wrappers — coercion and aggregator (added in 2.1.3)
+
+The JSONPath sort grammar accepts the same five function wrappers as
+simple-rich — three coercions (`num` / `str` / `date`) and two aggregators
+(`min` / `max`). Two surface forms are accepted; both lower to the same AST
+and are interchangeable for single-cardinality data:
+
+| Form | Example |
+| --- | --- |
+| Leaf-level call | `$.characteristic[?(@.name == 'price')].num(value)` |
+| Outer wrap around the entire expression | `num($.characteristic[?(@.name == 'price')].value)` |
+
+The leaf-level form is the natural pick when the path traverses additional
+dotted segments after the final `[?(...)]` — pre-function segments are
+promoted to naked array hops with an `AlwaysTrue` predicate, so the
+aggregator iterates the right collection. The outer-wrap form is preferable
+when the trailing path crosses an **object** intermediate before reaching
+the inner array; promoting an object segment to a naked hop would attempt
+`$filter` on a non-array and fail at query time.
+
+`num()` is the affordance for the most common downstream issue: TMF
+characteristic values are often stored as `String` even when their
+`valueType` is `number` (the DNext storage convention). A bare-leaf sort
+would collate them alphabetically — `"105.34"` < `"12.2"` < `"4.31"`. The
+`num()` wrapper coerces each value via
+`$convert(input, "double", onError: null)` and gives the expected numeric
+order. See **Simple-rich grammar → Aggregator and coercion functions** for
+the full semantics, including how mixed-type leaves compose and what
+`.date()` accepts as input — those rules apply identically here.
+
+**Filter coercion is not supported.** The JSONPath filter pipeline emits
+backend-agnostic QueryDSL predicates and there is no symmetric way to express
+`cast(value as decimal)` in MongoDB's find language. Use `num()` in the sort
+to force numeric ordering of string-typed characteristic values; for
+filtering by numeric range against such fields, persist the value with its
+declared type.
+
 ## Semantics
 
 - A sort term is **correlated** when its key is a JsonPath expression

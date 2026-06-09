@@ -63,13 +63,24 @@ public class Tmf630MongoCorrelatedSortExecutor {
       String sortKey = "_sortKey" + counter;
       String hasKey = "_hasKey" + counter;
       counter++;
+      String leafArrayReducerOp =
+          term.direction() == Sort.Direction.DESC
+              ? AggregationKeyTranslator.MAX_REDUCER
+              : AggregationKeyTranslator.MIN_REDUCER;
       Object sortKeyExpression =
           switch (term.kind()) {
             case JSONPATH -> AggregationKeyTranslator.translate(
-                jsonPathParser.parse(term.expression()), fieldResolver, entityClass);
+                jsonPathParser.parse(term.expression()),
+                fieldResolver,
+                entityClass,
+                leafArrayReducerOp);
             case SIMPLE_RICH -> AggregationKeyTranslator.translate(
-                simpleRichParser.parse(term.expression()), fieldResolver, entityClass);
-            case PLAIN -> plainSortKeyExpression(entityClass, term.expression());
+                simpleRichParser.parse(term.expression()),
+                fieldResolver,
+                entityClass,
+                leafArrayReducerOp);
+            case PLAIN -> plainSortKeyExpression(
+                entityClass, term.expression(), leafArrayReducerOp);
           };
       sortKeysDoc.append(sortKey, sortKeyExpression);
       // Companion key is computed in a separate $addFields stage so it can reference
@@ -127,15 +138,17 @@ public class Tmf630MongoCorrelatedSortExecutor {
     return new PageImpl<>(result.getMappedResults(), pageable, total);
   }
 
-  private Object plainSortKeyExpression(Class<?> entityClass, String dottedJavaPath) {
+  private Object plainSortKeyExpression(
+      Class<?> entityClass, String dottedJavaPath, String leafArrayReducerOp) {
     String pathExpr = "$" + fieldResolver.resolveBsonPath(entityClass, dottedJavaPath);
     // A plain dotted path whose intermediate segments include a collection-typed
     // property auto-projects to an array under Mongo's expression context. Two
     // such terms in one $sort trigger "cannot sort with keys that are parallel
-    // arrays" (BadValue, code 2). Reduce to the first element so each _sortKeyN
-    // stays scalar.
+    // arrays" (BadValue, code 2). Fold with $min (ASC) or $max (DESC) so each
+    // _sortKeyN stays scalar AND ordering matches MongoDB's pre-2.1.2 native
+    // array-key sort semantics (min element for ASC, max element for DESC).
     if (fieldResolver.hasArrayIntermediate(entityClass, dottedJavaPath)) {
-      return new Document("$arrayElemAt", Arrays.asList(pathExpr, 0));
+      return new Document(leafArrayReducerOp, pathExpr);
     }
     return pathExpr;
   }
