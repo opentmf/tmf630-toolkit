@@ -1513,7 +1513,7 @@ The translator emits one `$let` per array level, defensively wrapping
 each `input` in `$ifNull: [..., []]` so a missing intermediate array
 resolves cleanly to `null` at the leaf instead of erroring at runtime.
 
-#### Example F.1: trailing dotted path crossing an object intermediate (simple-rich only)
+#### Example F.1: trailing dotted path crossing an object intermediate
 
 When the trailing path (after the last `[...]`) crosses an object
 intermediate before reaching a nested array, simple-rich treats the
@@ -1539,7 +1539,7 @@ $let: {
       cond: { $eq: [ "$$c.id", "A100" ] }
     }}}
   },
-  in: "$$m0.service.serviceCharacteristic.value"
+  in: { $min: "$$m0.service.serviceCharacteristic.value" }
 }
 ```
 
@@ -1548,24 +1548,41 @@ traversing through the `service` sub-document and projecting `.value`
 across `serviceCharacteristic`'s elements. For single-element arrays
 (the common TMF case where each `prodSpecCharValueUse` has one
 `productSpecCharacteristicValue`), the result is effectively that
-element's `value`. For multi-element arrays, Mongo's `$sort` uses the
-**min** element ascending and the **max** element descending — write
-`.min(value)` / `.max(value)` explicitly when you want unambiguous
-multi-element semantics.
+element's `value`. For multi-element arrays, the executor folds the
+auto-projected array with `$min` (ASC) or `$max` (DESC) so each
+synthetic sort key stays scalar AND the ordering matches MongoDB's
+pre-2.1.2 native array-key sort semantics — write `.min(value)` /
+`.max(value)` explicitly when you want the aggregator at the leaf
+rather than the implicit direction-aware reduction.
 
-JsonPath does not accept this exact form: it requires a `[?(...)]`
-predicate at every array hop and rejects naked array traversal in the
-trailing path. Either drop to simple-rich for the trailing portion, or
-add a second predicate (Example F).
+> History: 2.1.2 fixed a "parallel arrays" crash by wrapping such
+> leaves in `$arrayElemAt: [path, 0]`, which silently switched
+> ordering to "first matching element regardless of direction".
+> 2.1.3 restored the direction-aware reduction (`$min` ASC / `$max`
+> DESC) so the pre-2.1.2 behaviour is back without re-introducing
+> the crash. See CHANGELOG [2.1.3] "Restored MongoDB's native
+> array-key sort semantics".
 
-#### Example G: aggregator functions (simple-rich only)
+**JSONPath equivalents.** Plain trailing dotted paths
+(`serviceOrderItem[?(@.id=='A100')].service.serviceCharacteristic.value`)
+work in JSONPath too — the path traversal is identical. The **simple-
+rich only** limitation applied to multiple inner-array hops without
+predicates; JSONPath requires a `[?(...)]` predicate at every explicit
+array hop. For a coercion-only function leaf (e.g.
+`.service.serviceCharacteristic.num(value)`) both grammars now produce
+the same translation since 2.1.3 — pre-function dotted segments stay
+inside the FieldRef path rather than being promoted to naked hops, so
+object intermediates like `service` are no longer a footgun.
+
+#### Example G: aggregator functions (simple-rich AND JSONPath)
 
 For arrays where multiple elements match the bracket predicate (or
-where you don't want predicate-based selection at all), simple-rich
-adds `min` and `max` aggregator functions:
+where you don't want predicate-based selection at all), both grammars
+expose `min` and `max` aggregator functions:
 
 ```http
 GET /api/products?sort=-characteristic[name=score].max(value)
+GET /api/products?sort=-$.characteristic[?(@.name == 'score')].max(value)
 ```
 
 For each document, take the **maximum** `value` across all
@@ -1573,11 +1590,13 @@ characteristics whose `name` is `score`, and order documents by that.
 
 ```http
 GET /api/products?sort=+characteristic[name=score].min(value)
+GET /api/products?sort=+$.characteristic[?(@.name == 'score')].min(value)
 ```
 
-Same shape, ascending by minimum.
+Same shape, ascending by minimum. JSONPath gained this in 2.1.3 (see
+also Example H for the equivalent change to coercion wrappers).
 
-#### Example H: type coercion (simple-rich only)
+#### Example H: type coercion (simple-rich AND JSONPath)
 
 When the leaf field is `Object`-typed across documents (a number in
 some, a string in others), MongoDB's BSON sort order groups by **type
@@ -1586,6 +1605,7 @@ intuitive ordering. Coerce to a uniform type:
 
 ```http
 GET /api/products?sort=characteristic[name=value].str(value)
+GET /api/products?sort=$.characteristic[?(@.name == 'value')].str(value)
 ```
 
 All values are coerced to string before sorting. Failures degrade to
@@ -1595,18 +1615,36 @@ desc-last rule). Available coercions: `str` (string), `num`
 ObjectId).
 
 Per TMF630 §4.7, the coercion wrapper may also enclose the entire
-sort term. The two forms produce the same aggregation pipeline:
+sort term. All four forms below produce the same aggregation pipeline:
 
 ```http
-# Inner-wrapper form
+# Simple-rich, inner-wrapper form
 GET /api/products?sort=characteristic[name=value].num(value)
 
-# Outer-wrapper form (equivalent)
+# Simple-rich, outer-wrapper form (equivalent)
 GET /api/products?sort=num(characteristic[name=value].value)
+
+# JSONPath, inner-wrapper form (added in 2.1.3)
+GET /api/products?sort=$.characteristic[?(@.name == 'value')].num(value)
+
+# JSONPath, outer-wrapper form (added in 2.1.3)
+GET /api/products?sort=num($.characteristic[?(@.name == 'value')].value)
 ```
 
-Outer wrappers compose recursively, so `num(str(arr[X].leaf))` is
-also accepted.
+Outer wrappers compose recursively, so `num(str(arr[X].leaf))` and
+`num(str($.arr[?(@.id=='X')].leaf))` are both accepted.
+
+**Multi-value array semantics** (2.1.3). When the leaf path crosses an
+inner array intermediate AFTER the predicate-filtered hop — e.g.
+`prodSpecCharValueUse[id=X].productSpecCharacteristicValue.num(value)`
+where `productSpecCharacteristicValue` is a list — the coercion runs
+**per element**, then the converted values are reduced direction-aware
+(ASC: `$min`; DESC: `$max`). So `["105.34", "12.2", "4.31"]` under ASC
+gives `4.31`, not the lex-min `"105.34"` converted. This matches the
+documented "coerce each value … numeric order" semantics. Single-
+element inner arrays are unaffected. Before 2.1.3 the coercion ran on
+the lex-extreme element, giving subtle wrong-order results for
+string-stored numerics (DNext convention).
 
 #### Example I: composing aggregator and coercion
 
@@ -1646,6 +1684,20 @@ interoperable with external JsonPath tooling (jsonpath.com, Jayway
 evaluation) without the toolkit having to choose between
 strict-prefix-required and tolerant.
 
+**Quote styles.** Both `'...'` and `"..."` are accepted as string-
+literal delimiters in sort predicates, matching the filter parser and
+canonical Jayway evaluation. The two forms produce identical AST:
+
+```http
+GET /api/products?sort=$.characteristic[?(@.name == 'price')].value
+GET /api/products?sort=$.characteristic[?(@.name == "price")].value
+```
+
+The opening quote is the close sentinel, so `'X"` does not terminate
+at the `"` (and vice versa). Added in 2.1.3 — earlier the sort parser
+only accepted `'`, making the toolkit internally inconsistent with the
+filter parser.
+
 #### Capability cheat-sheet — what each grammar accepts
 
 | Construct | Plain | Simple-rich | JsonPath |
@@ -1655,8 +1707,8 @@ strict-prefix-required and tolerant.
 | Logical `&&` / `\|\|` in predicate | n/a | drop to JsonPath | yes |
 | Multi-level chained correlation | n/a | yes | yes |
 | Predicate on a sub-array of the matched element | n/a | drop to JsonPath | yes |
-| Aggregator functions (`min`, `max`) | n/a | yes | not supported |
-| Coercion wrappers (`str`, `num`, `date`) | n/a | yes | not supported |
+| Aggregator functions (`min`, `max`) | n/a | yes | yes (added in 2.1.3 — leaf-call and outer-wrap forms) |
+| Coercion wrappers (`str`, `num`, `date`) | n/a | yes | yes (added in 2.1.3 — leaf-call and outer-wrap forms) |
 | Default-key bracket shorthand `arr[X]` | n/a | yes | n/a |
 | Trailing dotted path crossing object/array intermediates (e.g. `arr[X].deep.path.value`) | n/a | yes — Mongo path auto-traversal (min/max element of multi-element arrays per `$sort` direction) | rejected (400 — JsonPath requires a predicate at every array hop) |
 | JsonPath wildcard `[*]` (transparent projection) | n/a | n/a | accepted — stripped at parse time; equivalent to the same expression without `[*]` |
@@ -1910,6 +1962,14 @@ $[?(@.status == 'active')]
 $[?(@.status != 'active')]
 ```
 
+String literals accept both `'...'` and `"..."` delimiters
+interchangeably — the opening quote is the close sentinel, so `'X"`
+does not terminate at the `"`. The two forms parse identically:
+
+```
+$[?(@.status == "active")]
+```
+
 #### Comparison operators
 
 ```
@@ -1948,6 +2008,48 @@ $[?(@.externalReference.name == 'ORDER_REFERENCE')]
 ```
 
 Subject to allowlist and nested-path configuration (`allowNestedPathsJpa`, `allowNestedPathsDocdb`).
+
+#### Sub-array correlation shorthand (`<arrayPath>[?(...)]`)
+
+A compact form for "filter docs where some element of `<arrayPath>`
+satisfies the predicate." All three forms below produce the same
+QueryDSL predicate and (on Mongo) the same `$elemMatch` query:
+
+```http
+# Canonical wrapper form
+GET /api/products?filter=$[?(@.prodSpecCharValueUse[?(@.id == 'RC_OFFER_TYPE')])]
+
+# Sub-array shorthand — `$.` prefix optional per TMF630
+GET /api/products?filter=$.prodSpecCharValueUse[?(@.id == 'RC_OFFER_TYPE')]
+GET /api/products?filter=prodSpecCharValueUse[?(@.id == 'RC_OFFER_TYPE')]
+```
+
+The shorthand is parsed by `JsonPathFilterPredicateBuilder.trySubArrayShorthand`
+and rewritten to the canonical correlated form internally. The wrapper
+form is wordier but unambiguous when a single filter expression
+combines multiple sub-array conditions under `&&` / `||`.
+
+##### Trailing projection suffix is tolerated and discarded (2.1.3)
+
+DPC-style consumers build `?filter=` URLs by reusing their `?sort=`
+templates, which leaves a trailing projection like
+`.productSpecCharacteristicValue[*].value` after the filter's
+`[?(...)]`. The projection has no effect on the matched row set —
+that's fully determined by the predicate — so the parser strips it:
+
+```http
+# All five forms produce the same filter (`prodSpecCharValueUse[?(@.id == 'X')]`)
+GET /api/products?filter=$.prodSpecCharValueUse[?(@.id == 'RC_OFFER_TYPE')]
+GET /api/products?filter=$.prodSpecCharValueUse[?(@.id == 'RC_OFFER_TYPE')].value
+GET /api/products?filter=$.prodSpecCharValueUse[?(@.id == 'RC_OFFER_TYPE')].productSpecCharacteristicValue.value
+GET /api/products?filter=$.prodSpecCharValueUse[?(@.id == 'RC_OFFER_TYPE')].productSpecCharacteristicValue[*].value
+GET /api/products?filter=$.prodSpecCharValueUse[?(@.id == "RC_OFFER_TYPE")].productSpecCharacteristicValue[*].value
+```
+
+A suffix that contains another `[?(...)]` predicate, a positional
+index access (`[0]`), or a slice (`[0:5]`) is **rejected** with the
+standard "must be a filter expression" 400 — the caller is asked to
+rewrite explicitly rather than have a nested filter silently dropped.
 
 #### Combining attribute filtering with `filter=`
 
@@ -2000,10 +2102,11 @@ Supported subset (Mongo/document backends):
 - logical operators: `&&`, `||`
 - grouping with parentheses
 - comparisons: `==`, `!=`, `>`, `>=`, `<`, `<=`
-- literals: string, number, boolean, `null`
+- literals: string (single- or double-quoted), number, boolean, `null`
 - field paths: `@.field`, `@.nested.field`
 - array correlation: `@.arrayField[?(...)]` with strict same-element semantics via `$elemMatch`
 - JsonPath wildcard `[*]` is accepted as a transparent projection sigil (stripped at parse time; equivalent to the same expression without `[*]`)
+- trailing projection suffix on the sub-array shorthand is tolerated and discarded — `<arrayPath>[?(...)].dotted.projection.suffix` is treated as `<arrayPath>[?(...)]` since the predicate fully determines the matched row set. Useful for DPC-style URL templates that reuse sort projections in filter URLs. A suffix that contains another `[?(...)]` predicate, an index access (`[0]`), or a slice (`[0:5]`) is rejected so nested filtering doesn't sneak onto this surface silently. (Added in 2.1.3.)
 - merge with attribute filtering in the same request:
   - default: `AND`
   - override: `filter.combineWithAttributes=OR`
