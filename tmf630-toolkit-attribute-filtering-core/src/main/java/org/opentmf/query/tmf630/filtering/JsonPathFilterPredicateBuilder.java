@@ -375,6 +375,10 @@ public class JsonPathFilterPredicateBuilder {
       throw new TmfFilteringException("Null literal only supports == and != operators.");
     }
 
+    if (comparison.operator() == ComparisonOperator.REGEX) {
+      return Optional.of(buildRegexPredicate(rootPath, resolvedField, comparison.literal()));
+    }
+
     Object typedValue =
         valueConverter.convert(comparison.literal().valueAsString(), resolvedField.javaType(), resolvedField.fieldPath());
 
@@ -386,9 +390,40 @@ public class JsonPathFilterPredicateBuilder {
           case GTE -> TmfOperator.GTE;
           case LT -> TmfOperator.LT;
           case LTE -> TmfOperator.LTE;
+          case REGEX ->
+              throw new IllegalStateException("REGEX is handled before typed conversion");
         };
 
     return Optional.of(predicateFactory.build(rootPath, resolvedField, tmfOperator, typedValue));
+  }
+
+  /**
+   * TMF630 Part 6 {@code =~} operator. Accepts exactly the spec's {@code /pattern/flags}
+   * literal form; only the {@code i} flag is supported — the spec's own table notes library
+   * variance, and silently ignoring unknown flags would change match semantics. Routes
+   * through the same {@link PredicateFactory} REGEX/REGEXI path as the attribute-side
+   * {@code .regex}/{@code .regexi} operators, so the {@code regex.enabled} gate and
+   * {@code max-length} limit apply identically.
+   */
+  private Predicate buildRegexPredicate(
+      PathBuilder<?> rootPath, ResolvedField resolvedField, LiteralToken literal) {
+    if (literal.kind() != LiteralKind.REGEX) {
+      throw new TmfFilteringException("=~ requires a /pattern/ literal in jsonPath filter.");
+    }
+    String raw = literal.rawValue();
+    int close = raw.lastIndexOf('/');
+    String pattern = raw.substring(1, close);
+    String flags = raw.substring(close + 1);
+    boolean ignoreCase = "i".equals(flags);
+    if (!flags.isEmpty() && !ignoreCase) {
+      throw new TmfFilteringException(
+          "Unsupported regex flags '" + flags + "' in jsonPath filter; supported: i");
+    }
+    return predicateFactory.build(
+        rootPath,
+        resolvedField,
+        ignoreCase ? TmfOperator.REGEXI : TmfOperator.REGEX,
+        pattern);
   }
 
   private boolean isAllowedField(String fieldPath, Set<String> allowlist, AllowlistMode mode) {
@@ -515,14 +550,16 @@ public class JsonPathFilterPredicateBuilder {
     GT,
     GTE,
     LT,
-    LTE
+    LTE,
+    REGEX
   }
 
   private enum LiteralKind {
     STRING,
     NUMBER,
     BOOLEAN,
-    NULL
+    NULL,
+    REGEX
   }
 
   private record LiteralToken(LiteralKind kind, String rawValue) {
@@ -598,6 +635,7 @@ public class JsonPathFilterPredicateBuilder {
             case ">=" -> ComparisonOperator.GTE;
             case "<" -> ComparisonOperator.LT;
             case "<=" -> ComparisonOperator.LTE;
+            case "=~" -> ComparisonOperator.REGEX;
             default -> throw new TmfFilteringException("Unsupported jsonPath operator: " + operatorToken.text());
           };
 
@@ -629,6 +667,9 @@ public class JsonPathFilterPredicateBuilder {
 
     private LiteralToken parseLiteral(String raw) {
       String value = raw.trim();
+      if (value.startsWith("/") && value.lastIndexOf('/') > 0) {
+        return new LiteralToken(LiteralKind.REGEX, value);
+      }
       if (value.equals("null")) {
         return new LiteralToken(LiteralKind.NULL, "null");
       }
@@ -708,7 +749,7 @@ public class JsonPathFilterPredicateBuilder {
           Token twoCharToken = switch (two) {
             case "&&" -> new Token(TokenType.AND, "&&");
             case "||" -> new Token(TokenType.OR, "||");
-            case "==", "!=", ">=", "<=" -> new Token(TokenType.OPERATOR, two);
+            case "==", "!=", ">=", "<=", "=~" -> new Token(TokenType.OPERATOR, two);
             default -> null;
           };
           if (twoCharToken != null) {
@@ -759,6 +800,34 @@ public class JsonPathFilterPredicateBuilder {
             throw new TmfFilteringException("jsonPath field must start with @.: " + field);
           }
           tokens.add(new Token(TokenType.FIELD, field));
+          continue;
+        }
+        if (ch == '/') {
+          // TMF630 Part 6 regex literal for =~: /pattern/flags. The '\' escape keeps a
+          // literal '/' inside the pattern; trailing letters are flags.
+          int start = i;
+          i++;
+          boolean closed = false;
+          boolean escaped = false;
+          while (i < input.length()) {
+            char c = input.charAt(i);
+            i++;
+            if (escaped) {
+              escaped = false;
+            } else if (c == '\\') {
+              escaped = true;
+            } else if (c == '/') {
+              closed = true;
+              break;
+            }
+          }
+          if (!closed) {
+            throw new TmfFilteringException("Unterminated regex literal in jsonPath filter.");
+          }
+          while (i < input.length() && Character.isLetter(input.charAt(i))) {
+            i++;
+          }
+          tokens.add(new Token(TokenType.LITERAL, input.substring(start, i)));
           continue;
         }
         if (ch == '\'' || ch == '"') {

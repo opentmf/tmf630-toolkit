@@ -2,6 +2,8 @@ package org.opentmf.query.tmf630.filtering.config;
 
 public record Tmf630FilterSettings(
     boolean implicitEqEnabled,
+    boolean implicitEqCsvOr,
+    boolean implicitEqSemicolonOr,
     CombineMode combineRepeatedValues,
     boolean allowNestedPathsJpa,
     boolean allowNestedPathsDocdb,

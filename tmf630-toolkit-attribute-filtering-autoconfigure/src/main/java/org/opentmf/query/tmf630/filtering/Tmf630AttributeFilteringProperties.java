@@ -15,6 +15,8 @@ public class Tmf630AttributeFilteringProperties {
 
   private boolean enabled = true;
   private boolean implicitEqEnabled = true;
+  private boolean implicitEqCsvOr = true;
+  private boolean implicitEqSemicolonOr = true;
   private CombineMode combineRepeatedValues = CombineMode.OR;
   private boolean allowNestedPathsJpa = false;
   private boolean allowNestedPathsDocdb = true;
@@ -29,6 +31,8 @@ public class Tmf630AttributeFilteringProperties {
   public Tmf630FilterSettings toSettings() {
     return new Tmf630FilterSettings(
         implicitEqEnabled,
+        implicitEqCsvOr,
+        implicitEqSemicolonOr,
         combineRepeatedValues,
         allowNestedPathsJpa,
         allowNestedPathsDocdb,
@@ -56,6 +60,22 @@ public class Tmf630AttributeFilteringProperties {
 
   public void setImplicitEqEnabled(boolean implicitEqEnabled) {
     this.implicitEqEnabled = implicitEqEnabled;
+  }
+
+  public boolean isImplicitEqCsvOr() {
+    return implicitEqCsvOr;
+  }
+
+  public void setImplicitEqCsvOr(boolean implicitEqCsvOr) {
+    this.implicitEqCsvOr = implicitEqCsvOr;
+  }
+
+  public boolean isImplicitEqSemicolonOr() {
+    return implicitEqSemicolonOr;
+  }
+
+  public void setImplicitEqSemicolonOr(boolean implicitEqSemicolonOr) {
+    this.implicitEqSemicolonOr = implicitEqSemicolonOr;
   }
 
   public CombineMode getCombineRepeatedValues() {

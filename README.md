@@ -273,6 +273,8 @@ These are typically already present in your service. The toolkit does not pull t
 
 - `opentmf.tmf630.attribute-filtering.enabled` (default: `true`)
 - `opentmf.tmf630.attribute-filtering.implicit-eq-enabled` (default: `true`)
+- `opentmf.tmf630.attribute-filtering.implicit-eq-csv-or` (default: `true`)
+- `opentmf.tmf630.attribute-filtering.implicit-eq-semicolon-or` (default: `true`)
 - `opentmf.tmf630.attribute-filtering.combine-repeated-values` (`OR` or `AND`)
 - `opentmf.tmf630.attribute-filtering.allow-nested-paths-jpa` (default: `false`)
 - `opentmf.tmf630.attribute-filtering.allow-nested-paths-docdb` (default: `true`)
@@ -501,6 +503,10 @@ The default of `1` is intentional: when a client sends `fields=address`, the lib
 
 Explicit dot-paths in `fields` (e.g. `fields=address.country.code`) always resolve regardless of `depth`.
 
+Per TMF630 Part 1 §4.3, every partial representation automatically includes the resource's
+`id` and `href` (when the type exposes them), whether requested or not, and `fields=none`
+returns only those identity fields. Types without `id`/`href` properties are unaffected.
+
 ---
 
 #### Avoiding JPA lazy-load cascades — recommended patterns
@@ -683,6 +689,21 @@ Query parameter format: `field.operator=value`
 
 If `implicit-eq-enabled=true`, `field=value` is also supported and treated as `field.eq=value`.
 
+With `implicit-eq-csv-or=true` (the default), an implicit-eq value is a TMF630 value list: commas
+express OR, so `field=a,b` matches `a` OR `b`, exactly like `field=a&field=b` or `field.in=a,b`.
+Use explicit `field.eq=a,b` (or the `\,` escape) to match a literal value containing a comma;
+explicit single-value operators never split.
+
+With `implicit-eq-semicolon-or=true` (the default), TMF630 Part 1 §4.4 explicit `;` ORing is
+also supported in both spec shapes: `field=a;b` and the repeated-pair form `field=a;field=b`
+(the redundant `field=` prefix inside the value is stripped). Semicolons compose with commas —
+`field=a,b;c` matches `a` OR `b` OR `c`. The same escape hatches apply: explicit operators
+never split, and `\;` embeds a literal semicolon. A `;`-segment prefixed with a *different*
+key (`?a=x;b=y`) is kept as a literal element — cross-attribute `;` pairs are out of scope.
+Note that servlet containers URL-decode `%3B` to `;` before the toolkit sees the value, so an
+encoded semicolon is indistinguishable from a raw one; use `\;` (or an explicit operator) to
+transmit a literal semicolon.
+
 | Operator suffix | Meaning                        | Example                                                     |
 |-----------------|--------------------------------|-------------------------------------------------------------|
 | `eq`            | equals                         | `name.eq=Alice`                                             |
@@ -709,6 +730,20 @@ If `implicit-eq-enabled=true`, `field=value` is also supported and treated as `f
 | `regex`         | regular expression match       | `name.regex=^A.*`                                           |
 | `regexi`        | regex match ignore case        | `name.regexi=^a.*`                                          |
 
+Per TMF630 Part 1 §4.4, the URL-encoded operator literal forms are also accepted. The
+operator is embedded in the parameter name (`?dateTime%3E2013-04-20` decodes to
+`dateTime>2013-04-20`) and maps onto the equivalent suffix operator:
+
+| Encoded | Decoded name | Equivalent |
+|---|---|---|
+| `%3E` / `%3E%3D` | `field>v` / `field>=v` | `field.gt=v` / `field.gte=v` |
+| `%3C` / `%3C%3D` | `field<v` / `field<=v` | `field.lt=v` / `field.lte=v` |
+| `%3D%3D` | `field==v` | `field.eq=v` (explicit — never value-list split) |
+| `%3D~` | `field=~pattern` | `field.regex=pattern` |
+
+The spec's ORING example `?dateTime%3C2013-04-20;dateTime%3C2017-04-20` (one decoded name
+carrying two expressions) folds like repeated parameters.
+
 Notes:
 
 - `regex` / `regexi` require `opentmf.tmf630.attribute-filtering.regex.enabled=true`.
@@ -725,7 +760,11 @@ Notes:
 
 The following query parameter names are reserved for paging, sorting, field selection, and filter control. The attribute filtering engine skips them automatically — they are never treated as entity field filters:
 
-`page`, `size`, `sort`, `offset`, `limit`, `fields`, `filter`, `filter.combineWithAttributes`
+`page`, `size`, `sort`, `offset`, `limit`, `fields`, `filter`, `filter.combineWithAttributes`, `depth`, `expand`
+
+`depth` and `expand` are the TMF630 Part 2 dereferencing directives. The toolkit does not
+implement reference expansion (that requires application-level data access), but it reserves
+the names so a spec-compliant request is never misread as an attribute filter.
 
 If your entity happens to have a field with one of these names (for example, a column called `offset`), you can still filter by it using the explicit operator suffix form:
 
@@ -1698,6 +1737,32 @@ at the `"` (and vice versa). Added in 2.1.3 — earlier the sort parser
 only accepted `'`, making the toolkit internally inconsistent with the
 filter parser.
 
+#### Example K: positional-index sort `[N]` (JsonPath only)
+
+TMF630 Part 6 defines JSONPath index access (`[n]`, 0-based) and allows
+any JSON Path expression as a Sort-Field. The JsonPath sort grammar
+accepts `[N]` as a hop, selecting the **literal Nth element** — never
+the min/max direction fold used for `[*]`/plain array paths:
+
+```http
+# Sort by the first element's value
+GET /api/products?sort=$.characteristic[0].value
+
+# Predicate narrows the outer element, [1] picks the literal second inner element
+GET /api/orders?sort=$.serviceOrderItem[?(@.id == 'X')].service.serviceCharacteristic[1].value
+
+# Composes with coercion — converts the picked element only
+GET /api/products?sort=$.characteristic[0].num(value)
+```
+
+An out-of-bounds index yields a `null` sort key, which lands last
+regardless of direction per the standard missing-key contract.
+
+**Positional requires the JsonPath form** (`$.arr[0].value`). The bare
+simple-rich spelling `arr[0].value` keeps its default-key meaning
+(`arr[id=0].value`) for backward compatibility with numeric-id
+consumers.
+
 #### Capability cheat-sheet — what each grammar accepts
 
 | Construct | Plain | Simple-rich | JsonPath |
@@ -1712,6 +1777,7 @@ filter parser.
 | Default-key bracket shorthand `arr[X]` | n/a | yes | n/a |
 | Trailing dotted path crossing object/array intermediates (e.g. `arr[X].deep.path.value`) | n/a | yes — Mongo path auto-traversal (min/max element of multi-element arrays per `$sort` direction) | rejected (400 — JsonPath requires a predicate at every array hop) |
 | JsonPath wildcard `[*]` (transparent projection) | n/a | n/a | accepted — stripped at parse time; equivalent to the same expression without `[*]` |
+| Positional index `[N]` (literal Nth element, 0-based) | n/a | n/a — `arr[0]` means `arr[id=0]` (default-key shorthand) | yes (added in 2.1.4 — `$arrayElemAt`, out-of-bounds → nulls-last) |
 | Recursive descent (`..`), array slices (`[0:5]`), JsonPath functions (`length()`) | rejected | n/a | rejected (HTTP 400) |
 | Trailing predicate without leaf field | n/a | n/a | rejected (HTTP 400) |
 | Mixed with plain terms in one comma-separated sort | yes | yes | yes |
@@ -2084,7 +2150,6 @@ This library translates the nested `[?(...)]` pattern to a MongoDB `$elemMatch` 
 
 The following Jayway JsonPath features are **not** part of this library's restricted `filter=` subset and will return `400 Bad Request`:
 
-- Regex match (`=~`)
 - `IN` / `NIN` (use attribute-level `.in` / `.nin` operators instead)
 - `SIZE`, `EMPTY`, `CONTAINS` (Jayway-specific operators)
 - Exists check (`$[?(@.field)]`)
@@ -2102,11 +2167,14 @@ Supported subset (Mongo/document backends):
 - logical operators: `&&`, `||`
 - grouping with parentheses
 - comparisons: `==`, `!=`, `>`, `>=`, `<`, `<=`
+- regex match: `=~` with a `/pattern/` or `/pattern/i` literal;
+  requires `regex.enabled=true` and honors `regex.max-length`, exactly like the attribute-side
+  `.regex` / `.regexi` operators. Only the `i` flag is supported — other flags are rejected.
 - literals: string (single- or double-quoted), number, boolean, `null`
 - field paths: `@.field`, `@.nested.field`
 - array correlation: `@.arrayField[?(...)]` with strict same-element semantics via `$elemMatch`
 - JsonPath wildcard `[*]` is accepted as a transparent projection sigil (stripped at parse time; equivalent to the same expression without `[*]`)
-- trailing projection suffix on the sub-array shorthand is tolerated and discarded — `<arrayPath>[?(...)].dotted.projection.suffix` is treated as `<arrayPath>[?(...)]` since the predicate fully determines the matched row set. Useful for DPC-style URL templates that reuse sort projections in filter URLs. A suffix that contains another `[?(...)]` predicate, an index access (`[0]`), or a slice (`[0:5]`) is rejected so nested filtering doesn't sneak onto this surface silently. (Added in 2.1.3.)
+- trailing projection suffix on the sub-array shorthand is tolerated and discarded — `<arrayPath>[?(...)].dotted.projection.suffix` is treated as `<arrayPath>[?(...)]` since the predicate fully determines the matched row set. Useful for URL templates that reuse sort projections in filter URLs. A suffix that contains another `[?(...)]` predicate, an index access (`[0]`), or a slice (`[0:5]`) is rejected so nested filtering doesn't sneak onto this surface silently. (Added in 2.1.3.)
 - merge with attribute filtering in the same request:
   - default: `AND`
   - override: `filter.combineWithAttributes=OR`

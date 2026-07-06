@@ -334,6 +334,169 @@ class Tmf630MongoCorrelatedSortIT {
   }
 
   @Test
+  void positionalIndexSortAscPicksLiteralFirstElementNotMin() {
+    // [N] is LITERAL-POSITIONAL (TMF630 Part 6 index access), not the min/max
+    // direction fold used for [*]/plain array paths. Seeds where the first element
+    // is NOT the min: A [80, 30] → [0]=80 (min=30); B [50, 70] → [0]=50 (min=50).
+    // ASC by [0]: B(50), A(80). A min-fold would give [A, B] — the regression trap.
+    mongoTemplate.dropCollection(Product.class);
+    mongoTemplate.insertAll(
+        List.of(
+            new Product(
+                "A",
+                List.of(new Characteristic("price", 80), new Characteristic("price", 30))),
+            new Product(
+                "B",
+                List.of(new Characteristic("price", 50), new Characteristic("price", 70)))));
+
+    TmfSort sort =
+        new TmfSort(
+            List.of(
+                new TmfSortTerm(
+                    Sort.Direction.ASC,
+                    TmfSortTerm.Kind.JSONPATH,
+                    "$.characteristic[0].value")));
+
+    Page<Product> page =
+        executor.findAll(Product.class, null, sort, PageRequest.of(0, 10));
+
+    assertEquals(
+        List.of("B", "A"),
+        page.getContent().stream().map(Product::getId).toList());
+  }
+
+  @Test
+  void positionalIndexSortDescPicksLiteralFirstElementNotMax() {
+    // DESC mirror: A [30, 80] → [0]=30 (max=80); B [50, 20] → [0]=50 (max=50).
+    // DESC by [0]: B(50), A(30). A max-fold would give [A, B].
+    mongoTemplate.dropCollection(Product.class);
+    mongoTemplate.insertAll(
+        List.of(
+            new Product(
+                "A",
+                List.of(new Characteristic("price", 30), new Characteristic("price", 80))),
+            new Product(
+                "B",
+                List.of(new Characteristic("price", 50), new Characteristic("price", 20)))));
+
+    TmfSort sort =
+        new TmfSort(
+            List.of(
+                new TmfSortTerm(
+                    Sort.Direction.DESC,
+                    TmfSortTerm.Kind.JSONPATH,
+                    "$.characteristic[0].value")));
+
+    Page<Product> page =
+        executor.findAll(Product.class, null, sort, PageRequest.of(0, 10));
+
+    assertEquals(
+        List.of("B", "A"),
+        page.getContent().stream().map(Product::getId).toList());
+  }
+
+  @Test
+  void predicateHopThenPositionalIndexOnInnerArray() {
+    // The DPC shape: $.outer[?(pred)].sub[N].leaf — predicate narrows the outer
+    // element, [1] picks the literal second inner element. Seeds where [1], min,
+    // and first-element orderings all differ:
+    //   A: ["c", "b"] → [1]="b" (min="b", first="c")
+    //   B: ["a", "z"] → [1]="z" (min="a", first="a")
+    // ASC by [1]: A(b), B(z) → [A, B]. min or first would both give [B, A].
+    mongoTemplate.dropCollection(Order.class);
+    mongoTemplate.insertAll(
+        List.of(
+            new Order(
+                "A",
+                List.of(
+                    new OrderItem(
+                        "X",
+                        new Service(
+                            List.of(
+                                new Characteristic("k", "c"),
+                                new Characteristic("k", "b")))))),
+            new Order(
+                "B",
+                List.of(
+                    new OrderItem(
+                        "X",
+                        new Service(
+                            List.of(
+                                new Characteristic("k", "a"),
+                                new Characteristic("k", "z"))))))));
+
+    TmfSort sort =
+        new TmfSort(
+            List.of(
+                new TmfSortTerm(
+                    Sort.Direction.ASC,
+                    TmfSortTerm.Kind.JSONPATH,
+                    "$.serviceOrderItem[?(@.id == 'X')].service.serviceCharacteristic[1].value")));
+
+    Page<Order> page =
+        executor.findAll(Order.class, null, sort, PageRequest.of(0, 10));
+
+    assertEquals(
+        List.of("A", "B"),
+        page.getContent().stream().map(Order::getId).toList());
+  }
+
+  @Test
+  void outOfBoundsPositionalIndexYieldsNullSortKeySortedLast() {
+    // A has a second element ([1]=9); B does not → null key → nulls-last on ASC.
+    // Min semantics would have put B (min=1) first.
+    mongoTemplate.dropCollection(Product.class);
+    mongoTemplate.insertAll(
+        List.of(
+            new Product(
+                "A",
+                List.of(new Characteristic("price", 5), new Characteristic("price", 9))),
+            new Product("B", List.of(new Characteristic("price", 1)))));
+
+    TmfSort sort =
+        new TmfSort(
+            List.of(
+                new TmfSortTerm(
+                    Sort.Direction.ASC,
+                    TmfSortTerm.Kind.JSONPATH,
+                    "$.characteristic[1].value")));
+
+    Page<Product> page =
+        executor.findAll(Product.class, null, sort, PageRequest.of(0, 10));
+
+    assertEquals(
+        List.of("A", "B"),
+        page.getContent().stream().map(Product::getId).toList());
+  }
+
+  @Test
+  void positionalIndexComposesWithNumCoercion() {
+    // num($.characteristic[0].value) converts the picked element only: string-stored
+    // numerics sort numerically. [0] values: A="105.34", B="12.2" → ASC: B, A.
+    // Lexicographic would give A ("105.34" < "12.2"), pinning that $convert applies.
+    mongoTemplate.dropCollection(Product.class);
+    mongoTemplate.insertAll(
+        List.of(
+            new Product("A", List.of(new Characteristic("price", "105.34"))),
+            new Product("B", List.of(new Characteristic("price", "12.2")))));
+
+    TmfSort sort =
+        new TmfSort(
+            List.of(
+                new TmfSortTerm(
+                    Sort.Direction.ASC,
+                    TmfSortTerm.Kind.JSONPATH,
+                    "$.characteristic[0].num(value)")));
+
+    Page<Product> page =
+        executor.findAll(Product.class, null, sort, PageRequest.of(0, 10));
+
+    assertEquals(
+        List.of("B", "A"),
+        page.getContent().stream().map(Product::getId).toList());
+  }
+
+  @Test
   void jsonPathWildcardIsAcceptedAsTransparentProjection() {
     // The canonical JsonPath wildcard `[*]` and the Mongo-style trailing path produce
     // identical aggregation results once the parser strips `[*]`. Run the same data

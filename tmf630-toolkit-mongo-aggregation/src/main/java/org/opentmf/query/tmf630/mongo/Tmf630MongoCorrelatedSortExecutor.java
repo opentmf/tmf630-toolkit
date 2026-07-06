@@ -16,6 +16,7 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
 import org.springframework.data.mongodb.core.aggregation.AggregationOperation;
 import org.springframework.data.mongodb.core.aggregation.AggregationResults;
+import org.springframework.data.mongodb.core.convert.QueryMapper;
 import org.springframework.data.mongodb.core.mapping.MongoMappingContext;
 
 public class Tmf630MongoCorrelatedSortExecutor {
@@ -25,12 +26,15 @@ public class Tmf630MongoCorrelatedSortExecutor {
   private final SimpleRichSortParser simpleRichParser;
   private final MongodbDocumentSerializer querySerializer;
   private final MongoFieldResolver fieldResolver;
+  private final MongoMappingContext mappingContext;
+  private final QueryMapper queryMapper;
 
   public Tmf630MongoCorrelatedSortExecutor(MongoTemplate mongoTemplate, String defaultSimpleRichKey) {
     this.mongoTemplate = mongoTemplate;
     this.jsonPathParser = new JsonPathSortParser();
     this.simpleRichParser = new SimpleRichSortParser(defaultSimpleRichKey);
-    MongoMappingContext mappingContext = resolveMappingContext(mongoTemplate);
+    this.mappingContext = resolveMappingContext(mongoTemplate);
+    this.queryMapper = new QueryMapper(mongoTemplate.getConverter());
     this.querySerializer = new NoRefDocumentSerializer(mappingContext);
     this.fieldResolver =
         mappingContext != null
@@ -49,7 +53,7 @@ public class Tmf630MongoCorrelatedSortExecutor {
       Class<T> entityClass, Predicate filter, TmfSort sort, Pageable pageable) {
     String collectionName = mongoTemplate.getCollectionName(entityClass);
 
-    List<AggregationOperation> matchStages = buildMatchStages(filter);
+    List<AggregationOperation> matchStages = buildMatchStages(entityClass, filter);
     long total = count(matchStages, collectionName);
 
     List<AggregationOperation> stages = new ArrayList<>(matchStages);
@@ -153,13 +157,20 @@ public class Tmf630MongoCorrelatedSortExecutor {
     return pathExpr;
   }
 
-  private List<AggregationOperation> buildMatchStages(Predicate filter) {
+  private List<AggregationOperation> buildMatchStages(Class<?> entityClass, Predicate filter) {
     if (filter == null) {
       return List.of();
     }
     Object handled = querySerializer.handle(filter);
     if (!(handled instanceof Document doc) || doc.isEmpty()) {
       return List.of();
+    }
+    // The serializer leaves dotted Java paths (e.g. `key.serial`) untranslated because a dotted
+    // string is not a valid single-property lookup, and the stage is added as a raw lambda that
+    // Spring Data never remaps. Run the document through the same QueryMapper the plain find path
+    // uses so @Field/@Id renames apply per path segment and both executors can never diverge.
+    if (mappingContext != null) {
+      doc = queryMapper.getMappedObject(doc, mappingContext.getPersistentEntity(entityClass));
     }
     Document matchStage = new Document("$match", doc);
     return List.of(ctx -> matchStage);

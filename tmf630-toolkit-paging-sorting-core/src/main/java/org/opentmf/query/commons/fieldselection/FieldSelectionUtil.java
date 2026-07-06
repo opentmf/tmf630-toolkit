@@ -284,15 +284,36 @@ public final class FieldSelectionUtil {
     SortedSet<String> set = new TreeSet<>();
 
     for (String field : fields) {
-      if (field.trim().isEmpty()) {
+      // TMF630 Part 1 §4.3: "fields=none" selects no resource properties; the
+      // mandatory identity fields injected below are then the entire response.
+      if (field.trim().isEmpty() || "none".equals(field.trim())) {
         continue;
       }
       set.add(field.trim());
     }
 
     parseFieldsRecursive(beanClass, set, root, "", 0, null, depth);
+    includeMandatoryIdentityFields(beanClass, root);
 
     return root;
+  }
+
+  /**
+   * TMF630 Part 1 §4.3: {@code id} and {@code href} are always present in a partial
+   * representation, whether requested or not (and are the only content of
+   * {@code fields=none}). Injected only when the type exposes them as scalar properties;
+   * types without them are unaffected.
+   */
+  private static void includeMandatoryIdentityFields(
+      Class<?> beanClass, Map<String, FieldNode> map) {
+    for (PropertyDescriptor pd : getProperties(beanClass)) {
+      String name = pd.getName();
+      if (("id".equals(name) || "href".equals(name))
+          && !map.containsKey(name)
+          && getProperties(getType(pd)).isEmpty()) {
+        map.put(name, new FieldNode());
+      }
+    }
   }
 
   private static void parseFieldsRecursive(
