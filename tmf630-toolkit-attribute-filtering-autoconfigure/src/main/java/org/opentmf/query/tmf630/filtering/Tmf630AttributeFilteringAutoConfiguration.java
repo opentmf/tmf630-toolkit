@@ -64,7 +64,9 @@ public class Tmf630AttributeFilteringAutoConfiguration {
   @ConditionalOnMissingBean
   public PredicateFactory tmf630PredicateFactory(Tmf630AttributeFilteringProperties properties) {
     return new PredicateFactory(
-        properties.getRegex().isEnabled(), properties.getRegex().getMaxLength());
+        properties.getRegex().isEnabled(),
+        properties.getRegex().getMaxLength(),
+        properties.getIsnullSemantics());
   }
 
   @Bean

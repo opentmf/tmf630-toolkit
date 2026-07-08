@@ -99,15 +99,25 @@ All notable changes to `tmf630-toolkit` are documented in this file.
   `opentmf.tmf630.attribute-filtering.implicit-eq-csv-or` (default `true`,
   per spec) restores the previous literal behaviour when set to `false`.
 
-### Not changed
-- **`IS_NULL` deliberately continues to match missing-only.** Part 1's
-  operator table defines no null-test operator, and Part 6 defines
-  `[?(!@.field)]` as matching items that *"do not have"* the property —
-  exactly the `$exists:false` the toolkit emits (for `?attr.isnull=true`
-  and the `filter=` forms `!@.field` / `== null`). Treating an explicit
-  `null` or an empty array as equivalent to a missing field is a
-  data-model convention outside the specification and is intentionally
-  not part of the toolkit.
+- **New setting `opentmf.tmf630.attribute-filtering.isnull-semantics`
+  (`MISSING_ONLY` \| `NULLISH`, default `MISSING_ONLY`).** TMF630 Part 1
+  defines no null-test operator and Part 6's `[?(!@.field)]` glosses as
+  *"items that do not have the property"* — exactly the `$exists:false`
+  the toolkit emits by default, and the semantics MISSING_ONLY preserves
+  unchanged. Downstream consumers whose data model treats a missing
+  field, an explicit `null`, and an empty array as equivalent "no value"
+  states can opt into `NULLISH`: `?attr.isnull=true` (and the `filter=`
+  forms `!@.field` / `== null`) then also match documents where the
+  field is explicitly `null`. The widening applies on Mongo
+  `@Document` roots — Spring Data's `QueryMapper` post-processing pass
+  strips size / typed-empty-list clauses from the OR, so empty-array
+  matching on the plain find path requires a companion size-based
+  predicate; on JPA `@Entity` roots the widening is skipped because
+  SQL's `IS NULL` already captures the only "no value" state for
+  scalars, and applying the `NOT IN (NULL)` complement would poison
+  IS_NOT_NULL to zero rows via SQL trilean UNKNOWN. IS_NOT_NULL under
+  NULLISH is the exact boolean complement of the widened IS_NULL
+  (built as an AND of per-branch complements, never `NOT (...)`).
 
 ### Fixed
 - **Mongo aggregation executor no longer returns an empty page when a

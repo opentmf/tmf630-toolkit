@@ -1,9 +1,12 @@
 package org.opentmf.query.tmf630.filtering.predicate;
 
-import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import com.querydsl.core.types.Operation;
+import com.querydsl.core.types.Ops;
 import com.querydsl.core.types.Predicate;
 import com.querydsl.core.types.dsl.PathBuilder;
 import java.util.ArrayList;
@@ -11,6 +14,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.opentmf.query.tmf630.filtering.TmfFilteringException;
 import org.opentmf.query.tmf630.filtering.TmfOperator;
+import org.opentmf.query.tmf630.filtering.config.IsnullSemantics;
 
 class PredicateFactoryTest {
 
@@ -137,6 +141,43 @@ class PredicateFactoryTest {
   }
 
   @Test
+  void missingOnlyIsnullEmitsPlainIsNull() {
+    PredicateFactory factory = new PredicateFactory(true, 256, IsnullSemantics.MISSING_ONLY);
+    PathBuilder<SampleEntity> root = new PathBuilder<>(SampleEntity.class, "sampleEntity");
+
+    Predicate isNull =
+        factory.buildNoValue(root, new ResolvedField("name", String.class), TmfOperator.IS_NULL);
+    Predicate isNotNull =
+        factory.buildNoValue(
+            root, new ResolvedField("name", String.class), TmfOperator.IS_NOT_NULL);
+
+    assertEquals(Ops.IS_NULL, ((Operation<?>) isNull).getOperator());
+    assertEquals(Ops.IS_NOT_NULL, ((Operation<?>) isNotNull).getOperator());
+  }
+
+  @Test
+  void nullishOnJpaRootDoesNotWiden() {
+    // SampleEntity has no @Document — NULLISH must degrade to plain IS NULL / IS NOT NULL on
+    // JPA and unknown roots, because SQL's IS NULL already captures the only "no value"
+    // state for scalars and NOT IN (NULL) would poison the query via SQL trilean UNKNOWN.
+    PredicateFactory factory = new PredicateFactory(true, 256, IsnullSemantics.NULLISH);
+    PathBuilder<SampleEntity> root = new PathBuilder<>(SampleEntity.class, "sampleEntity");
+
+    Predicate isNull =
+        factory.buildNoValue(root, new ResolvedField("name", String.class), TmfOperator.IS_NULL);
+    Predicate isNotNull =
+        factory.buildNoValue(
+            root, new ResolvedField("name", String.class), TmfOperator.IS_NOT_NULL);
+
+    assertEquals(Ops.IS_NULL, ((Operation<?>) isNull).getOperator());
+    assertEquals(Ops.IS_NOT_NULL, ((Operation<?>) isNotNull).getOperator());
+  }
+
+  // Mongo NULLISH widening (@Document root) is exercised end-to-end by the Mongo IT — see
+  // Tmf630MongoNullishIT in tmf630-toolkit-mongo-aggregation — because spring-data-mongodb
+  // is not on this module's classpath so we cannot stamp a real @Document on a fixture here.
+
+  @Test
   void handlesPrimitiveTypeBoxingBranches() {
     PredicateFactory factory = new PredicateFactory(true, 256);
     PathBuilder<PrimitiveEntity> root = new PathBuilder<>(PrimitiveEntity.class, "primitiveEntity");
@@ -156,6 +197,7 @@ class PredicateFactoryTest {
     private String name;
     private Integer age;
     private NonComparable payload;
+    private List<String> tags;
   }
 
   static class NonComparable {}

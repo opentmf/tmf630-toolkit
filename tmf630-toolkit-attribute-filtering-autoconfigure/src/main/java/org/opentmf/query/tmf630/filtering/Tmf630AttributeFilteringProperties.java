@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 import org.opentmf.query.tmf630.filtering.config.AllowlistMode;
 import org.opentmf.query.tmf630.filtering.config.CombineMode;
+import org.opentmf.query.tmf630.filtering.config.IsnullSemantics;
 import org.opentmf.query.tmf630.filtering.config.PredicateLimits;
 import org.opentmf.query.tmf630.filtering.config.Tmf630FilterSettings;
 import org.opentmf.query.tmf630.filtering.config.UnknownParamBehavior;
@@ -27,6 +28,7 @@ public class Tmf630AttributeFilteringProperties {
   private UnknownParamBehavior onUnknownField = UnknownParamBehavior.REJECT;
   private UnknownParamBehavior onUnknownOperator = UnknownParamBehavior.REJECT;
   private UnknownParamBehavior onUnknownJsonPathField = UnknownParamBehavior.IGNORE;
+  private IsnullSemantics isnullSemantics = IsnullSemantics.MISSING_ONLY;
 
   public Tmf630FilterSettings toSettings() {
     return new Tmf630FilterSettings(
@@ -43,7 +45,8 @@ public class Tmf630AttributeFilteringProperties {
         onUnknownOperator,
         jsonPathFilter.enabled,
         jsonPathFilter.maxLength,
-        onUnknownJsonPathField);
+        onUnknownJsonPathField,
+        isnullSemantics);
   }
 
   public boolean isEnabled() {
@@ -156,6 +159,14 @@ public class Tmf630AttributeFilteringProperties {
 
   public void setOnUnknownJsonPathField(UnknownParamBehavior onUnknownJsonPathField) {
     this.onUnknownJsonPathField = onUnknownJsonPathField;
+  }
+
+  public IsnullSemantics getIsnullSemantics() {
+    return isnullSemantics;
+  }
+
+  public void setIsnullSemantics(IsnullSemantics isnullSemantics) {
+    this.isnullSemantics = isnullSemantics;
   }
 
   public static class Regex {

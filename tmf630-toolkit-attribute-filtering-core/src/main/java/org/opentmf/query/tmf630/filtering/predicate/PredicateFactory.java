@@ -1,23 +1,34 @@
 package org.opentmf.query.tmf630.filtering.predicate;
 
+import com.querydsl.core.BooleanBuilder;
 import com.querydsl.core.types.Ops;
 import com.querydsl.core.types.Predicate;
 import com.querydsl.core.types.dsl.Expressions;
 import com.querydsl.core.types.dsl.PathBuilder;
+import com.querydsl.core.types.dsl.SimplePath;
+import java.lang.annotation.Annotation;
+import java.util.Collections;
+import java.util.List;
 import org.opentmf.query.tmf630.filtering.TmfFilteringException;
 import org.opentmf.query.tmf630.filtering.TmfOperator;
-
-import java.util.List;
+import org.opentmf.query.tmf630.filtering.config.IsnullSemantics;
 
 @SuppressWarnings({"rawtypes", "unchecked"})
 public class PredicateFactory {
 
   private final boolean regexEnabled;
   private final int maxRegexLength;
+  private final IsnullSemantics isnullSemantics;
 
   public PredicateFactory(boolean regexEnabled, int maxRegexLength) {
+    this(regexEnabled, maxRegexLength, IsnullSemantics.MISSING_ONLY);
+  }
+
+  public PredicateFactory(
+      boolean regexEnabled, int maxRegexLength, IsnullSemantics isnullSemantics) {
     this.regexEnabled = regexEnabled;
     this.maxRegexLength = maxRegexLength;
+    this.isnullSemantics = isnullSemantics;
   }
 
   public Predicate build(
@@ -68,12 +79,91 @@ public class PredicateFactory {
     String fieldPath = field.fieldPath();
     Class<?> type = box(field.javaType());
     return switch (operator) {
-      case IS_NULL -> root.getSimple(fieldPath, (Class) type).isNull();
-      case IS_NOT_NULL -> root.getSimple(fieldPath, (Class) type).isNotNull();
+      case IS_NULL -> nullish(root, fieldPath, type, false);
+      case IS_NOT_NULL -> nullish(root, fieldPath, type, true);
       default ->
           throw new TmfFilteringException(
               "Unsupported no-value operator: " + operator.suffix());
     };
+  }
+
+  /**
+   * IS_NULL / IS_NOT_NULL emission driven by {@link IsnullSemantics}.
+   *
+   * <p>Under {@code MISSING_ONLY} (the default, preserved for back-compat) we emit
+   * {@code path.isNull()} / {@code path.isNotNull()} exactly as before — on Mongo this
+   * serializes to {@code {field: {$exists: false}}} / {@code {$exists: true}} and on
+   * JPA to {@code IS NULL} / {@code IS NOT NULL}.
+   *
+   * <p>{@code NULLISH} widens IS_NULL to also match an explicit {@code null} value on
+   * Mongo. The widening is intentionally scoped to Mongo {@code @Document} roots because
+   * on JPA:
+   * <ul>
+   *   <li>SQL {@code IS NULL} already captures the only "no value" state for scalar
+   *       columns — the widening would be a no-op.
+   *   <li>Applying the OR arm via {@code IN (NULL)} on IS_NULL would inflate the SQL
+   *       harmlessly, but the complementary {@code NOT IN (NULL)} on IS_NOT_NULL is
+   *       UNKNOWN under SQL trilean logic and would poison the AND, returning zero
+   *       rows for every {@code .isnotnull=} query.
+   * </ul>
+   * So the widening is a runtime backend-detect: NULLISH-and-Mongo widens; every other
+   * combination degrades to the plain IS_NULL/IS_NOT_NULL that MISSING_ONLY emits.
+   *
+   * <p>On Mongo the widened forms are exact complements of each other:
+   * <ul>
+   *   <li>IS_NULL under NULLISH: {@code IS_NULL OR IN [null]} → serializes to
+   *       {@code $or:[{$exists:false},{$in:[null]}]}, matching missing OR explicit null.
+   *       Mongo's {@code $in:[null]} already covers both states, so the {@code $exists:false}
+   *       branch is redundant but kept for correctness against serializers that may
+   *       normalize either shape.
+   *   <li>IS_NOT_NULL under NULLISH: {@code IS_NOT_NULL AND NOT_IN [null]} → serializes
+   *       to {@code $exists:true,$nin:[null]}, the boolean complement.
+   * </ul>
+   *
+   * <p>Empty-array widening ({@code {$size:0}} / {@code {$eq:[]}}) is intentionally NOT
+   * added here: Spring Data's {@code QueryMapper} strips size/typed-empty-list clauses
+   * from the OR during its post-serialization type-mapping pass, so any clause we emit
+   * silently disappears on the plain find path. Callers that need to also match
+   * {@code []} should compose the widened {@code .isnull} with an explicit
+   * {@code .size().eq(0)} predicate at the repository level, until a future revision
+   * addresses the QueryMapper interaction.
+   */
+  private Predicate nullish(
+      PathBuilder<?> root, String fieldPath, Class<?> type, boolean negate) {
+    SimplePath<?> path = root.getSimple(fieldPath, (Class) type);
+    boolean widen = isnullSemantics == IsnullSemantics.NULLISH && isMongoRoot(root);
+    if (!widen) {
+      return negate ? path.isNotNull() : path.isNull();
+    }
+    if (!negate) {
+      BooleanBuilder w = new BooleanBuilder(path.isNull());
+      w.or(
+          Expressions.predicate(
+              Ops.IN, path, Expressions.constant(Collections.singletonList(null))));
+      return w.getValue();
+    }
+    // Exact complement: never wrap the widened IS_NULL with Ops.NOT — SQL trilean makes
+    // NOT (IS NULL OR IN (NULL)) collapse to UNKNOWN. Build the AND of per-branch
+    // complements instead so each clause is independently well-formed.
+    BooleanBuilder w = new BooleanBuilder(path.isNotNull());
+    w.and(
+        Expressions.predicate(
+            Ops.NOT_IN, path, Expressions.constant(Collections.singletonList(null))));
+    return w.getValue();
+  }
+
+  private static boolean isMongoRoot(PathBuilder<?> root) {
+    Class<?> type = root.getType();
+    if (type == null) {
+      return false;
+    }
+    for (Annotation annotation : type.getAnnotations()) {
+      if ("org.springframework.data.mongodb.core.mapping.Document"
+          .equals(annotation.annotationType().getName())) {
+        return true;
+      }
+    }
+    return false;
   }
 
   public Predicate buildMulti(

@@ -296,6 +296,9 @@ These are typically already present in your service. The toolkit does not pull t
 - `opentmf.tmf630.attribute-filtering.on-unknown-operator` (`REJECT` or `IGNORE`)
 - `opentmf.tmf630.attribute-filtering.json-path-filter.enabled` (default: `true`)
 - `opentmf.tmf630.attribute-filtering.json-path-filter.max-length` (default: `2048`)
+- `opentmf.tmf630.attribute-filtering.isnull-semantics` (`MISSING_ONLY` or
+  `NULLISH`, default `MISSING_ONLY`) — widens what `?attr.isnull=` matches. See
+  [Null-check widening](#null-check-widening-missing_only-vs-nullish) below.
 
 ### Field selection properties
 
@@ -743,6 +746,33 @@ operator is embedded in the parameter name (`?dateTime%3E2013-04-20` decodes to
 
 The spec's ORING example `?dateTime%3C2013-04-20;dateTime%3C2017-04-20` (one decoded name
 carrying two expressions) folds like repeated parameters.
+
+#### Null-check widening (`MISSING_ONLY` vs `NULLISH`)
+
+TMF630 defines no null-test operator; Part 6's `[?(!@.field)]` glosses as *"items that do
+not have the property"*. The toolkit's default (`isnull-semantics: MISSING_ONLY`) mirrors
+that: `?attr.isnull=true` (and `filter=` forms `!@.field` / `== null`) matches only
+documents where the field is missing (Mongo `{$exists: false}`) or SQL `NULL`. This is the
+back-compatible behaviour and the one Part 6 arguably specifies.
+
+Downstream consumers whose data model treats *missing*, *explicit `null`*, and *empty
+array* as equivalent "no value" states can opt into `isnull-semantics: NULLISH`. Under
+NULLISH:
+
+- On Mongo `@Document` roots, `?attr.isnull=true` widens to match documents where the
+  field is **missing OR explicitly `null`**. `?attr.isnotnull=true` is the exact
+  complement. Empty-array matching (`[]`) is intentionally not applied on the plain
+  find path — Spring Data's `QueryMapper` strips `$size`/typed-empty-list clauses during
+  its post-serialization pass — so callers that need the third state combine the widened
+  `.isnull` with an explicit repository-level size predicate.
+- On JPA `@Entity` roots the widening is skipped: SQL `IS NULL` already captures the
+  only "no value" state for scalar columns, and applying the `NOT IN (NULL)` complement
+  would poison `IS_NOT_NULL` to zero rows via SQL trilean UNKNOWN. NULLISH is therefore a
+  functional no-op on JPA — the same SQL as MISSING_ONLY.
+
+Set the mode application-wide via the property; there is no per-request override —
+callers that need mixed semantics run the two `?attr.isnull=` styles as separate
+requests or compose repository-level predicates directly.
 
 Notes:
 

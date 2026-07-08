@@ -14,7 +14,47 @@ public record Tmf630FilterSettings(
     UnknownParamBehavior onUnknownOperator,
     boolean jsonPathFilterEnabled,
     int jsonPathMaxLength,
-    UnknownParamBehavior onUnknownJsonPathField) {
+    UnknownParamBehavior onUnknownJsonPathField,
+    IsnullSemantics isnullSemantics) {
+
+  /**
+   * Back-compat constructor without {@link IsnullSemantics} — used by callers that predate the
+   * 2.1.4 nullish toggle. Defaults to {@link IsnullSemantics#MISSING_ONLY}, which preserves the
+   * exact pre-toggle IS_NULL/IS_NOT_NULL behavior (Mongo {@code $exists:false}, JPA
+   * {@code IS NULL}).
+   */
+  public Tmf630FilterSettings(
+      boolean implicitEqEnabled,
+      boolean implicitEqCsvOr,
+      boolean implicitEqSemicolonOr,
+      CombineMode combineRepeatedValues,
+      boolean allowNestedPathsJpa,
+      boolean allowNestedPathsDocdb,
+      boolean regexEnabled,
+      PredicateLimits limits,
+      AllowlistMode allowlistMode,
+      UnknownParamBehavior onUnknownField,
+      UnknownParamBehavior onUnknownOperator,
+      boolean jsonPathFilterEnabled,
+      int jsonPathMaxLength,
+      UnknownParamBehavior onUnknownJsonPathField) {
+    this(
+        implicitEqEnabled,
+        implicitEqCsvOr,
+        implicitEqSemicolonOr,
+        combineRepeatedValues,
+        allowNestedPathsJpa,
+        allowNestedPathsDocdb,
+        regexEnabled,
+        limits,
+        allowlistMode,
+        onUnknownField,
+        onUnknownOperator,
+        jsonPathFilterEnabled,
+        jsonPathMaxLength,
+        onUnknownJsonPathField,
+        IsnullSemantics.MISSING_ONLY);
+  }
 
   public boolean allowNestedPathsFor(Class<?> rootEntity) {
     if (hasAnnotation(rootEntity, "jakarta.persistence.Entity")
