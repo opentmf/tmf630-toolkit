@@ -3,7 +3,6 @@ package org.opentmf.query.tmf630.filtering;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import java.util.Set;
@@ -95,6 +94,8 @@ class Tmf630ResolverOrderingPostProcessorTest {
   private static Tmf630PredicateArgumentResolver newResolver() {
     Tmf630FilterSettings settings =
         new Tmf630FilterSettings(
+            true,
+            true,
             true,
             CombineMode.OR,
             false,

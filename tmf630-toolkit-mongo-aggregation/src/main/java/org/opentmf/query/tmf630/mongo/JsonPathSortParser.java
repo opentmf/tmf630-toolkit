@@ -181,6 +181,18 @@ public final class JsonPathSortParser {
                 "Sort path is missing a trailing leaf field after the predicate: " + input);
           }
           expect(".");
+        } else if (peekPositionalIndex()) {
+          // TMF630 Part 6 JSONPath 0-based index access: [N] picks the literal Nth
+          // element. Modeled as a hop with AlwaysTruePredicate plus the index, so the
+          // translator selects $arrayElemAt instead of $first — never the min/max fold.
+          hops.add(
+              new JsonPathSortAst.ArrayHop(
+                  dottedId, JsonPathSortAst.AlwaysTruePredicate.INSTANCE, readPositionalIndex()));
+          if (pos == input.length()) {
+            throw new IllegalArgumentException(
+                "Sort path is missing a trailing leaf field after the [N] index: " + input);
+          }
+          expect(".");
         } else {
           // A dotted identifier may be followed by a single balanced parenthesised group
           // forming a function-call leaf: `num(value)`, `productSpec.num(value)`,
@@ -191,7 +203,8 @@ public final class JsonPathSortParser {
           String trailing = dottedId + trailingCall;
           if (hops.isEmpty()) {
             throw new IllegalArgumentException(
-                "JsonPath sort term must contain at least one [?(...)] correlation predicate: "
+                "JsonPath sort term must contain at least one [?(...)] correlation predicate"
+                    + " or [N] index hop: "
                     + input);
           }
           skipWhitespace();
@@ -202,6 +215,23 @@ public final class JsonPathSortParser {
           return splitTrailing(hops, trailing);
         }
       }
+    }
+
+    private boolean peekPositionalIndex() {
+      return pos + 1 < input.length()
+          && input.charAt(pos) == '['
+          && Character.isDigit(input.charAt(pos + 1));
+    }
+
+    private int readPositionalIndex() {
+      consume(1);
+      int start = pos;
+      while (pos < input.length() && Character.isDigit(input.charAt(pos))) {
+        pos++;
+      }
+      String digits = input.substring(start, pos);
+      expect("]");
+      return Integer.parseInt(digits);
     }
 
     private String readBalancedFunctionCall() {

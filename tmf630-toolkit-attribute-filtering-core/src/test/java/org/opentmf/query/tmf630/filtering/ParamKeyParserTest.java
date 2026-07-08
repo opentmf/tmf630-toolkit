@@ -1,6 +1,7 @@
 package org.opentmf.query.tmf630.filtering;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -14,6 +15,16 @@ class ParamKeyParserTest {
 
     assertEquals("createdOn", parsed.fieldPath());
     assertEquals(TmfOperator.GTE, parsed.operator());
+    assertFalse(parsed.implicitEq());
+  }
+
+  @Test
+  void marksExplicitEqSuffixAsNotImplicit() {
+    ParamKeyParser parser = new ParamKeyParser(new OperatorRegistry(), true);
+    ParsedParamKey parsed = parser.parse("name.eq").orElseThrow();
+
+    assertEquals(TmfOperator.EQ, parsed.operator());
+    assertFalse(parsed.implicitEq());
   }
 
   @Test
@@ -31,6 +42,7 @@ class ParamKeyParserTest {
 
     assertEquals("transformationId", parsed.fieldPath());
     assertEquals(TmfOperator.EQ, parsed.operator());
+    assertTrue(parsed.implicitEq());
   }
 
   @Test
@@ -54,6 +66,7 @@ class ParamKeyParserTest {
 
     assertEquals("createdOn.unknown", parsed.fieldPath());
     assertEquals(TmfOperator.EQ, parsed.operator());
+    assertTrue(parsed.implicitEq());
   }
 
   @Test

@@ -26,6 +26,82 @@ class JsonPathSortParserTest {
     assertEquals("X", ((JsonPathSortAst.StringLiteral) cp.literal()).value());
   }
 
+  // ---------- Positional index hops [N] (TMF630 Part 6 JSONPath index access) ----------
+
+  @Test
+  void parsesPositionalIndexHop() {
+    JsonPathSortAst.SortPath p = parser.parse("$.arr[0].value");
+
+    assertEquals(1, p.hops().size());
+    JsonPathSortAst.ArrayHop hop = p.hops().get(0);
+    assertEquals("arr", hop.arrayPath());
+    assertEquals(0, hop.index());
+    assertInstanceOf(JsonPathSortAst.AlwaysTruePredicate.class, hop.predicate());
+    assertEquals("value", ((JsonPathSortAst.FieldRef) p.leaf()).fieldPath());
+  }
+
+  @Test
+  void predicateHopsCarryNullIndex() {
+    JsonPathSortAst.SortPath p = parser.parse("$.arr[?(@.id == 'X')].value");
+    assertEquals(null, p.hops().get(0).index());
+  }
+
+  @Test
+  void parsesIndexHopWithDeeperTrailingPath() {
+    JsonPathSortAst.SortPath p = parser.parse("$.arr[2].sub.value");
+
+    assertEquals(2, p.hops().get(0).index());
+    assertEquals("sub.value", ((JsonPathSortAst.FieldRef) p.leaf()).fieldPath());
+  }
+
+  @Test
+  void parsesPredicateHopFollowedByIndexedInnerHop() {
+    JsonPathSortAst.SortPath p =
+        parser.parse("$.outer[?(@.id == 'X')].sub[1].value");
+
+    assertEquals(2, p.hops().size());
+    assertEquals("outer", p.hops().get(0).arrayPath());
+    assertEquals(null, p.hops().get(0).index());
+    assertEquals("sub", p.hops().get(1).arrayPath());
+    assertEquals(1, p.hops().get(1).index());
+    assertInstanceOf(JsonPathSortAst.AlwaysTruePredicate.class, p.hops().get(1).predicate());
+    assertEquals("value", ((JsonPathSortAst.FieldRef) p.leaf()).fieldPath());
+  }
+
+  @Test
+  void indexHopComposesWithCoercionLeafAndOuterWrap() {
+    JsonPathSortAst.SortPath leafCall = parser.parse("$.arr[0].num(value)");
+    JsonPathSortAst.Coercion leafCoercion =
+        assertInstanceOf(JsonPathSortAst.Coercion.class, leafCall.leaf());
+    assertEquals(JsonPathSortAst.CoercionType.NUM, leafCoercion.type());
+    assertEquals(0, leafCall.hops().get(0).index());
+
+    JsonPathSortAst.SortPath outerWrap = parser.parse("num($.arr[0].value)");
+    assertEquals(leafCall, outerWrap);
+  }
+
+  @Test
+  void indexHopIgnoresWildcardProjectionInTrailingPath() {
+    JsonPathSortAst.SortPath p = parser.parse("$.arr[0].sub[*].value");
+    assertEquals(0, p.hops().get(0).index());
+    assertEquals("sub.value", ((JsonPathSortAst.FieldRef) p.leaf()).fieldPath());
+  }
+
+  @Test
+  void rejectsNegativeIndex() {
+    assertThrows(IllegalArgumentException.class, () -> parser.parse("$.arr[-1].value"));
+  }
+
+  @Test
+  void rejectsNonIntegerIndex() {
+    assertThrows(IllegalArgumentException.class, () -> parser.parse("$.arr[1.5].value"));
+  }
+
+  @Test
+  void rejectsIndexHopWithoutTrailingLeaf() {
+    assertThrows(IllegalArgumentException.class, () -> parser.parse("$.arr[0]"));
+  }
+
   @Test
   void parsesAllComparisonOperators() {
     assertEquals(JsonPathSortAst.ComparisonOperator.NE, opOf("$.a[?(@.x != 1)].v"));

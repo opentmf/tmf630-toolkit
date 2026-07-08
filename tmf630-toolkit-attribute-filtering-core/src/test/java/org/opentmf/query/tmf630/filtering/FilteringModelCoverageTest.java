@@ -32,10 +32,14 @@ class FilteringModelCoverageTest {
     ParsedParamKey key = new ParsedParamKey("name", TmfOperator.EQ);
     assertEquals("name", key.fieldPath());
     assertEquals(TmfOperator.EQ, key.operator());
+    assertFalse(key.implicitEq());
+    assertTrue(new ParsedParamKey("name", TmfOperator.EQ, true).implicitEq());
 
     PredicateLimits limits = new PredicateLimits(10, 3, 64);
     Tmf630FilterSettings settings =
         new Tmf630FilterSettings(
+            true,
+            true,
             true,
             CombineMode.AND,
             true,
@@ -49,6 +53,7 @@ class FilteringModelCoverageTest {
             1234,
             UnknownParamBehavior.REJECT);
 
+    assertTrue(settings.implicitEqCsvOr());
     assertEquals(10, settings.limits().maxClauses());
     assertEquals(3, settings.limits().maxValuesPerKey());
     assertEquals(64, settings.limits().maxRegexLength());

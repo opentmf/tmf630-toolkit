@@ -14,6 +14,7 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class FieldSelectionUtilTest {
@@ -419,6 +420,59 @@ class FieldSelectionUtilTest {
     ctor.newInstance();
   }
 
+  // ---------- TMF630 Part 1 §4.3: id/href always present; fields=none ----------
+
+  @Test
+  void partialSelectionAlwaysIncludesIdAndHref() {
+    Map<String, Object> result = FieldSelectionUtil.fieldsToMap(ticket(), "description");
+
+    assertEquals("42", result.get("id"));
+    assertEquals("/tickets/42", result.get("href"));
+    assertEquals("complaint", result.get("description"));
+    assertFalse(result.containsKey("status"), "status was not requested");
+  }
+
+  @Test
+  void explicitlySelectedIdIsNotDuplicated() {
+    Map<String, Object> result = FieldSelectionUtil.fieldsToMap(ticket(), "id,description");
+
+    assertEquals(Set.of("id", "description", "href"), result.keySet());
+    assertEquals("42", result.get("id"));
+  }
+
+  @Test
+  void fieldsNoneReturnsOnlyIdAndHref() {
+    Map<String, Object> result = FieldSelectionUtil.fieldsToMap(ticket(), "none");
+
+    assertEquals(Set.of("id", "href"), result.keySet());
+    assertEquals("42", result.get("id"));
+    assertEquals("/tickets/42", result.get("href"));
+  }
+
+  @Test
+  void selectionOnTypeWithoutIdOrHrefInjectsNothing() {
+    Map<String, Object> result =
+        FieldSelectionUtil.fieldsToMap(new PersonRecord("Alice", 30, "X"), "name");
+
+    assertEquals(Set.of("name"), result.keySet());
+  }
+
+  @Test
+  void fullRepresentationWithoutFieldsParamStaysComplete() {
+    Map<String, Object> result = FieldSelectionUtil.fieldsToMap(ticket());
+
+    assertEquals(Set.of("id", "href", "description", "status"), result.keySet());
+  }
+
+  private static Ticket ticket() {
+    Ticket t = new Ticket();
+    t.setId("42");
+    t.setHref("/tickets/42");
+    t.setDescription("complaint");
+    t.setStatus("open");
+    return t;
+  }
+
   record PersonRecord(String name, int age, String city) {}
 
   record AddressRecord(String city, CountryRecord country) {}
@@ -632,6 +686,45 @@ class FieldSelectionUtilTest {
 
     public void setMappedChildren(List<Map<String, Child>> mappedChildren) {
       this.mappedChildren = mappedChildren;
+    }
+  }
+
+  static class Ticket {
+    private String id;
+    private String href;
+    private String description;
+    private String status;
+
+    public String getId() {
+      return id;
+    }
+
+    public void setId(String id) {
+      this.id = id;
+    }
+
+    public String getHref() {
+      return href;
+    }
+
+    public void setHref(String href) {
+      this.href = href;
+    }
+
+    public String getDescription() {
+      return description;
+    }
+
+    public void setDescription(String description) {
+      this.description = description;
+    }
+
+    public String getStatus() {
+      return status;
+    }
+
+    public void setStatus(String status) {
+      this.status = status;
     }
   }
 

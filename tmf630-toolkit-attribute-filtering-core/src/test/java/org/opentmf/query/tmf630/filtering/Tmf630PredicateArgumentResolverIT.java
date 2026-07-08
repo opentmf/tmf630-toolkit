@@ -26,6 +26,8 @@ class Tmf630PredicateArgumentResolverIT {
     Tmf630FilterSettings settings =
         new Tmf630FilterSettings(
             true,
+            true,
+            true,
             CombineMode.OR,
             false,
             false,

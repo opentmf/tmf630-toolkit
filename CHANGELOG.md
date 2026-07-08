@@ -2,6 +2,145 @@
 
 All notable changes to `tmf630-toolkit` are documented in this file.
 
+## [2.1.4] - 2026-07-06
+
+### Added
+- **TMF630 Part 1 §4.3 partial-representation identity rule: `id` and `href`
+  are now always present, and `fields=none` is supported.** When a `fields=`
+  selection is applied (via `@Tmf630Response`, `Tmf630Util.tmfPage`, or
+  `FieldSelectionUtil` directly), the resource's `id` and `href` properties
+  are included whether requested or not, per the spec's "id and href
+  attributes are always present". `fields=none` selects no resource
+  properties, so the response carries exactly the identity fields. Both apply
+  only when the type exposes `id`/`href` as scalar properties — DTOs without
+  them are unaffected, as are full representations (no `fields=` parameter).
+  Note this is a deliberate behavior change for consumers that relied on
+  partial representations omitting an unrequested `id`.
+- **TMF630 Part 1 §4.4 URL-encoded operator literal forms.** The operator
+  table's second spelling — the operator embedded in the parameter name,
+  e.g. `?dateTime%3E2013-04-20` (decoded name `dateTime>2013-04-20`) — now
+  maps onto the equivalent suffix operator: `>` → `.gt`, `>=` → `.gte`,
+  `<` → `.lt`, `<=` → `.lte`, `==` → `.eq` (explicit: never value-list
+  split), `=~` → `.regex` (gated by `regex.enabled`). Values may sit in the
+  name remainder or in the value slot (`?field%3E=v`). The spec's ORING
+  example (`?dateTime%3C2013-04-20;dateTime%3C2017-04-20`, one decoded name
+  carrying two expressions) splits on `;` with the duplicate `<field><op>`
+  prefix stripped and folds like repeated parameters. Keys are rewritten
+  before parsing, so allowlists, limits, and conversion apply unchanged.
+- **TMF630 Part 6 `=~` regex predicate in the JSONPath `filter=` grammar.**
+  `?filter=$[?(@.status =~ /Resol.*/i)]` now parses: `/pattern/` maps to the
+  existing REGEX predicate and `/pattern/i` to REGEXI, exactly the spec's
+  literal form. Composes inside array-match correlation.
+  Gated by the same `regex.enabled` (default `false`) and `regex.max-length`
+  settings as the attribute-side operators; flags other than `i` are
+  rejected (the spec's own table notes library variance — silently ignoring
+  flags would change match semantics).
+- **`depth` and `expand` are now reserved parameter names.** They are the
+  TMF630 Part 2 Ch.3 dereferencing directives; the toolkit does not
+  implement reference expansion (application-level data access), but no
+  longer misreads a spec-compliant `?depth=2` as an attribute filter. The
+  explicit-operator escape (`depth.eq=2`) keeps same-named entity fields
+  filterable.
+- **TMF630 Part 1 §4.4 explicit `;` ORing for implicit-eq attribute
+  filters.** Both spec shapes are now supported: the value list
+  `?attr=v1;v2` and the repeated-pair form `?attr=v1;attr=v2` (servlet
+  containers deliver the whole `;`-tail inside the first value; the
+  redundant `<sameKey>=` prefix is stripped per segment). Semicolons
+  compose with the comma value list — `?attr=a,b;c` ORs all three — and
+  splitting happens in a single pass so an escape intended for one
+  separator is never consumed by the other. Same rules as the comma form:
+  implicit-eq only (explicit operators keep literals), `\;` embeds a
+  literal semicolon, per-element type conversion, elements count toward
+  `max-values-per-key`/`max-clauses`. A segment prefixed with a
+  *different* key (`?a=x;b=y`) stays a literal element — cross-attribute
+  `;` pairs are out of scope. New setting
+  `opentmf.tmf630.attribute-filtering.implicit-eq-semicolon-or` (default
+  `true`, per spec) restores the previous literal behaviour when `false`.
+  Note: containers URL-decode `%3B` before the resolver runs, so an
+  encoded semicolon cannot be distinguished from a raw one — the escape
+  hatches are `\;` and explicit operators.
+- **Positional-index sort `[N]` in the JsonPath sort grammar.** TMF630
+  Part 6 allows any JSON Path expression as a Sort-Field and defines
+  0-based index access, so `?sort=$.arr[0].value` and the predicate+index
+  shape `?sort=$.outer[?(@.id=='X')].sub[1].value` now parse and execute on
+  `Tmf630MongoCorrelatedSortExecutor`. Semantics are LITERAL-POSITIONAL
+  (`$arrayElemAt`), deliberately bypassing the min/max direction fold
+  used for `[*]`/plain array paths; an out-of-bounds index yields a null
+  sort key → nulls-last per the existing contract. Coercion and
+  aggregator wrappers compose (`$.arr[0].num(value)` converts the picked
+  element only; aggregator leaves map over just the picked element via
+  `$slice`). The AST models this as an optional `index` on `ArrayHop`
+  (source-compatible constructor retained), and the translator's only
+  change is picking `$arrayElemAt` instead of `$first` where an index is
+  present — predicate hops are byte-identical. The bare simple-rich
+  spelling `arr[0].value` keeps its default-key meaning (`arr[id=0]`) for
+  backward compatibility; positional requires the JsonPath form. A new
+  `JSONPATH_INDEX` column in the cross-executor parity matrix pins
+  filter+`[N]` row/total equivalence with the plain find path (the
+  `$match` continues through the 2.1.4 `QueryMapper` pass).
+
+- **TMF630 value-list (comma-OR) semantics for implicit-eq attribute
+  filters.** `?attr=a,b` now matches `a` OR `b`, equivalent to the
+  repeated-parameter form `?attr=a&attr=b` and to `?attr.in=a,b`. This
+  completes the value-list support added for `.in`/`.nin`/`.between` in
+  2.1.0 — the single-value branch previously converted the raw value as one
+  literal, so `?attr=a,b` became `EQ("a,b")` and silently matched nothing.
+  Splitting reuses the existing multi-value CSV parser (`\,` escapes a
+  literal comma, blank segments are dropped), each element is
+  type-converted individually (so `?num=1,2` works on numeric fields), and
+  every element counts toward `max-values-per-key` and `max-clauses`
+  exactly as in the multi-value branch. Mixed forms compose per
+  `combine-repeated-values`: `?attr=a,b&attr=c` folds to `(a OR b) OR c`
+  under `OR` and `(a OR b) AND c` under `AND`. Only the implicit spelling
+  splits — every explicit single-value operator (`.eq`, `.ne`, `.like`,
+  ...) keeps its raw value as one literal, which is the documented escape
+  hatch for values that legitimately contain a comma. Reserved parameters
+  (`fields`, `sort`, ...) are untouched. New setting
+  `opentmf.tmf630.attribute-filtering.implicit-eq-csv-or` (default `true`,
+  per spec) restores the previous literal behaviour when set to `false`.
+
+- **New setting `opentmf.tmf630.attribute-filtering.isnull-semantics`
+  (`MISSING_ONLY` \| `NULLISH`, default `MISSING_ONLY`).** TMF630 Part 1
+  defines no null-test operator and Part 6's `[?(!@.field)]` glosses as
+  *"items that do not have the property"* — exactly the `$exists:false`
+  the toolkit emits by default, and the semantics MISSING_ONLY preserves
+  unchanged. Downstream consumers whose data model treats a missing
+  field, an explicit `null`, and an empty array as equivalent "no value"
+  states can opt into `NULLISH`: `?attr.isnull=true` (and the `filter=`
+  forms `!@.field` / `== null`) then also match documents where the
+  field is explicitly `null`. The widening applies on Mongo
+  `@Document` roots — Spring Data's `QueryMapper` post-processing pass
+  strips size / typed-empty-list clauses from the OR, so empty-array
+  matching on the plain find path requires a companion size-based
+  predicate; on JPA `@Entity` roots the widening is skipped because
+  SQL's `IS NULL` already captures the only "no value" state for
+  scalars, and applying the `NOT IN (NULL)` complement would poison
+  IS_NOT_NULL to zero rows via SQL trilean UNKNOWN. IS_NOT_NULL under
+  NULLISH is the exact boolean complement of the widened IS_NULL
+  (built as an AND of per-branch complements, never `NOT (...)`).
+
+### Fixed
+- **Mongo aggregation executor no longer returns an empty page when a
+  filter targets a `@Field`-renamed path.** When a QueryDSL attribute
+  filter referenced a field whose BSON name differs from its Java name —
+  any `@Field("...")` rename, including sub-fields of an `@Id`
+  composite-key type and `id` fields of embedded list elements stored as
+  `_id` — AND the sort routed through `Tmf630MongoCorrelatedSortExecutor`,
+  the request returned zero rows and `total=0` while the same filter on the
+  plain `repository.findAll` path matched correctly. Root cause: dotted
+  Java paths arrive in the predicate as a single path element, so
+  `NoRefDocumentSerializer` could not resolve them per-segment and emitted
+  the Java name verbatim into a raw `$match` stage that Spring Data's
+  `QueryMapper` never remaps (the stage is added as a raw aggregation
+  lambda). The executor now runs the serialized predicate through the same
+  `QueryMapper` (built from `mongoTemplate.getConverter()`) that the plain
+  find path uses, against the target entity's own mapping metadata — fully
+  generic, no name special-casing. The `$match + $count` total pipeline
+  shares the same stage list, so data page and total are fixed together. A
+  cross-executor parity IT (5 filters × 4 sorts against an `@Id`
+  composite-key fixture) pins executor results to `repository.findAll`
+  equivalence.
+
 ## [2.1.3] - 2026-06-09
 
 ### Fixed

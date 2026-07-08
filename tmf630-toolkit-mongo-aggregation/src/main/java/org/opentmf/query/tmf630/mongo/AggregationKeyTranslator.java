@@ -67,7 +67,14 @@ public final class AggregationKeyTranslator {
 
     if (idx == hops.size() - 1) {
       if (containsAggregator(leaf)) {
-        Object aggregated = translateAggregatedLeaf(leaf, filterStage, resolver, elementType);
+        // With a positional index the aggregator maps over just the picked element:
+        // $slice keeps the array shape $map expects and yields [] out of bounds,
+        // which the $min/$max reducer folds to null (→ nulls-last).
+        Document aggInput =
+            hop.index() == null
+                ? filterStage
+                : new Document("$slice", List.of(filterStage, hop.index(), 1));
+        Object aggregated = translateAggregatedLeaf(leaf, aggInput, resolver, elementType);
         return wrapDocument(aggregated);
       }
       String varName = "m" + idx;
@@ -81,7 +88,7 @@ public final class AggregationKeyTranslator {
       return new Document(
           "$let",
           new Document()
-              .append("vars", new Document(varName, new Document("$first", filterStage)))
+              .append("vars", new Document(varName, pickElement(filterStage, hop)))
               .append(
                   "in",
                   translatePerElement(
@@ -92,10 +99,23 @@ public final class AggregationKeyTranslator {
     return new Document(
         "$let",
         new Document()
-            .append("vars", new Document(varName, new Document("$first", filterStage)))
+            .append("vars", new Document(varName, pickElement(filterStage, hop)))
             .append(
                 "in",
                 translateHop(hops, idx + 1, leaf, resolver, elementType, leafArrayReducerOp)));
+  }
+
+  /**
+   * Selects the single element a hop resolves to: the first match for predicate hops, or
+   * the LITERAL element at the hop's positional {@code [N]} index. {@code $arrayElemAt}
+   * past the end of the array yields MISSING, which flows into the executor's existing
+   * missing-key contract (nulls-last). The positional pick deliberately bypasses the
+   * min/max direction fold — TMF630 Part 6 index access selects by position, not extreme.
+   */
+  private static Document pickElement(Document filterStage, JsonPathSortAst.ArrayHop hop) {
+    return hop.index() == null
+        ? new Document("$first", filterStage)
+        : new Document("$arrayElemAt", List.of(filterStage, hop.index()));
   }
 
   private static boolean containsAggregator(JsonPathSortAst.LeafExpression leaf) {

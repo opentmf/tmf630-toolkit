@@ -3,7 +3,6 @@ package org.opentmf.query.tmf630.filtering;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -69,6 +68,92 @@ class JsonPathFilterPredicateBuilderTest {
             settings(UnknownParamBehavior.REJECT, true));
 
     assertNotNull(predicate);
+  }
+
+  // ---------- TMF630 Part 6 operator table: =~ regex predicate ----------
+
+  @Test
+  void regexOperatorBuildsMatchesPredicateWhenRegexEnabled() {
+    Predicate predicate =
+        regexEnabledBuild("$[?(@.name =~ /^ab.*/)]");
+
+    assertNotNull(predicate);
+    assertTrue(predicate.toString().contains("^ab.*"));
+  }
+
+  @Test
+  void regexIgnoreCaseFlagProducesDifferentPredicateThanCaseSensitive() {
+    Predicate sensitive = regexEnabledBuild("$[?(@.name =~ /^ab.*/)]");
+    Predicate insensitive = regexEnabledBuild("$[?(@.name =~ /^ab.*/i)]");
+
+    assertTrue(insensitive.toString().contains("^ab.*"));
+    assertFalse(
+        sensitive.toString().equals(insensitive.toString()),
+        "/pattern/i must map to the ignore-case regex predicate");
+  }
+
+  @Test
+  void regexRequiresSlashPatternLiteral() {
+    // Part 6 defines only the /pattern/flags literal form for =~.
+    assertThrows(
+        TmfFilteringException.class,
+        () -> regexEnabledBuild("$[?(@.name =~ '^ab.*')]"));
+  }
+
+  @Test
+  void regexInsideArrayMatchCorrelation() {
+    Predicate predicate =
+        regexEnabledBuild("$[?(@.externalReference[?(@.name =~ /ORD.*/)])]");
+
+    assertNotNull(predicate);
+    assertTrue(predicate.toString().contains("ORD.*"));
+  }
+
+  @Test
+  void regexOperatorRejectedWhenRegexDisabled() {
+    FieldPathResolver pathResolver = new FieldPathResolver();
+    ValueConverter converter = new ValueConverter(new DefaultFormattingConversionService());
+    PredicateFactory factory = new PredicateFactory(false, 128);
+    JsonPathFilterPredicateBuilder builder =
+        new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
+
+    assertThrows(
+        TmfFilteringException.class,
+        () ->
+            builder.build(
+                Entity.class,
+                pathResolver.createRootPath(Entity.class),
+                "$[?(@.name =~ /^ab.*/)]",
+                Set.of("name"),
+                settings(UnknownParamBehavior.REJECT, true)));
+  }
+
+  @Test
+  void regexRejectsUnsupportedFlags() {
+    assertThrows(
+        TmfFilteringException.class,
+        () -> regexEnabledBuild("$[?(@.name =~ /^ab.*/gs)]"));
+  }
+
+  @Test
+  void regexRejectsUnterminatedPattern() {
+    assertThrows(
+        TmfFilteringException.class,
+        () -> regexEnabledBuild("$[?(@.name =~ /^ab.*)]"));
+  }
+
+  private Predicate regexEnabledBuild(String expression) {
+    FieldPathResolver pathResolver = new FieldPathResolver();
+    ValueConverter converter = new ValueConverter(new DefaultFormattingConversionService());
+    PredicateFactory factory = new PredicateFactory(true, 128);
+    JsonPathFilterPredicateBuilder builder =
+        new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
+    return builder.build(
+        Entity.class,
+        pathResolver.createRootPath(Entity.class),
+        expression,
+        Set.of("name", "externalReference", "externalReference.name"),
+        settings(UnknownParamBehavior.REJECT, true));
   }
 
   @Test
@@ -658,6 +743,8 @@ class JsonPathFilterPredicateBuilderTest {
     Tmf630FilterSettings limitedSettings =
         new Tmf630FilterSettings(
             settings.implicitEqEnabled(),
+            settings.implicitEqCsvOr(),
+            settings.implicitEqSemicolonOr(),
             settings.combineRepeatedValues(),
             settings.allowNestedPathsJpa(),
             settings.allowNestedPathsDocdb(),
@@ -715,6 +802,8 @@ class JsonPathFilterPredicateBuilderTest {
 
     Tmf630FilterSettings splitSettings =
         new Tmf630FilterSettings(
+            true,
+            true,
             true,
             CombineMode.OR,
             true,
@@ -1037,6 +1126,8 @@ class JsonPathFilterPredicateBuilderTest {
     // on unknown JSON Path fields, IGNORE-flavoured tests still expect an empty
     // result.
     return new Tmf630FilterSettings(
+        true,
+        true,
         true,
         CombineMode.OR,
         allowNestedPaths,

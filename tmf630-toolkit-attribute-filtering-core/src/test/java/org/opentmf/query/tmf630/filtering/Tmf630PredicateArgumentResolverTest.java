@@ -1,6 +1,7 @@
 package org.opentmf.query.tmf630.filtering;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -52,6 +53,9 @@ class Tmf630PredicateArgumentResolverTest {
     request.setParameter("limit", "10");
     request.setParameter("fields", "name,age");
     request.setParameter("sort", "-name");
+    // TMF630 Part 2 Ch.3 directives — must never be treated as attribute filters.
+    request.setParameter("depth", "2");
+    request.setParameter("expand", "productOffering.productSpecification");
 
     Object predicate =
         resolver.resolveArgument(
@@ -108,6 +112,8 @@ class Tmf630PredicateArgumentResolverTest {
     Tmf630FilterSettings settings =
         new Tmf630FilterSettings(
             true,
+            true,
+            true,
             CombineMode.OR,
             false,
             false,
@@ -151,6 +157,8 @@ class Tmf630PredicateArgumentResolverTest {
     Tmf630FilterSettings settings =
         new Tmf630FilterSettings(
             true,
+            true,
+            true,
             CombineMode.OR,
             false,
             false,
@@ -193,6 +201,8 @@ class Tmf630PredicateArgumentResolverTest {
   void rejectsWhenPredicateLimitsExceeded() {
     Tmf630FilterSettings settings =
         new Tmf630FilterSettings(
+            true,
+            true,
             true,
             CombineMode.AND,
             false,
@@ -269,6 +279,8 @@ class Tmf630PredicateArgumentResolverTest {
     Tmf630FilterSettings settings =
         new Tmf630FilterSettings(
             true,
+            true,
+            true,
             CombineMode.OR,
             false,
             false,
@@ -311,6 +323,8 @@ class Tmf630PredicateArgumentResolverTest {
   void combinesMultiClauseAttributeBlockWithMultiConditionJsonPathUsingOr() throws Exception {
     Tmf630FilterSettings settings =
         new Tmf630FilterSettings(
+            true,
+            true,
             true,
             CombineMode.OR,
             false,
@@ -410,6 +424,8 @@ class Tmf630PredicateArgumentResolverTest {
     Tmf630FilterSettings settings =
         new Tmf630FilterSettings(
             true,
+            true,
+            true,
             CombineMode.OR,
             false,
             false,
@@ -452,6 +468,8 @@ class Tmf630PredicateArgumentResolverTest {
     Tmf630FilterSettings settings =
         new Tmf630FilterSettings(
             true,
+            true,
+            true,
             CombineMode.OR,
             false,
             false,
@@ -488,9 +506,402 @@ class Tmf630PredicateArgumentResolverTest {
                 null));
   }
 
+  // ---------- TMF630 value-list (comma-OR) semantics for implicit eq ----------
+
+  @Test
+  void implicitEqCsvSplitsIntoOrOfEqualsMatchingRepeatedParamForm() throws Exception {
+    Tmf630PredicateArgumentResolver resolver = csvResolver(CombineMode.OR, 20, true);
+
+    MockHttpServletRequest csv = new MockHttpServletRequest();
+    csv.setParameter("name", "a,b");
+    MockHttpServletRequest repeated = new MockHttpServletRequest();
+    repeated.setParameter("name", "a", "b");
+
+    String csvPredicate = resolveToString(resolver, csv);
+    assertEquals(resolveToString(resolver, repeated), csvPredicate);
+    assertEquals("entity.name = a || entity.name = b", csvPredicate);
+  }
+
+  @Test
+  void implicitEqCsvComposesWithRepeatedParamsPerCombineMode() throws Exception {
+    Tmf630PredicateArgumentResolver orResolver = csvResolver(CombineMode.OR, 20, true);
+    MockHttpServletRequest mixed = new MockHttpServletRequest();
+    mixed.setParameter("name", "a,b", "c");
+    MockHttpServletRequest repeated = new MockHttpServletRequest();
+    repeated.setParameter("name", "a", "b", "c");
+
+    // Under OR the value-list group collapses into the same OR chain as three repeated values.
+    assertEquals(resolveToString(orResolver, repeated), resolveToString(orResolver, mixed));
+
+    // Under AND the per-value groups compose per combineRepeatedValues: (a OR b) AND c.
+    Tmf630PredicateArgumentResolver andResolver = csvResolver(CombineMode.AND, 20, true);
+    assertEquals(
+        "(entity.name = a || entity.name = b) && entity.name = c",
+        resolveToString(andResolver, mixed));
+  }
+
+  @Test
+  void explicitEqKeepsCommaAsLiteralEscapeHatch() throws Exception {
+    Tmf630PredicateArgumentResolver resolver = csvResolver(CombineMode.OR, 20, true);
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setParameter("name.eq", "a,b");
+
+    assertEquals("entity.name = a,b", resolveToString(resolver, request));
+  }
+
+  @Test
+  void otherExplicitSingleValueOperatorsKeepCommaAsLiteral() throws Exception {
+    Tmf630PredicateArgumentResolver resolver = csvResolver(CombineMode.OR, 20, true);
+
+    MockHttpServletRequest ne = new MockHttpServletRequest();
+    ne.setParameter("name.ne", "a,b");
+    assertTrue(resolveToString(resolver, ne).contains("a,b"));
+
+    MockHttpServletRequest like = new MockHttpServletRequest();
+    like.setParameter("name.like", "a,b");
+    assertTrue(resolveToString(resolver, like).contains("a,b"));
+  }
+
+  @Test
+  void explicitInStillSplitsAndCoversSameElementsAsImplicitEq() throws Exception {
+    Tmf630PredicateArgumentResolver resolver = csvResolver(CombineMode.OR, 20, true);
+
+    MockHttpServletRequest in = new MockHttpServletRequest();
+    in.setParameter("name.in", "a,b");
+    String inPredicate = resolveToString(resolver, in);
+    assertEquals("entity.name in [a, b]", inPredicate);
+
+    // Same elements, semantically equivalent OR-of-eq form for the implicit spelling.
+    MockHttpServletRequest implicit = new MockHttpServletRequest();
+    implicit.setParameter("name", "a,b");
+    assertEquals("entity.name = a || entity.name = b", resolveToString(resolver, implicit));
+  }
+
+  @Test
+  void implicitEqCsvConvertsEachElementToFieldType() throws Exception {
+    Tmf630PredicateArgumentResolver resolver = csvResolver(CombineMode.OR, 20, true);
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setParameter("age", "1,2");
+
+    // Pre-split behavior could not even convert the literal "1,2" to Integer.
+    assertEquals("entity.age = 1 || entity.age = 2", resolveToString(resolver, request));
+  }
+
+  @Test
+  void implicitEqCsvOnNestedPathSplitsValueNeverKey() throws Exception {
+    Tmf630PredicateArgumentResolver resolver = csvResolver(CombineMode.OR, 20, true);
+    MockHttpServletRequest csv = new MockHttpServletRequest();
+    csv.setParameter("ref.code", "x,y");
+    MockHttpServletRequest repeated = new MockHttpServletRequest();
+    repeated.setParameter("ref.code", "x", "y");
+
+    String csvPredicate = resolveToString(resolver, csv);
+    assertEquals(resolveToString(resolver, repeated), csvPredicate);
+    assertEquals("entity.ref.code = x || entity.ref.code = y", csvPredicate);
+  }
+
+  @Test
+  void implicitEqCsvDropsBlankSegments() throws Exception {
+    Tmf630PredicateArgumentResolver resolver = csvResolver(CombineMode.OR, 20, true);
+    MockHttpServletRequest csv = new MockHttpServletRequest();
+    csv.setParameter("name", "a,,b,");
+    MockHttpServletRequest repeated = new MockHttpServletRequest();
+    repeated.setParameter("name", "a", "b");
+
+    assertEquals(resolveToString(resolver, repeated), resolveToString(resolver, csv));
+  }
+
+  @Test
+  void implicitEqEscapedCommaStaysLiteral() throws Exception {
+    Tmf630PredicateArgumentResolver resolver = csvResolver(CombineMode.OR, 20, true);
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setParameter("name", "a\\,b");
+
+    assertEquals("entity.name = a,b", resolveToString(resolver, request));
+  }
+
+  @Test
+  void implicitEqCsvEnforcesMaxValuesPerKeyOnElementCount() {
+    Tmf630PredicateArgumentResolver resolver = csvResolver(CombineMode.OR, 2, true);
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setParameter("name", "a,b,c");
+
+    assertThrows(
+        TmfFilteringException.class,
+        () ->
+            resolver.resolveArgument(
+                predicateParameter(), null, new ServletWebRequest(request), null));
+  }
+
+  @Test
+  void implicitEqCsvToggleOffRestoresLiteralBehavior() throws Exception {
+    Tmf630PredicateArgumentResolver resolver = csvResolver(CombineMode.OR, 20, false);
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setParameter("name", "a,b");
+
+    assertEquals("entity.name = a,b", resolveToString(resolver, request));
+  }
+
+  // ---------- TMF630 Part 1 §4.4 URL-encoded operator literal form ----------
+  // ?dateTime%3E2013-04-20 decodes to a parameter NAME containing the operator
+  // ("dateTime>2013-04-20") because encoded chars are not name/value separators.
+
+  @Test
+  void encodedComparisonLiteralsInParamNameMapToSuffixOperators() throws Exception {
+    Tmf630PredicateArgumentResolver resolver = csvResolver(CombineMode.OR, 20, true);
+
+    MockHttpServletRequest gt = new MockHttpServletRequest();
+    gt.setParameter("age>18", "");
+    assertEquals("entity.age > 18", resolveToString(resolver, gt));
+
+    MockHttpServletRequest gte = new MockHttpServletRequest();
+    gte.setParameter("age>=18", "");
+    assertEquals("entity.age >= 18", resolveToString(resolver, gte));
+
+    MockHttpServletRequest lt = new MockHttpServletRequest();
+    lt.setParameter("age<65", "");
+    assertEquals("entity.age < 65", resolveToString(resolver, lt));
+
+    MockHttpServletRequest lte = new MockHttpServletRequest();
+    lte.setParameter("age<=65", "");
+    assertEquals("entity.age <= 65", resolveToString(resolver, lte));
+  }
+
+  @Test
+  void encodedEqualsLiteralIsExplicitEqAndKeepsCommasLiteral() throws Exception {
+    Tmf630PredicateArgumentResolver resolver = csvResolver(CombineMode.OR, 20, true);
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setParameter("name==a,b", "");
+
+    // '==' is the explicit EQ spelling: never value-list split.
+    assertEquals("entity.name = a,b", resolveToString(resolver, request));
+  }
+
+  @Test
+  void encodedOperatorValueMaySitInTheValueSlot() throws Exception {
+    // A client sending ?age%3E=18 yields name "age>" with value "18".
+    Tmf630PredicateArgumentResolver resolver = csvResolver(CombineMode.OR, 20, true);
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setParameter("age>", "18");
+
+    assertEquals("entity.age > 18", resolveToString(resolver, request));
+  }
+
+  @Test
+  void encodedOringExampleFoldsSemicolonSeparatedExpressions() throws Exception {
+    // Spec example: ?dateTime%3C2013-04-20;dateTime%3C2017-04-20 — one decoded name
+    // carrying two full expressions; the duplicate "<field><op>" prefix is stripped.
+    Tmf630PredicateArgumentResolver resolver = csvResolver(CombineMode.OR, 20, true);
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setParameter("age<18;age<65", "");
+
+    assertEquals("entity.age < 18 || entity.age < 65", resolveToString(resolver, request));
+  }
+
+  @Test
+  void encodedRegexLiteralIsGatedByRegexEnabled() throws Exception {
+    // csvResolver builds PredicateFactory(regexEnabled=false) → 400.
+    Tmf630PredicateArgumentResolver disabled = csvResolver(CombineMode.OR, 20, true);
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setParameter("name=~^ab.*", "");
+    assertThrows(
+        TmfFilteringException.class,
+        () ->
+            disabled.resolveArgument(
+                predicateParameter(), null, new ServletWebRequest(request), null));
+
+    Tmf630FilterSettings settings =
+        new Tmf630FilterSettings(
+            true,
+            true,
+            true,
+            CombineMode.OR,
+            true,
+            true,
+            true,
+            new PredicateLimits(20, 20, 128),
+            AllowlistMode.ALLOW_ALL,
+            UnknownParamBehavior.REJECT,
+            UnknownParamBehavior.REJECT,
+            true,
+            2048,
+            UnknownParamBehavior.REJECT);
+    Tmf630PredicateArgumentResolver enabled =
+        new Tmf630PredicateArgumentResolver(
+            new ParamKeyParser(new OperatorRegistry(), true),
+            settings,
+            rootEntity -> Set.of(),
+            new FieldPathResolver(),
+            new ValueConverter(new DefaultFormattingConversionService()),
+            new PredicateFactory(true, 128),
+            new JsonPathFilterPredicateBuilder(
+                new FieldPathResolver(),
+                new ValueConverter(new DefaultFormattingConversionService()),
+                new PredicateFactory(true, 128)));
+    MockHttpServletRequest ok = new MockHttpServletRequest();
+    ok.setParameter("name=~^ab.*", "");
+    assertTrue(resolveToString(enabled, ok).contains("matches"));
+  }
+
+  // ---------- TMF630 Part 1 §4.4 explicit ';' ORing ----------
+
+  @Test
+  void implicitEqSemicolonSplitsIntoOrOfEquals() throws Exception {
+    Tmf630PredicateArgumentResolver resolver = csvResolver(CombineMode.OR, 20, true);
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setParameter("name", "ack;rejected");
+
+    assertEquals("entity.name = ack || entity.name = rejected", resolveToString(resolver, request));
+  }
+
+  @Test
+  void implicitEqSemicolonRepeatedPairFormStripsSameKeyPrefix() throws Exception {
+    // ?status=ack;status=rejected arrives as one value "ack;status=rejected" — the
+    // spec's repeated-pair form. The redundant "<sameKey>=" prefix is stripped.
+    Tmf630PredicateArgumentResolver resolver = csvResolver(CombineMode.OR, 20, true);
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setParameter("name", "ack;name=rejected");
+
+    assertEquals("entity.name = ack || entity.name = rejected", resolveToString(resolver, request));
+  }
+
+  @Test
+  void implicitEqSemicolonForeignKeyPrefixStaysLiteral() throws Exception {
+    // Cross-attribute pairs (?a=x;b=y) are out of scope: a segment prefixed with a
+    // DIFFERENT key is kept as a literal element, not silently reinterpreted.
+    Tmf630PredicateArgumentResolver resolver = csvResolver(CombineMode.OR, 20, true);
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setParameter("name", "ack;age=5");
+
+    assertEquals("entity.name = ack || entity.name = age=5", resolveToString(resolver, request));
+  }
+
+  @Test
+  void implicitEqSemicolonAndCommaCompose() throws Exception {
+    Tmf630PredicateArgumentResolver resolver = csvResolver(CombineMode.OR, 20, true);
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setParameter("name", "a,b;c");
+
+    assertEquals(
+        "entity.name = a || entity.name = b || entity.name = c",
+        resolveToString(resolver, request));
+  }
+
+  @Test
+  void explicitEqKeepsSemicolonAsLiteral() throws Exception {
+    Tmf630PredicateArgumentResolver resolver = csvResolver(CombineMode.OR, 20, true);
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setParameter("name.eq", "ack;rejected");
+
+    assertEquals("entity.name = ack;rejected", resolveToString(resolver, request));
+  }
+
+  @Test
+  void implicitEqEscapedSemicolonStaysLiteral() throws Exception {
+    Tmf630PredicateArgumentResolver resolver = csvResolver(CombineMode.OR, 20, true);
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setParameter("name", "a\\;b");
+
+    assertEquals("entity.name = a;b", resolveToString(resolver, request));
+  }
+
+  @Test
+  void implicitEqSemicolonToggleOffRestoresLiteralBehavior() throws Exception {
+    Tmf630PredicateArgumentResolver resolver =
+        csvResolver(CombineMode.OR, 20, true, false);
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setParameter("name", "ack;rejected");
+
+    assertEquals("entity.name = ack;rejected", resolveToString(resolver, request));
+  }
+
+  @Test
+  void implicitEqSemicolonElementsCountTowardMaxValuesPerKey() {
+    Tmf630PredicateArgumentResolver resolver = csvResolver(CombineMode.OR, 2, true);
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setParameter("name", "a;b;c");
+
+    assertThrows(
+        TmfFilteringException.class,
+        () ->
+            resolver.resolveArgument(
+                predicateParameter(), null, new ServletWebRequest(request), null));
+  }
+
+  @Test
+  void implicitEqValueOfOnlyCommasYieldsNoClause() throws Exception {
+    Tmf630PredicateArgumentResolver resolver = csvResolver(CombineMode.OR, 20, true);
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setParameter("name", ",");
+
+    Object predicate =
+        resolver.resolveArgument(predicateParameter(), null, new ServletWebRequest(request), null);
+    assertFalse(((com.querydsl.core.BooleanBuilder) predicate).hasValue());
+  }
+
+  @Test
+  void reservedFieldsParamIsNeverSplitIntoClauses() throws Exception {
+    Tmf630PredicateArgumentResolver resolver = csvResolver(CombineMode.OR, 20, true);
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setParameter("fields", "name,age");
+
+    Object predicate =
+        resolver.resolveArgument(predicateParameter(), null, new ServletWebRequest(request), null);
+    assertFalse(((com.querydsl.core.BooleanBuilder) predicate).hasValue());
+  }
+
+  private static String resolveToString(
+      Tmf630PredicateArgumentResolver resolver, MockHttpServletRequest request) throws Exception {
+    return resolver
+        .resolveArgument(predicateParameter(), null, new ServletWebRequest(request), null)
+        .toString();
+  }
+
+  private static Tmf630PredicateArgumentResolver csvResolver(
+      CombineMode combineRepeatedValues, int maxValuesPerKey, boolean implicitEqCsvOr) {
+    return csvResolver(combineRepeatedValues, maxValuesPerKey, implicitEqCsvOr, true);
+  }
+
+  private static Tmf630PredicateArgumentResolver csvResolver(
+      CombineMode combineRepeatedValues,
+      int maxValuesPerKey,
+      boolean implicitEqCsvOr,
+      boolean implicitEqSemicolonOr) {
+    Tmf630FilterSettings settings =
+        new Tmf630FilterSettings(
+            true,
+            implicitEqCsvOr,
+            implicitEqSemicolonOr,
+            combineRepeatedValues,
+            true,
+            true,
+            false,
+            new PredicateLimits(20, maxValuesPerKey, 128),
+            AllowlistMode.ALLOW_ALL,
+            UnknownParamBehavior.REJECT,
+            UnknownParamBehavior.REJECT,
+            true,
+            2048,
+            UnknownParamBehavior.REJECT);
+
+    return new Tmf630PredicateArgumentResolver(
+        new ParamKeyParser(new OperatorRegistry(), true),
+        settings,
+        rootEntity -> Set.of(),
+        new FieldPathResolver(),
+        new ValueConverter(new DefaultFormattingConversionService()),
+        new PredicateFactory(false, 128),
+        new JsonPathFilterPredicateBuilder(
+            new FieldPathResolver(),
+            new ValueConverter(new DefaultFormattingConversionService()),
+            new PredicateFactory(false, 128)));
+  }
+
   private static Tmf630PredicateArgumentResolver newResolver(AllowlistMode mode) {
     Tmf630FilterSettings settings =
         new Tmf630FilterSettings(
+            true,
+            true,
             true,
             CombineMode.OR,
             false,
@@ -545,5 +956,12 @@ class Tmf630PredicateArgumentResolverTest {
     private String name;
     @SuppressWarnings("unused")
     private Integer age;
+    @SuppressWarnings("unused")
+    private Ref ref;
+  }
+
+  private static class Ref {
+    @SuppressWarnings("unused")
+    private String code;
   }
 }

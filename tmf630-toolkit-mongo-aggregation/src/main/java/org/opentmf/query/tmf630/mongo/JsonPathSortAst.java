@@ -12,7 +12,18 @@ public final class JsonPathSortAst {
     }
   }
 
-  public record ArrayHop(String arrayPath, Predicate predicate) {}
+  /**
+   * One array traversal step. {@code index} carries a positional {@code [N]} selection
+   * (TMF630 Part 6 JSONPath 0-based index access): the hop picks the literal element at
+   * that position of the (predicate-filtered) array instead of the first match. A
+   * {@code null} index keeps the pre-existing first-match semantics.
+   */
+  public record ArrayHop(String arrayPath, Predicate predicate, Integer index) {
+
+    public ArrayHop(String arrayPath, Predicate predicate) {
+      this(arrayPath, predicate, null);
+    }
+  }
 
   public sealed interface Predicate
       permits AndPredicate, OrPredicate, ComparisonPredicate, AlwaysTruePredicate {}
