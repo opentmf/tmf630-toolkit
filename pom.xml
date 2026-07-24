@@ -78,7 +78,7 @@
     <maven.gpg.plugin.version>3.2.8</maven.gpg.plugin.version>
     <maven.release.plugin.version>3.3.1</maven.release.plugin.version>
     <central.publishing.maven.plugin.version>0.11.0</central.publishing.maven.plugin.version>
-    <sonar.maven.plugin.version>5.0.0.4389</sonar.maven.plugin.version>
+    <sonar.maven.plugin.version>5.7.0.6970</sonar.maven.plugin.version>
     <failsafe.includes.pattern>**/*IT.java</failsafe.includes.pattern>
     <tmf630.sql.it.datasource.url>jdbc:tc:postgresql:18.1-alpine:///db</tmf630.sql.it.datasource.url>
   </properties>
