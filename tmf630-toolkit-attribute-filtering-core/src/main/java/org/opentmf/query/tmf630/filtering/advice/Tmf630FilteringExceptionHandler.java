@@ -1,8 +1,7 @@
 package org.opentmf.query.tmf630.filtering.advice;
 
-import java.util.LinkedHashMap;
-import java.util.Map;
 import org.opentmf.query.tmf630.filtering.TmfFilteringException;
+import org.opentmf.query.tmf630.model.ErrorMessage;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
@@ -25,12 +24,13 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 public class Tmf630FilteringExceptionHandler {
 
   @ExceptionHandler(TmfFilteringException.class)
-  public ResponseEntity<Map<String, Object>> handle(TmfFilteringException ex) {
-    Map<String, Object> body = new LinkedHashMap<>();
-    body.put("code", String.valueOf(HttpStatus.BAD_REQUEST.value()));
-    body.put("status", HttpStatus.BAD_REQUEST.getReasonPhrase());
-    body.put("reason", "Invalid filter parameter.");
-    body.put("message", ex.getMessage());
+  public ResponseEntity<ErrorMessage> handle(TmfFilteringException ex) {
+    ErrorMessage body =
+        new ErrorMessage(
+            String.valueOf(HttpStatus.BAD_REQUEST.value()),
+            HttpStatus.BAD_REQUEST.getReasonPhrase(),
+            "Invalid filter parameter.",
+            ex.getMessage());
     return ResponseEntity.badRequest().body(body);
   }
 }

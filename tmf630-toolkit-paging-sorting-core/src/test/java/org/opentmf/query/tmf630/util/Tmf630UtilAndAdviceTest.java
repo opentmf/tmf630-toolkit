@@ -191,6 +191,90 @@ class Tmf630UtilAndAdviceTest {
     assertEquals(a.hashCode(), b.hashCode());
   }
 
+  // ---------- TMF-630 Part 1 §4.5 Link header for pagination navigation ----------
+
+  @Test
+  void linkHeaderIsAbsentWhenTotalIsZero() {
+    HttpHeaders headers = new HttpHeaders();
+    Tmf630Util.applyLinkHeader(headers, "http://host/api/x?offset=0&limit=10", 0, 0, 10);
+    assertEquals(null, headers.getFirst(HttpHeaders.LINK));
+  }
+
+  @Test
+  void linkHeaderOnFirstPageHasFirstNextLastNoPrev() {
+    HttpHeaders headers = new HttpHeaders();
+    // total=50, offset=0, limit=10 → we're at the first page. last page starts at 40.
+    Tmf630Util.applyLinkHeader(headers, "http://host/api/x?offset=0&limit=10", 50, 0, 10);
+    String link = headers.getFirst(HttpHeaders.LINK);
+    assertNotNull(link);
+    assertTrue(link.contains("offset=0"));
+    assertTrue(link.contains("rel=\"first\""));
+    assertTrue(link.contains("offset=10"));
+    assertTrue(link.contains("rel=\"next\""));
+    assertTrue(link.contains("offset=40"));
+    assertTrue(link.contains("rel=\"last\""));
+    assertFalse(link.contains("rel=\"prev\""), "First page must not emit rel=prev");
+  }
+
+  @Test
+  void linkHeaderOnMiddlePageHasAllFour() {
+    HttpHeaders headers = new HttpHeaders();
+    // total=50, offset=20, limit=10 → prev=10, next=30, last=40
+    Tmf630Util.applyLinkHeader(headers, "http://host/api/x?offset=20&limit=10", 50, 20, 10);
+    String link = headers.getFirst(HttpHeaders.LINK);
+    assertNotNull(link);
+    assertTrue(link.contains("offset=0") && link.contains("rel=\"first\""));
+    assertTrue(link.contains("offset=10") && link.contains("rel=\"prev\""));
+    assertTrue(link.contains("offset=30") && link.contains("rel=\"next\""));
+    assertTrue(link.contains("offset=40") && link.contains("rel=\"last\""));
+  }
+
+  @Test
+  void linkHeaderOnLastPageHasFirstPrevLastNoNext() {
+    HttpHeaders headers = new HttpHeaders();
+    // total=50, offset=40, limit=10 → we're at the last page. no next.
+    Tmf630Util.applyLinkHeader(headers, "http://host/api/x?offset=40&limit=10", 50, 40, 10);
+    String link = headers.getFirst(HttpHeaders.LINK);
+    assertNotNull(link);
+    assertTrue(link.contains("offset=0") && link.contains("rel=\"first\""));
+    assertTrue(link.contains("offset=30") && link.contains("rel=\"prev\""));
+    assertTrue(link.contains("offset=40") && link.contains("rel=\"last\""));
+    assertFalse(link.contains("rel=\"next\""), "Last page must not emit rel=next");
+  }
+
+  @Test
+  void linkHeaderOnSinglePageHasFirstAndLastOnly() {
+    HttpHeaders headers = new HttpHeaders();
+    // total=5, offset=0, limit=10 → everything fits in one page. no prev, no next.
+    Tmf630Util.applyLinkHeader(headers, "http://host/api/x?offset=0&limit=10", 5, 0, 10);
+    String link = headers.getFirst(HttpHeaders.LINK);
+    assertNotNull(link);
+    assertTrue(link.contains("rel=\"first\""));
+    assertTrue(link.contains("rel=\"last\""));
+    assertFalse(link.contains("rel=\"prev\""));
+    assertFalse(link.contains("rel=\"next\""));
+  }
+
+  @Test
+  void linkHeaderPreservesUnrelatedQueryParams() {
+    HttpHeaders headers = new HttpHeaders();
+    Tmf630Util.applyLinkHeader(
+        headers, "http://host/api/x?status=active&offset=0&limit=10", 30, 0, 10);
+    String link = headers.getFirst(HttpHeaders.LINK);
+    assertNotNull(link);
+    // The other query params must survive the offset= replacement round-trip.
+    assertTrue(link.contains("status=active"), link);
+  }
+
+  @Test
+  void applyLinkHeaderFromCurrentRequestSilentlyNoOpsOutsideRequestContext() {
+    // No RequestContextHolder attributes bound in a plain unit test — the helper must
+    // catch the IllegalStateException and return without adding a header.
+    HttpHeaders headers = new HttpHeaders();
+    Tmf630Util.applyLinkHeaderFromCurrentRequest(headers, 50, 0, 10);
+    assertEquals(null, headers.getFirst(HttpHeaders.LINK));
+  }
+
   public static class SamplePerson {
     private String name;
     private int age;

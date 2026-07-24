@@ -34,7 +34,7 @@ import org.springframework.test.web.servlet.MockMvc;
       "spring.datasource.url=jdbc:tc:postgresql:18.1-alpine:///db",
       "spring.datasource.driver-class-name=org.testcontainers.jdbc.ContainerDatabaseDriver",
       "opentmf.tmf630.attribute-filtering.allowlist.mode=DENY_ALL",
-      "opentmf.tmf630.attribute-filtering.allowlist.entities.JpaServiceOrderEntity=id,href,category,externalId,requestedStartDate,state",
+      "opentmf.tmf630.attribute-filtering.allowlist.entities.JpaServiceOrderEntity=id,href,category,externalId,requestedStartDate,state,tags",
       "opentmf.tmf630.attribute-filtering.onUnknownField=REJECT",
       "opentmf.tmf630.attribute-filtering.onUnknownOperator=REJECT"
     })
@@ -54,6 +54,7 @@ class Tmf630PredicateJpaParityIT {
     String json = readClasspathUtf8(DATASET_RESOURCE);
     JsonNode root = jsonMapper.readTree(json);
     List<JpaServiceOrderEntity> entities = new ArrayList<>();
+    int index = 0;
     for (JsonNode node : root) {
       JpaServiceOrderEntity entity = new JpaServiceOrderEntity();
       entity.setId(node.path("id").asText());
@@ -62,7 +63,16 @@ class Tmf630PredicateJpaParityIT {
       entity.setExternalId(node.path("externalId").asText());
       entity.setRequestedStartDate(node.path("requestedStartDate").asText());
       entity.setState(node.path("state").asText());
+      // Deterministic length() fixture: exactly one entity carries 3 tags and one
+      // carries 2 tags; the rest have 0. Anchoring on index keeps counts stable if
+      // the fixture is reordered.
+      if (index == 0) {
+        entity.setTags(new ArrayList<>(List.of("a", "b", "c")));
+      } else if (index == 1) {
+        entity.setTags(new ArrayList<>(List.of("x", "y")));
+      }
       entities.add(entity);
+      index++;
     }
     repository.saveAll(entities);
   }
@@ -111,6 +121,58 @@ class Tmf630PredicateJpaParityIT {
   @Test
   void rejectsInvalidJsonPathOnJpaFlow() throws Exception {
     mockMvc.perform(get("/jpa-search").param("filter", "$.state")).andExpect(status().isBadRequest());
+  }
+
+  @Test
+  void lengthEqualsMatchesEntitiesWithExactlyThatManyElements() throws Exception {
+    // The setUp seeds index 0 with 3 tags and index 1 with 2 tags; pinning by their
+    // hrefs proves length()==N matches the intended entity and not neighbours.
+    mockMvc
+        .perform(get("/jpa-search").param("filter", "$[?(@.tags.length()==3)]"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.length()").value(1))
+        .andExpect(jsonPath("$[0].id").value("6215245d7fce055f32210d79"));
+
+    mockMvc
+        .perform(get("/jpa-search").param("filter", "$[?(@.tags.length()==2)]"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.length()").value(1))
+        .andExpect(jsonPath("$[0].id").value("621524e67fce055f32210d7a"));
+  }
+
+  @Test
+  void lengthEqualsZeroExcludesTaggedEntities() throws Exception {
+    // Pin the response via the fixture's known href for the first entity — index 0
+    // is tagged with 3 elements, so length()==0 combined with that href must return
+    // no rows (proves length()==0 does not silently match a non-empty collection).
+    mockMvc
+        .perform(
+            get("/jpa-search")
+                .param("href.eq", "/tmf-api/serviceOrdering/v4/serviceOrder/6215245d7fce055f32210d79")
+                .param("filter", "$[?(@.tags.length()==0)]"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.length()").value(0));
+  }
+
+  @Test
+  void rejectsLengthOnScalarLeafJsonPathOnJpaFlow() throws Exception {
+    mockMvc
+        .perform(get("/jpa-search").param("filter", "$[?(@.state.length()==5)]"))
+        .andExpect(status().isBadRequest());
+  }
+
+  @Test
+  void rejectsLengthWithNonEqualsComparatorJsonPathOnJpaFlow() throws Exception {
+    mockMvc
+        .perform(get("/jpa-search").param("filter", "$[?(@.tags.length()>0)]"))
+        .andExpect(status().isBadRequest());
+  }
+
+  @Test
+  void rejectsPositionalIndexJsonPathOnJpaFlow() throws Exception {
+    mockMvc
+        .perform(get("/jpa-search").param("filter", "$[?(@.externalReference[0].id == 'X')]"))
+        .andExpect(status().isBadRequest());
   }
 
   @Test

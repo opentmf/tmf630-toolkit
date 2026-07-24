@@ -341,11 +341,42 @@ public class JsonPathFilterPredicateBuilder {
       return nested.map(p -> buildElemMatchPredicate(resolvedArrayPath.collectionPath(), p));
     }
 
+    if (node instanceof LengthComparisonNode length) {
+      String effectivePath = allowlistPrefix + stripPositionalIndices(length.fieldPath());
+      if (!isAllowedField(effectivePath, allowlist, settings.allowlistMode())) {
+        if (settings.onUnknownJsonPathField() == UnknownParamBehavior.REJECT) {
+          throw new TmfFilteringException("Unknown or disallowed field: " + effectivePath);
+        }
+        return Optional.empty();
+      }
+      final ResolvedField resolvedField;
+      try {
+        resolvedField = pathResolver.resolve(rootEntity, length.fieldPath(), allowNestedPaths);
+      } catch (TmfFilteringException ex) {
+        if (settings.onUnknownJsonPathField() == UnknownParamBehavior.REJECT) {
+          throw ex;
+        }
+        return Optional.empty();
+      }
+      if (!resolvedField.leafIsCollection()) {
+        throw new TmfFilteringException(
+            "length() is supported only on collection fields: " + length.fieldPath());
+      }
+      return Optional.of(predicateFactory.buildLength(rootPath, resolvedField, length.size()));
+    }
+
     if (!(node instanceof ComparisonNode comparison)) {
       throw new TmfFilteringException("Unsupported jsonPath filter expression.");
     }
 
-    String effectiveFieldPath = allowlistPrefix + comparison.fieldPath();
+    if (isJpaEntity(rootEntity) && containsPositionalIndex(comparison.fieldPath())) {
+      throw new TmfFilteringException(
+          "Positional index [N] in jsonPath filter is supported only for document databases.");
+    }
+
+    // The allowlist is authored by JavaBean field name; positional index [N] narrows
+    // which element, not which field, so it is stripped before the allowlist check.
+    String effectiveFieldPath = allowlistPrefix + stripPositionalIndices(comparison.fieldPath());
     if (!isAllowedField(effectiveFieldPath, allowlist, settings.allowlistMode())) {
       if (settings.onUnknownJsonPathField() == UnknownParamBehavior.REJECT) {
         throw new TmfFilteringException("Unknown or disallowed field: " + effectiveFieldPath);
@@ -431,6 +462,22 @@ public class JsonPathFilterPredicateBuilder {
       return allowlist.isEmpty() || allowlist.contains(fieldPath);
     }
     return allowlist.contains(fieldPath);
+  }
+
+  private boolean containsPositionalIndex(String fieldPath) {
+    for (int i = 0; i < fieldPath.length() - 1; i++) {
+      if (fieldPath.charAt(i) == '[' && Character.isDigit(fieldPath.charAt(i + 1))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private String stripPositionalIndices(String fieldPath) {
+    if (fieldPath.indexOf('[') < 0) {
+      return fieldPath;
+    }
+    return fieldPath.replaceAll("\\[\\d+]", "");
   }
 
   private boolean isJpaEntity(Class<?> type) {
@@ -544,6 +591,8 @@ public class JsonPathFilterPredicateBuilder {
   private record ComparisonNode(
       String fieldPath, ComparisonOperator operator, LiteralToken literal) implements Node {}
 
+  private record LengthComparisonNode(String fieldPath, int size) implements Node {}
+
   private enum ComparisonOperator {
     EQ,
     NE,
@@ -619,6 +668,12 @@ public class JsonPathFilterPredicateBuilder {
             new LiteralToken(LiteralKind.NULL, "null"));
       }
 
+      if (peek(TokenType.FIELD_LENGTH)) {
+        Token lengthField = tokens.get(index);
+        index++;
+        return parseLength(lengthField.text());
+      }
+
       Token fieldToken = expect(TokenType.FIELD, "Expected @.fieldPath in jsonPath filter.");
       if (fieldToken.text().contains("[?(")) {
         return parseArrayMatch(fieldToken.text());
@@ -641,6 +696,35 @@ public class JsonPathFilterPredicateBuilder {
 
       return new ComparisonNode(
           fieldToken.text().substring(2), operator, parseLiteral(literalToken.text()));
+    }
+
+    private Node parseLength(String fieldTokenText) {
+      // Reading-A scope: `length()==N` only. Non-`==` comparators and non-integer
+      // literals are rejected here so the message is specific to length(), not the
+      // generic "unsupported operator". The FIELD_LENGTH token text still carries
+      // the leading `@.` prefix that FIELD tokens carry — strip it consistently.
+      Token operatorToken =
+          expect(TokenType.OPERATOR, "length() must be followed by a comparison operator.");
+      if (!"==".equals(operatorToken.text())) {
+        throw new TmfFilteringException(
+            "length() supports only == comparison; use [?(...)] for non-empty checks.");
+      }
+      Token literalToken = expect(TokenType.LITERAL, "length() requires an integer literal.");
+      String raw = literalToken.text();
+      int value;
+      try {
+        value = Integer.parseInt(raw);
+      } catch (NumberFormatException ex) {
+        throw new TmfFilteringException("length() requires a non-negative integer literal.");
+      }
+      if (value < 0) {
+        throw new TmfFilteringException("length() requires a non-negative integer literal.");
+      }
+      String fieldPath = fieldTokenText.startsWith("@.") ? fieldTokenText.substring(2) : "";
+      if (fieldPath.isBlank()) {
+        throw new TmfFilteringException("length() requires a named collection field.");
+      }
+      return new LengthComparisonNode(fieldPath, value);
     }
 
     private Node parseArrayMatch(String fieldToken) {
@@ -791,6 +875,18 @@ public class JsonPathFilterPredicateBuilder {
                 throw new TmfFilteringException("Invalid array filter syntax in jsonPath filter.");
               }
               i++;
+            } else if (c == '[' && i + 1 < input.length() && Character.isDigit(input.charAt(i + 1))) {
+              // TMF630 Part 6 JSONPath positional index `[N]` — kept in the FIELD token
+              // verbatim so FieldPathResolver can translate it into a dotted numeric hop
+              // (`arr[2].leaf` → `arr.2.leaf`) that Mongo resolves natively.
+              int j = i + 1;
+              while (j < input.length() && Character.isDigit(input.charAt(j))) {
+                j++;
+              }
+              if (j >= input.length() || input.charAt(j) != ']') {
+                throw new TmfFilteringException("Malformed positional index in jsonPath filter.");
+              }
+              i = j + 1;
             } else {
               break;
             }
@@ -798,6 +894,15 @@ public class JsonPathFilterPredicateBuilder {
           String field = input.substring(start, i);
           if (!field.startsWith("@.")) {
             throw new TmfFilteringException("jsonPath field must start with @.: " + field);
+          }
+          // TMF630 Part 6 Functions table lists `length()` returning Integer.
+          // Consumed as part of the field token so parsePrimary can dispatch to
+          // the length-comparison branch instead of the plain field comparison.
+          if (field.endsWith(".length") && input.startsWith("()", i)) {
+            i += 2;
+            String base = field.substring(0, field.length() - ".length".length());
+            tokens.add(new Token(TokenType.FIELD_LENGTH, base));
+            continue;
           }
           tokens.add(new Token(TokenType.FIELD, field));
           continue;
@@ -903,6 +1008,7 @@ public class JsonPathFilterPredicateBuilder {
     NOT,
     OPERATOR,
     FIELD,
+    FIELD_LENGTH,
     LITERAL,
     EOF
   }

@@ -41,7 +41,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
     classes = Tmf630PredicateMongoIT.TestApp.class,
     properties = {
       "opentmf.tmf630.attribute-filtering.allowlist.mode=DENY_ALL",
-      "opentmf.tmf630.attribute-filtering.allowlist.entities.MongoSearchEntity=id,href,category,externalId,requestedStartDate,state,externalReference.id,externalReference.name",
+      "opentmf.tmf630.attribute-filtering.allowlist.entities.MongoSearchEntity=id,href,category,externalId,requestedStartDate,state,externalReference,externalReference.id,externalReference.name",
       "opentmf.tmf630.attribute-filtering.allowNestedPathsDocdb=true",
       "opentmf.tmf630.attribute-filtering.onUnknownField=REJECT",
       "opentmf.tmf630.attribute-filtering.onUnknownOperator=REJECT"
@@ -240,6 +240,69 @@ class Tmf630PredicateMongoIT {
 
     assertEquals(withoutWildcard, withWildcard);
     assertEquals(10, withWildcard);
+  }
+
+  @Test
+  void positionalIndexSelectsElementByZeroBasedIndex() {
+    // Seed's sort-fixture docs (category FILTER_SORT_IT) each carry a two-element
+    // externalReference array: [0] = {name: 'OTHER'}, [1] = {name: 'SORT_KEY'}.
+    // Part-6 [N] is 0-based, so both indexed forms should match all three docs.
+    long atZero =
+        countDocumentsByFilter(
+            "$[?(@.category == 'FILTER_SORT_IT' && @.externalReference[0].name == 'OTHER')]");
+    long atOne =
+        countDocumentsByFilter(
+            "$[?(@.category == 'FILTER_SORT_IT' && @.externalReference[1].name == 'SORT_KEY')]");
+    assertEquals(3, atZero);
+    assertEquals(3, atOne);
+  }
+
+  @Test
+  void positionalIndexReturnsNoMatchWhenNoElementAtThatIndexSatisfiesPredicate() {
+    // At [0] the seed stores 'OTHER'; asking for 'SORT_KEY' at [0] must not
+    // silently widen to any-element behavior.
+    long count =
+        countDocumentsByFilter(
+            "$[?(@.category == 'FILTER_SORT_IT' && @.externalReference[0].name == 'SORT_KEY')]");
+    assertEquals(0, count);
+  }
+
+  @Test
+  void lengthEqualsMatchesArraysOfExactlyThatSizeOnMongo() {
+    // The sort-fixture docs each carry a 2-element externalReference array
+    // ([OTHER, SORT_KEY]); length()==2 combined with the fixture's category
+    // pins the expected count to exactly 3.
+    long twoElem =
+        countDocumentsByFilter(
+            "$[?(@.category == 'FILTER_SORT_IT' && @.externalReference.length()==2)]");
+    assertEquals(3, twoElem);
+  }
+
+  @Test
+  void lengthEqualsZeroMatchesEmptyArrayOnMongo() {
+    // Seed an empty-array doc adjacent to the existing fixture and verify that
+    // length()==0 selects it (and only it) among that category. Uses the raw
+    // Mongo path to avoid perturbing shared seed loops.
+    mongoTemplate.getDb().getCollection("mongo_search_entity")
+        .insertOne(new Document("_id", "len0-doc")
+            .append("category", "LEN_ZERO_IT")
+            .append("externalReference", List.of()));
+    long empty =
+        countDocumentsByFilter(
+            "$[?(@.category == 'LEN_ZERO_IT' && @.externalReference.length()==0)]");
+    assertEquals(1, empty);
+  }
+
+  @Test
+  void positionalIndexOutOfRangeReturnsZeroRowsNotError() throws Exception {
+    // Mongo-native behavior: dotted numeric hop past the array length is not an
+    // error, it just doesn't match anything.
+    mockMvc
+        .perform(
+            get("/mongo-search")
+                .param("filter", "$[?(@.externalReference[99].name == 'anything')]"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.length()").value(0));
   }
 
   @Test

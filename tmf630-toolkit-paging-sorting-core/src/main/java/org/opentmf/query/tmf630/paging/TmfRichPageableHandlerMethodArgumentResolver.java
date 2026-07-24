@@ -3,6 +3,7 @@ package org.opentmf.query.tmf630.paging;
 import java.util.List;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
+import org.opentmf.query.tmf630.exception.TmfPagingException;
 import org.opentmf.query.tmf630.paging.config.Tmf630PagingSettings;
 import org.springframework.core.MethodParameter;
 import org.springframework.data.domain.PageRequest;
@@ -69,12 +70,12 @@ public class TmfRichPageableHandlerMethodArgumentResolver
     try {
       long value = Long.parseLong(raw);
       if (value < 0) {
-        throw new IllegalArgumentException(OFFSET + " must be >= 0");
+        throw new TmfPagingException(OFFSET + " must be >= 0");
       }
       return value;
     } catch (NumberFormatException e) {
       if (settings.strictMode()) {
-        throw new IllegalArgumentException(OFFSET + " must be numeric", e);
+        throw new TmfPagingException(OFFSET + " must be numeric", e);
       }
       return 0L;
     }
@@ -86,18 +87,18 @@ public class TmfRichPageableHandlerMethodArgumentResolver
       try {
         int value = Integer.parseInt(raw);
         if (value <= 0) {
-          throw new IllegalArgumentException(LIMIT + " must be > 0");
+          throw new TmfPagingException(LIMIT + " must be > 0");
         }
         limit = value;
       } catch (NumberFormatException e) {
         if (settings.strictMode()) {
-          throw new IllegalArgumentException(LIMIT + " must be numeric", e);
+          throw new TmfPagingException(LIMIT + " must be numeric", e);
         }
       }
     }
     limit = Math.min(limit, settings.maxLimit());
     if (limit <= 0) {
-      throw new IllegalArgumentException(LIMIT + " must be > 0");
+      throw new TmfPagingException(LIMIT + " must be > 0");
     }
     return limit;
   }

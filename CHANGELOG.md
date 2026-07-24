@@ -2,6 +2,69 @@
 
 All notable changes to `tmf630-toolkit` are documented in this file.
 
+## [2.1.5] - 2026-07-24
+
+### Added
+
+- **TMF630 Part 1 §4.5 `Link` header for pagination navigation.** Paged
+  responses (via `@Tmf630Response` on a `Page<>` return or via
+  `Tmf630Util.tmfPage(Page)`) now emit
+  `Link: <...offset=0...>; rel="first", <...>; rel="prev", <...>; rel="next",
+  <...>; rel="last"` alongside the existing `X-Total-Count`, `X-Result-Count`,
+  and `Content-Range` headers. `rel="prev"` is omitted on the first page and
+  `rel="next"` is omitted on the last page; `first` and `last` are always
+  present when the result set is non-empty. Unrelated query parameters
+  (`status=`, `filter=`, `sort=`, etc.) are preserved in the emitted URIs so
+  clients can navigate without reconstructing them. The helper is safe to
+  call outside a request context (silent no-op).
+- **TMF630 Part 1 §3.4 error body coverage for sort/paging parameter
+  errors.** New `TmfPagingException` (extends `IllegalArgumentException` for
+  backward compatibility) is thrown by `TmfSortParser`,
+  `TmfPageableHandlerMethodArgumentResolver`, and
+  `TmfRichPageableHandlerMethodArgumentResolver` for invalid `sort=`,
+  `offset=`, or `limit=` values. A new `Tmf630PagingExceptionHandler`
+  advice (auto-wired via `Tmf630ExceptionHandlingAutoConfiguration`) returns
+  `400 Bad Request` with the same TMF `ErrorMessage` body shape as
+  `Tmf630FilteringExceptionHandler` and `Tmf630RangeExceptionHandler`.
+  Previously these errors fell through to Spring's default 400 translator
+  and produced a non-TMF body, so a consumer trying to deserialize errors
+  uniformly across `filter=`/`sort=`/`offset=`/`limit=` would fail on the
+  sort/paging side.
+- **TMF630 Part 1 §3.4 optional error fields.** `ErrorMessage` record
+  gains `referenceError`, `@type`, and `@schemaLocation` — all optional,
+  omitted from the JSON body when unset via `@JsonInclude(NON_NULL)`. The
+  existing four-argument constructor is preserved. `Tmf630FilteringExceptionHandler`
+  migrated from a `LinkedHashMap` body to the `ErrorMessage` record, so all
+  four handlers (filtering, sort/paging, range, and any consumer using
+  `ErrorMessage` directly) now produce byte-identical body shapes.
+- **TMF630 Part 6 positional index `[N]` in `filter=` field paths (Mongo).**
+  `filter=$[?(@.productOrderItem[2].state == 'completed')]` and multi-hop
+  `@.a[0].b[1].c` now parse and execute on document backends, resolved as a
+  dotted numeric path (`productOrderItem.2.state`) that MongoDB navigates
+  natively. Out-of-range indices match nothing (Mongo-native), not an error.
+  The allowlist is authored by JavaBean field name; `[N]` narrows the
+  element, not the field, so an allowlist entry `externalReference.id`
+  covers `externalReference[N].id` too. Positional index in `filter=` on
+  JPA backends is rejected with a clear `400` — element-N indexing is not
+  portable JPQL — mirroring the existing array-correlation guard.
+  Symmetric with the `[N]` positional segment shipped in the sort grammar
+  in 2.1.4; closes the filter-side gap.
+- **TMF630 Part 6 `length()` function in `filter=` on collection fields
+  (both backends).** `filter=$[?(@.tags.length() == 0)]` closes the
+  "companion size-based predicate" gap the 2.1.4 CHANGELOG named for
+  `isnull-semantics: NULLISH`, which deliberately excludes empty arrays on
+  the plain find path. Both backends emit through the standard QueryDSL
+  `Ops.COL_SIZE` fast path — `SIZE(coll) = N` on JPA, `{field: {$size: N}}`
+  on Mongo — so no raw `$expr` emission or Spring Data serializer override
+  is introduced. Scope is deliberately narrow: `== N` only on collection
+  fields. Non-`==` comparators (`!=`, `>`, `>=`, `<`, `<=`) and non-collection
+  leaves (strings, objects, scalars) are rejected at parse time with
+  specific `400` messages, each naming an escape hatch — this keeps the URL
+  grammar cross-backend-consistent (a URL that works on JPA and 400s on
+  Mongo would be a bug factory) and defers the raw-emission architectural
+  conversation until the JSONB backend forces it for all three backends
+  together.
+
 ## [2.1.4] - 2026-07-06
 
 ### Added

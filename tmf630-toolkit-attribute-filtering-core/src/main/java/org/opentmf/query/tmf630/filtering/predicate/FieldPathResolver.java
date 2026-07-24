@@ -24,15 +24,55 @@ public class FieldPathResolver {
     }
 
     Class<?> current = rootEntity;
-    for (String segment : fieldPath.split("\\.")) {
-      Field field = findField(current, segment);
+    boolean leafIsCollection = false;
+    StringBuilder resolvedPath = new StringBuilder();
+    String[] segments = fieldPath.split("\\.");
+    for (int i = 0; i < segments.length; i++) {
+      String segment = segments[i];
+      int bracket = segment.indexOf('[');
+      String name = bracket < 0 ? segment : segment.substring(0, bracket);
+      String indexDigits = bracket < 0 ? null : extractIndexDigits(segment, bracket, fieldPath);
+
+      Field field = findField(current, name);
       if (field == null) {
         throw new TmfFilteringException("Unknown field path: " + fieldPath);
       }
+
+      if (resolvedPath.length() > 0) {
+        resolvedPath.append('.');
+      }
+      resolvedPath.append(name);
+
+      boolean fieldIsCollection = Collection.class.isAssignableFrom(field.getType());
+      if (indexDigits != null) {
+        if (!fieldIsCollection) {
+          throw new TmfFilteringException(
+              "Positional index [N] requires a collection field: " + fieldPath);
+        }
+        resolvedPath.append('.').append(indexDigits);
+      }
+      boolean isLastSegment = i == segments.length - 1;
+      leafIsCollection = isLastSegment && fieldIsCollection && indexDigits == null;
       current = resolveFieldType(field);
     }
 
-    return new ResolvedField(fieldPath, current);
+    return new ResolvedField(resolvedPath.toString(), current, leafIsCollection);
+  }
+
+  private String extractIndexDigits(String segment, int bracket, String fullPath) {
+    if (!segment.endsWith("]")) {
+      throw new TmfFilteringException("Malformed positional index in field path: " + fullPath);
+    }
+    String digits = segment.substring(bracket + 1, segment.length() - 1);
+    if (digits.isEmpty()) {
+      throw new TmfFilteringException("Positional index [N] requires digits: " + fullPath);
+    }
+    for (int i = 0; i < digits.length(); i++) {
+      if (!Character.isDigit(digits.charAt(i))) {
+        throw new TmfFilteringException("Positional index [N] must be numeric: " + fullPath);
+      }
+    }
+    return digits;
   }
 
   private Field findField(Class<?> type, String name) {

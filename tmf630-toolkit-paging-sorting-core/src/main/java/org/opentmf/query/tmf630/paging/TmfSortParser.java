@@ -5,6 +5,7 @@ import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import org.opentmf.query.tmf630.exception.TmfPagingException;
 import org.springframework.data.domain.Sort;
 import org.springframework.util.StringUtils;
 
@@ -58,7 +59,7 @@ public class TmfSortParser {
 
         TmfSortTerm.Kind kind = classify(expression);
         if (kind != TmfSortTerm.Kind.PLAIN && !acceptCorrelated) {
-          throw new IllegalArgumentException(
+          throw new TmfPagingException(
               "Correlated sort terms ("
                   + kind.name().toLowerCase().replace('_', '-')
                   + ") are not supported in this context: "
@@ -77,10 +78,10 @@ public class TmfSortParser {
 
   private void validateProperty(String property) {
     if (!allowNestedProperties && property.contains(".")) {
-      throw new IllegalArgumentException("Nested sort properties are not allowed: " + property);
+      throw new TmfPagingException("Nested sort properties are not allowed: " + property);
     }
     if (!allowlist.isEmpty() && !allowlist.contains(property)) {
-      throw new IllegalArgumentException("Sort property is not allowed: " + property);
+      throw new TmfPagingException("Sort property is not allowed: " + property);
     }
   }
 

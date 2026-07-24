@@ -2176,6 +2176,65 @@ This library translates the nested `[?(...)]` pattern to a MongoDB `$elemMatch` 
 > **Warning — uncorrelated matching:**
 > Using separate attribute parameters like `externalReference.name.eq=ORDER_REFERENCE&externalReference.id.eq=OPCO-ORDER-012` does **not** guarantee that both values come from the same array element. An object with `name=ORDER_REFERENCE` on one reference and `id=OPCO-ORDER-012` on a **different** reference would be a false positive. Always use the nested `[?(...)]` form for correlated conditions on Mongo backends.
 
+#### Positional index `[N]` in filter paths (Mongo only, 2.1.5)
+
+TMF630 Part 6 lists `[n]` — "Selects the nth element from an array. Indexes
+are 0-based." — as a JSONPath path operator. `filter=` accepts positional
+`[N]` inside `@`-paths and resolves it as a dotted numeric hop
+(`productOrderItem[2].state` → `productOrderItem.2.state`), which MongoDB
+resolves natively:
+
+```
+$[?(@.productOrderItem[2].state == 'completed')]
+$[?(@.a[0].b[1].c == 'x')]
+```
+
+- **Mongo:** dotted numeric path is resolved natively — no `$expr`, no
+  aggregation stage. Out-of-range indices simply match nothing.
+- **JPA:** rejected with `400 Bad Request`. Element-N indexing is not
+  portable JPQL, and the toolkit will not silently fake it via a subquery.
+- Allowlist is authored by JavaBean field name; `[N]` narrows the element,
+  not the field, so an allowlist entry `externalReference.id` covers
+  `externalReference[N].id` too.
+
+#### `length()` on collection fields (2.1.5)
+
+TMF630 Part 6's Functions table lists `length()` returning Integer for an
+array. `filter=` accepts `length() == N` on collection fields; both backends
+serialize it through the standard QueryDSL `Ops.COL_SIZE` fast path
+(`SIZE(coll)=N` on JPA, `{field: {$size: N}}` on Mongo). This closes the
+"exists but is empty" gap named in the 2.1.4 CHANGELOG for `isnull-semantics:
+NULLISH`, which deliberately excludes empty arrays:
+
+```
+$[?(@.tags.length() == 0)]
+$[?(@.externalReference.length() == 3)]
+$[?(@.externalReference.length() == 0 || @.name == 'x')]
+```
+
+Deliberately narrow scope in 2.1.5 — all rejections return `400 Bad Request`
+with a specific message:
+
+- **`==` only.** `length() > 0` and every other comparator are rejected
+  (`"length() supports only == comparison; use [?(...)] for non-empty
+  checks"`). Cross-backend consistency: Mongo cannot express `>` / `<` on
+  `$size` without raw `$expr` emission through package-private Spring Data
+  internals, and shipping a URL grammar that works on JPA but 400s on Mongo
+  would be a bug factory.
+- **Collections only.** `length()` on a String, object, or scalar field is
+  rejected (`"length() is supported only on collection fields"`). TMF-630
+  Part 6 defines `length()` for arrays; string/object length are out of the
+  normative spec.
+- **Non-negative integer literal.** `length() == 'x'`, `length() == null`,
+  `length() == -1` all return `400`.
+
+Escape hatches for the excluded cases:
+
+- Non-empty check: existing array-match `$[?(@.arr[?(@.id)])]`.
+- String-length approximation: existing regex `$[?(@.name =~ /^.{5,}$/)]`.
+- Repository-level QueryDSL for anything else: `entity.tags.size().gt(5)`
+  on JPA; `Criteria.where(...)` on Mongo.
+
 #### What this library does NOT support
 
 The following Jayway JsonPath features are **not** part of this library's restricted `filter=` subset and will return `400 Bad Request`:
@@ -2184,7 +2243,8 @@ The following Jayway JsonPath features are **not** part of this library's restri
 - `SIZE`, `EMPTY`, `CONTAINS` (Jayway-specific operators)
 - Exists check (`$[?(@.field)]`)
 - Recursive descent operator (`..`)
-- Functions (`length()`, `count()`, etc.)
+- Functions other than `length()` (e.g. `count()`, `min()`, `max()`)
+- `length()` outside the `== N` on collection-field scope (see above)
 - Script expressions
 
 For set operations, null checks, pattern matching, and other advanced filtering, use the attribute-level query parameters (`.eq`, `.ne`, `.in`, `.nin`, `.like`, `.likei`, `.isnull`, `.isnotnull`, `.regex`, etc.) which provide full coverage of these use cases.
@@ -2203,6 +2263,8 @@ Supported subset (Mongo/document backends):
 - literals: string (single- or double-quoted), number, boolean, `null`
 - field paths: `@.field`, `@.nested.field`
 - array correlation: `@.arrayField[?(...)]` with strict same-element semantics via `$elemMatch`
+- positional index `[N]` in field paths — dotted numeric hop resolved natively by Mongo (2.1.5)
+- `length() == N` on collection fields via the standard `$size` fast path (2.1.5)
 - JsonPath wildcard `[*]` is accepted as a transparent projection sigil (stripped at parse time; equivalent to the same expression without `[*]`)
 - trailing projection suffix on the sub-array shorthand is tolerated and discarded — `<arrayPath>[?(...)].dotted.projection.suffix` is treated as `<arrayPath>[?(...)]` since the predicate fully determines the matched row set. Useful for URL templates that reuse sort projections in filter URLs. A suffix that contains another `[?(...)]` predicate, an index access (`[0]`), or a slice (`[0:5]`) is rejected so nested filtering doesn't sneak onto this surface silently. (Added in 2.1.3.)
 - merge with attribute filtering in the same request:
@@ -2234,6 +2296,7 @@ Supported subset (JPA backends):
 - comparisons: `==`, `!=`, `>`, `>=`, `<`, `<=`
 - literals: string, number, boolean, `null`
 - field paths: `@.field`, `@.nested.field` (subject to allowlist and nested-path configuration)
+- `length() == N` on collection fields via standard JPQL `SIZE(coll)` (2.1.5)
 - merge with attribute filtering in the same request:
   - default: `AND`
   - override: `filter.combineWithAttributes=OR`
@@ -2241,6 +2304,7 @@ Supported subset (JPA backends):
 Not supported in JPA:
 
 - array-correlation patterns such as `@.arrayField[?(...)]`
+- positional index `[N]` in field paths (Mongo-only per TMF630 Part 6 dotted-numeric semantics; JPQL cannot express element-N indexing on a plain collection)
 - these are intentionally rejected with `400 Bad Request`
 
 ### When `filter=` throws `400 Bad Request`
@@ -2257,6 +2321,8 @@ The library throws a filtering exception (mapped to HTTP `400`) for unsupported 
 - unknown/disallowed field paths when unknown-field behavior is `REJECT`
 - nested path usage when nested paths are disabled
 - array-correlation usage on JPA backends
+- positional index `[N]` in filter paths on JPA backends
+- `length()` used with any comparator other than `==`, or on a non-collection leaf
 - `filter=` exceeds configured max length
 - JsonPath filter feature is disabled by configuration
 

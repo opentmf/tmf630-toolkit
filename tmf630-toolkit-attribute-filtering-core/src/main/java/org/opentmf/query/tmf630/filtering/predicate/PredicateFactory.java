@@ -75,6 +75,28 @@ public class PredicateFactory {
     };
   }
 
+  /**
+   * TMF630 Part 6 {@code length()} function on collection fields. Emits the standard
+   * QueryDSL {@code Ops.COL_SIZE} equality shape, which both querydsl-jpa (as
+   * {@code SIZE(coll) = N}) and querydsl-mongodb (as {@code {field: {$size: N}}})
+   * serialize natively. Reading-A scope: only the {@code == N} case; non-equality
+   * comparators on {@code length()} would require raw {@code $expr} emission on
+   * Mongo (rejected upstream in the parser).
+   */
+  public Predicate buildLength(PathBuilder<?> root, ResolvedField field, int size) {
+    Class<?> elementType = field.javaType();
+    String[] segments = field.fieldPath().split("\\.");
+    PathBuilder<?> current = root;
+    for (int i = 0; i < segments.length - 1; i++) {
+      current = current.get(segments[i]);
+    }
+    return Expressions.numberOperation(
+            Integer.class,
+            Ops.COL_SIZE,
+            current.getCollection(segments[segments.length - 1], (Class) elementType))
+        .eq(size);
+  }
+
   public Predicate buildNoValue(PathBuilder<?> root, ResolvedField field, TmfOperator operator) {
     String fieldPath = field.fieldPath();
     Class<?> type = box(field.javaType());

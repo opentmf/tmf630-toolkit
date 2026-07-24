@@ -2,7 +2,9 @@ package org.opentmf.query.tmf630.mongo;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import com.querydsl.core.types.Ops;
 import com.querydsl.core.types.Predicate;
+import com.querydsl.core.types.dsl.Expressions;
 import com.querydsl.core.types.dsl.PathBuilder;
 import java.util.Comparator;
 import java.util.List;
@@ -86,6 +88,18 @@ class Tmf630MongoFilterSortParityIT {
     COMPOSITE_TENANT_IN(
         ROOT.getString("key.tenant").in("acme", "beta"), Set.of("S1", "S2", "S3", "S4")),
     ITEM_ID_EQ(ROOT.getString("item.id").eq("L1"), Set.of("S1", "S3")),
+    // TMF630 Part 6 positional index [N] in filter path — dotted numeric hop
+    // (`item.0.id`) resolves to the literal first element on Mongo. S1's [0] is L1;
+    // S3's [0] is also L1 (its L9 sits at [1]); S2/S4 have no L1 at index 0.
+    ITEM_INDEX0_ID_EQ(ROOT.getString("item.0.id").eq("L1"), Set.of("S1", "S3")),
+    // TMF630 Part 6 length() on collection field — Ops.COL_SIZE equality; must
+    // survive the aggregation executor's $match stage the same way it survives
+    // the plain find path. S3 has 2 items; all others have 1.
+    ITEM_LENGTH_EQ_2(
+        Expressions.numberOperation(
+                Integer.class, Ops.COL_SIZE, ROOT.getCollection("item", Item.class))
+            .eq(2),
+        Set.of("S3")),
     STATUS_EQ(ROOT.getString("status").eq("open"), Set.of("S1", "S2"));
 
     final Predicate predicate;

@@ -1113,6 +1113,241 @@ class JsonPathFilterPredicateBuilderTest {
                 settings(UnknownParamBehavior.REJECT, true)));
   }
 
+  // ---------- TMF630 Part 6 positional index [N] in filter paths ----------
+
+  @Test
+  void positionalIndexInFilterPathBuildsDottedNumericPathForMongo() {
+    FieldPathResolver pathResolver = new FieldPathResolver();
+    ValueConverter converter = new ValueConverter(new DefaultFormattingConversionService());
+    PredicateFactory factory = new PredicateFactory(false, 128);
+    JsonPathFilterPredicateBuilder builder =
+        new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
+
+    Predicate predicate =
+        builder.build(
+            Entity.class,
+            pathResolver.createRootPath(Entity.class),
+            "$[?(@.externalReference[2].id == 'X')]",
+            Set.of("externalReference.id"),
+            settings(UnknownParamBehavior.REJECT, true));
+
+    assertNotNull(predicate);
+    assertTrue(predicate.toString().contains("externalReference.2.id"));
+  }
+
+  @Test
+  void positionalIndexAcceptsMultipleHops() {
+    FieldPathResolver pathResolver = new FieldPathResolver();
+    ValueConverter converter = new ValueConverter(new DefaultFormattingConversionService());
+    PredicateFactory factory = new PredicateFactory(false, 128);
+    JsonPathFilterPredicateBuilder builder =
+        new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
+
+    Predicate predicate =
+        builder.build(
+            NestedEntity.class,
+            pathResolver.createRootPath(NestedEntity.class),
+            "$[?(@.wrapper.externalReference[0].name == 'X')]",
+            Set.of("wrapper.externalReference.name"),
+            settings(UnknownParamBehavior.REJECT, true));
+
+    assertNotNull(predicate);
+    assertTrue(predicate.toString().contains("wrapper.externalReference.0.name"));
+  }
+
+  @Test
+  void positionalIndexRejectedOnJpaEntity() {
+    FieldPathResolver pathResolver = new FieldPathResolver();
+    ValueConverter converter = new ValueConverter(new DefaultFormattingConversionService());
+    PredicateFactory factory = new PredicateFactory(false, 128);
+    JsonPathFilterPredicateBuilder builder =
+        new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
+
+    TmfFilteringException ex =
+        assertThrows(
+            TmfFilteringException.class,
+            () ->
+                builder.build(
+                    JpaLikeEntity.class,
+                    pathResolver.createRootPath(JpaLikeEntity.class),
+                    "$[?(@.externalReference[2].id == 'X')]",
+                    Set.of("externalReference.id"),
+                    settings(UnknownParamBehavior.REJECT, true)));
+    assertTrue(ex.getMessage().contains("document databases"));
+  }
+
+  @Test
+  void positionalIndexRejectedOnScalarLeaf() {
+    FieldPathResolver pathResolver = new FieldPathResolver();
+    ValueConverter converter = new ValueConverter(new DefaultFormattingConversionService());
+    PredicateFactory factory = new PredicateFactory(false, 128);
+    JsonPathFilterPredicateBuilder builder =
+        new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
+
+    assertThrows(
+        TmfFilteringException.class,
+        () ->
+            builder.build(
+                ScalarEntity.class,
+                pathResolver.createRootPath(ScalarEntity.class),
+                "$[?(@.name[0] == 'X')]",
+                Set.of("name"),
+                settings(UnknownParamBehavior.REJECT, true)));
+  }
+
+  @Test
+  void positionalIndexAllowlistMatchesUnindexedFieldName() {
+    // The allowlist is authored by JavaBean field name; [N] narrows the element,
+    // not the field, so the allowlist entry `externalReference.id` covers
+    // `externalReference[2].id` too.
+    FieldPathResolver pathResolver = new FieldPathResolver();
+    ValueConverter converter = new ValueConverter(new DefaultFormattingConversionService());
+    PredicateFactory factory = new PredicateFactory(false, 128);
+    JsonPathFilterPredicateBuilder builder =
+        new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
+
+    Predicate predicate =
+        builder.build(
+            Entity.class,
+            pathResolver.createRootPath(Entity.class),
+            "$[?(@.externalReference[7].name == 'foo')]",
+            Set.of("externalReference.name"),
+            settings(UnknownParamBehavior.REJECT, true));
+
+    assertNotNull(predicate);
+  }
+
+  // ---------- TMF630 Part 6 length() function on collection fields ----------
+
+  @Test
+  void lengthOnCollectionFieldBuildsSizeEqualsPredicate() {
+    FieldPathResolver pathResolver = new FieldPathResolver();
+    ValueConverter converter = new ValueConverter(new DefaultFormattingConversionService());
+    PredicateFactory factory = new PredicateFactory(false, 128);
+    JsonPathFilterPredicateBuilder builder =
+        new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
+
+    Predicate predicate =
+        builder.build(
+            Entity.class,
+            pathResolver.createRootPath(Entity.class),
+            "$[?(@.externalReference.length()==0)]",
+            Set.of("externalReference"),
+            settings(UnknownParamBehavior.REJECT, true));
+
+    assertNotNull(predicate);
+    // Standard QueryDSL Ops.COL_SIZE toString.
+    assertTrue(
+        predicate.toString().toLowerCase().contains("size(")
+            || predicate.toString().contains("COL_SIZE"),
+        predicate.toString());
+  }
+
+  @Test
+  void lengthOnNestedCollectionField() {
+    FieldPathResolver pathResolver = new FieldPathResolver();
+    ValueConverter converter = new ValueConverter(new DefaultFormattingConversionService());
+    PredicateFactory factory = new PredicateFactory(false, 128);
+    JsonPathFilterPredicateBuilder builder =
+        new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
+
+    Predicate predicate =
+        builder.build(
+            NestedEntity.class,
+            pathResolver.createRootPath(NestedEntity.class),
+            "$[?(@.wrapper.externalReference.length()==2)]",
+            Set.of("wrapper.externalReference"),
+            settings(UnknownParamBehavior.REJECT, true));
+
+    assertNotNull(predicate);
+  }
+
+  @Test
+  void lengthRejectsNonEqualsComparator() {
+    TmfFilteringException ex =
+        assertThrows(
+            TmfFilteringException.class,
+            () -> buildLengthExpression("$[?(@.externalReference.length()>0)]"));
+    assertTrue(ex.getMessage().contains("only == comparison"), ex.getMessage());
+  }
+
+  @Test
+  void lengthRejectsNonIntegerLiteral() {
+    assertThrows(
+        TmfFilteringException.class,
+        () -> buildLengthExpression("$[?(@.externalReference.length()=='x')]"));
+  }
+
+  @Test
+  void lengthRejectsNegativeInteger() {
+    TmfFilteringException ex =
+        assertThrows(
+            TmfFilteringException.class,
+            () -> buildLengthExpression("$[?(@.externalReference.length()==-1)]"));
+    assertTrue(ex.getMessage().contains("non-negative"), ex.getMessage());
+  }
+
+  @Test
+  void lengthRejectsNullLiteral() {
+    assertThrows(
+        TmfFilteringException.class,
+        () -> buildLengthExpression("$[?(@.externalReference.length()==null)]"));
+  }
+
+  @Test
+  void lengthRejectsScalarLeaf() {
+    FieldPathResolver pathResolver = new FieldPathResolver();
+    ValueConverter converter = new ValueConverter(new DefaultFormattingConversionService());
+    PredicateFactory factory = new PredicateFactory(false, 128);
+    JsonPathFilterPredicateBuilder builder =
+        new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
+
+    TmfFilteringException ex =
+        assertThrows(
+            TmfFilteringException.class,
+            () ->
+                builder.build(
+                    Entity.class,
+                    pathResolver.createRootPath(Entity.class),
+                    "$[?(@.name.length()==5)]",
+                    Set.of("name"),
+                    settings(UnknownParamBehavior.REJECT, true)));
+    assertTrue(ex.getMessage().contains("collection fields"), ex.getMessage());
+  }
+
+  @Test
+  void lengthComposesWithLogicalOperators() {
+    FieldPathResolver pathResolver = new FieldPathResolver();
+    ValueConverter converter = new ValueConverter(new DefaultFormattingConversionService());
+    PredicateFactory factory = new PredicateFactory(false, 128);
+    JsonPathFilterPredicateBuilder builder =
+        new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
+
+    Predicate predicate =
+        builder.build(
+            Entity.class,
+            pathResolver.createRootPath(Entity.class),
+            "$[?(@.externalReference.length()==0 || @.name == 'x')]",
+            Set.of("externalReference", "name"),
+            settings(UnknownParamBehavior.REJECT, true));
+
+    assertNotNull(predicate);
+  }
+
+  private Predicate buildLengthExpression(String expression) {
+    FieldPathResolver pathResolver = new FieldPathResolver();
+    ValueConverter converter = new ValueConverter(new DefaultFormattingConversionService());
+    PredicateFactory factory = new PredicateFactory(false, 128);
+    JsonPathFilterPredicateBuilder builder =
+        new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
+    return builder.build(
+        Entity.class,
+        pathResolver.createRootPath(Entity.class),
+        expression,
+        Set.of("externalReference"),
+        settings(UnknownParamBehavior.REJECT, true));
+  }
+
   private static Tmf630FilterSettings settings(
       UnknownParamBehavior unknownFieldBehavior, boolean jsonPathEnabled) {
     return settings(unknownFieldBehavior, jsonPathEnabled, true);

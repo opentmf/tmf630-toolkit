@@ -83,7 +83,7 @@ public class Tmf630ResponseBodyAdvice implements ResponseBodyAdvice<Object> {
         ResponseEntity.class.isAssignableFrom(returnType.getParameterType());
 
     if (body instanceof Page<?> page) {
-      return handlePage(page, fields, depth, response, wrappedInResponseEntity);
+      return handlePage(page, fields, depth, request, response, wrappedInResponseEntity);
     }
 
     return applyFieldSelection(body, fields, depth);
@@ -108,7 +108,12 @@ public class Tmf630ResponseBodyAdvice implements ResponseBodyAdvice<Object> {
   }
 
   private Object handlePage(
-      Page<?> page, String fields, int depth, ServerHttpResponse response, boolean statusAlreadySet) {
+      Page<?> page,
+      String fields,
+      int depth,
+      ServerHttpRequest request,
+      ServerHttpResponse response,
+      boolean statusAlreadySet) {
     long total = page.getTotalElements();
     long offset = page.getPageable().getOffset();
     long returned = page.getNumberOfElements();
@@ -131,6 +136,12 @@ public class Tmf630ResponseBodyAdvice implements ResponseBodyAdvice<Object> {
       boolean fullPage = total == 0 || (offset == 0 && returned == total);
       response.setStatusCode(HttpStatusCode.valueOf(fullPage ? 200 : 206));
       Tmf630Util.applyRangeHeaders(response.getHeaders(), total, offset, returned, true);
+      Tmf630Util.applyLinkHeader(
+          response.getHeaders(),
+          request.getURI().toString(),
+          total,
+          offset,
+          page.getSize());
     }
 
     List<?> content = page.getContent();
