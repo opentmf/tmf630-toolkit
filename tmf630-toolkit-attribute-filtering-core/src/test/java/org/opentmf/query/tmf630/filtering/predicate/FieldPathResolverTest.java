@@ -8,6 +8,14 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.opentmf.query.tmf630.filtering.TmfFilteringException;
 
+/**
+ * Nested {@code SampleEntity}/{@code NestedEntity}/{@code CollectionEntity}/… test DTOs declare
+ * private fields that are never read from Java code — {@link FieldPathResolver} exercises them via
+ * reflection (walking declared fields by name/generic type). Sonar S1068 flags them as "unused"
+ * because it does not model that reflective read path; deleting the fields would silently break
+ * these tests. Suppress at class level with intent.
+ */
+@SuppressWarnings("java:S1068")
 class FieldPathResolverTest {
 
   @Test

@@ -681,6 +681,7 @@ class Tmf630MongoCorrelatedSortIT {
   }
 
   @Test
+  @SuppressWarnings("java:S125") // inline reproduction notes contain tokens Sonar mis-detects as commented code
   void correlatedSortAscPutsRowsLackingMatchingArrayElementLast() {
     // Colleague's repro of the correlated-form nulls-position divergence: rows
     // where the predicate matches no element in the target array land last in

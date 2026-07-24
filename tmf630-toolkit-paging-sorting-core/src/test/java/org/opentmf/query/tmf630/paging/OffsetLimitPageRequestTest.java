@@ -55,8 +55,8 @@ class OffsetLimitPageRequestTest {
     assertNotEquals(a, differentOffset);
     assertNotEquals(a, differentLimit);
     assertNotEquals(a, differentSort);
-    assertNotEquals(a, null);
-    assertNotEquals(a, "string");
+    assertNotEquals(null, a);
+    assertNotEquals("string", a);
   }
 
   @Test
@@ -72,8 +72,7 @@ class OffsetLimitPageRequestTest {
   void rejectsInvalidValues() {
     assertThrows(IllegalArgumentException.class, () -> new OffsetLimitPageRequest(-1, 10, null));
     assertThrows(IllegalArgumentException.class, () -> new OffsetLimitPageRequest(0, 0, null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new OffsetLimitPageRequest(0, 10, Sort.unsorted()).withPage(-1));
+    OffsetLimitPageRequest zeroOffset = new OffsetLimitPageRequest(0, 10, Sort.unsorted());
+    assertThrows(IllegalArgumentException.class, () -> zeroOffset.withPage(-1));
   }
 }

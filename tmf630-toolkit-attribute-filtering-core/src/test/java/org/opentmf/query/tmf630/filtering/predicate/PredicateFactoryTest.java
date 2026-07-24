@@ -16,6 +16,14 @@ import org.opentmf.query.tmf630.filtering.TmfFilteringException;
 import org.opentmf.query.tmf630.filtering.TmfOperator;
 import org.opentmf.query.tmf630.filtering.config.IsnullSemantics;
 
+/**
+ * Nested {@code SampleEntity}/{@code PrimitiveEntity} test DTOs declare private fields that are
+ * never read from Java code — {@link PredicateFactory} builds Querydsl predicates against them via
+ * reflection through {@link PathBuilder} and the {@link ResolvedField} bindings. Sonar S1068 flags
+ * the fields as "unused" because it does not model that path; deleting them would silently break
+ * the tests. Suppress at class level with intent.
+ */
+@SuppressWarnings("java:S1068")
 class PredicateFactoryTest {
 
   @Test
@@ -99,35 +107,35 @@ class PredicateFactoryTest {
     PredicateFactory factory = new PredicateFactory(true, 256);
     PathBuilder<SampleEntity> root = new PathBuilder<>(SampleEntity.class, "sampleEntity");
     ResolvedField payload = new ResolvedField("payload", NonComparable.class);
+    NonComparable value = new NonComparable();
     assertThrows(
         TmfFilteringException.class,
-        () -> factory.build(root, payload, TmfOperator.GT, new NonComparable()));
+        () -> factory.build(root, payload, TmfOperator.GT, value));
   }
 
   @Test
   void rejectsBetweenWithInvalidArity() {
     PredicateFactory factory = new PredicateFactory(true, 256);
     PathBuilder<SampleEntity> root = new PathBuilder<>(SampleEntity.class, "sampleEntity");
+    ResolvedField age = new ResolvedField("age", Integer.class);
+    ArrayList<Object> singleton = new ArrayList<>(List.of(1));
     assertThrows(
         TmfFilteringException.class,
-        () ->
-            factory.buildMulti(
-                root,
-                new ResolvedField("age", Integer.class),
-                TmfOperator.BETWEEN,
-                new ArrayList<>(List.of(1))));
+        () -> factory.buildMulti(root, age, TmfOperator.BETWEEN, singleton));
   }
 
   @Test
   void rejectsRegexForNonStringAndOverlyLongPattern() {
     PredicateFactory factory = new PredicateFactory(true, 3);
     PathBuilder<SampleEntity> root = new PathBuilder<>(SampleEntity.class, "sampleEntity");
+    ResolvedField ageField = new ResolvedField("age", Integer.class);
+    ResolvedField nameField = new ResolvedField("name", String.class);
     assertThrows(
         TmfFilteringException.class,
-        () -> factory.build(root, new ResolvedField("age", Integer.class), TmfOperator.REGEX, "123"));
+        () -> factory.build(root, ageField, TmfOperator.REGEX, "123"));
     assertThrows(
         TmfFilteringException.class,
-        () -> factory.build(root, new ResolvedField("name", String.class), TmfOperator.REGEX, "1234"));
+        () -> factory.build(root, nameField, TmfOperator.REGEX, "1234"));
   }
 
   @Test
@@ -135,9 +143,10 @@ class PredicateFactoryTest {
     PredicateFactory factory = new PredicateFactory(true, 256);
     PathBuilder<SampleEntity> root = new PathBuilder<>(SampleEntity.class, "sampleEntity");
     ResolvedField field = new ResolvedField("name", String.class);
+    List<Object> singleton = List.of("x");
     assertThrows(TmfFilteringException.class, () -> factory.build(root, field, TmfOperator.BETWEEN, "x"));
     assertThrows(TmfFilteringException.class, () -> factory.buildNoValue(root, field, TmfOperator.EQ));
-    assertThrows(TmfFilteringException.class, () -> factory.buildMulti(root, field, TmfOperator.EQ, List.of("x")));
+    assertThrows(TmfFilteringException.class, () -> factory.buildMulti(root, field, TmfOperator.EQ, singleton));
   }
 
   @Test

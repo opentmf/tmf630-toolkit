@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.math.BigDecimal;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 class JsonPathSortParserTest {
 
@@ -283,14 +285,23 @@ class JsonPathSortParserTest {
     assertEquals(withoutWildcard, withWildcard);
   }
 
-  @Test
-  void preservesQuotedSquareStarLiteralInsidePredicate() {
-    // A user could (theoretically) want to compare against the literal string '[*]'.
-    // The strip pass must NOT remove [*] when it appears inside a quoted string.
-    JsonPathSortAst.SortPath p = parser.parse("$.arr[?(@.label == '[*]')].value");
+  /**
+   * The strip/quote-tracking passes must preserve the literal value between the opening and closing
+   * quote regardless of quote style ({@code '} or {@code "}) or contents (including {@code [*]},
+   * whitespace, or the other quote character).
+   */
+  @ParameterizedTest(name = "quoted literal preserved: input={0}, expected={1}")
+  @CsvSource({
+      "$.arr[?(@.label == '[*]')].value, [*]",
+      "$.arr[?(@.name == \"abc def\")].value, abc def",
+      "$.arr[?(@.name == \"with'apostrophe\")].value, with'apostrophe",
+      "$.arr[?(@.label == \"[*]\")].value, [*]",
+  })
+  void quotedLiteralValuePreservedVerbatim(String input, String expected) {
+    JsonPathSortAst.SortPath p = parser.parse(input);
     JsonPathSortAst.ComparisonPredicate cp =
         (JsonPathSortAst.ComparisonPredicate) p.hops().get(0).predicate();
-    assertEquals("[*]", ((JsonPathSortAst.StringLiteral) cp.literal()).value());
+    assertEquals(expected, ((JsonPathSortAst.StringLiteral) cp.literal()).value());
   }
 
   @Test
@@ -419,6 +430,7 @@ class JsonPathSortParserTest {
   }
 
   @Test
+  @SuppressWarnings("java:S125") // inline explanation contains $map/$convert/$min tokens Sonar mis-detects as code
   void doesNotPromotePreFunctionSegmentsForCoercionOnlyLeaves() {
     // Coercion-only leaves keep pre-function segments inside the FieldRef path;
     // the translator emits $map+$convert+$min/$max for array-intermediate paths
@@ -498,15 +510,6 @@ class JsonPathSortParserTest {
   }
 
   @Test
-  void doubleQuotedLiteralStringValuePreservedVerbatim() {
-    JsonPathSortAst.SortPath p =
-        parser.parse("$.arr[?(@.name == \"abc def\")].value");
-    JsonPathSortAst.ComparisonPredicate cp =
-        (JsonPathSortAst.ComparisonPredicate) p.hops().get(0).predicate();
-    assertEquals("abc def", ((JsonPathSortAst.StringLiteral) cp.literal()).value());
-  }
-
-  @Test
   void mixedQuoteStylesParseCorrectly() {
     // The two quote styles must be independent: a `'` opening a literal must NOT
     // be closed by a `"`. The opening char acts as the close sentinel.
@@ -520,30 +523,6 @@ class JsonPathSortParserTest {
         (JsonPathSortAst.ComparisonPredicate) ap.right();
     assertEquals("X", ((JsonPathSortAst.StringLiteral) left.literal()).value());
     assertEquals("Y", ((JsonPathSortAst.StringLiteral) right.literal()).value());
-  }
-
-  @Test
-  void doubleQuotedStringContainingSingleQuoteIsPreserved() {
-    // The literal contains a `'` that must NOT terminate the `"..."` string.
-    JsonPathSortAst.SortPath p =
-        parser.parse("$.arr[?(@.name == \"with'apostrophe\")].value");
-    JsonPathSortAst.ComparisonPredicate cp =
-        (JsonPathSortAst.ComparisonPredicate) p.hops().get(0).predicate();
-    assertEquals(
-        "with'apostrophe",
-        ((JsonPathSortAst.StringLiteral) cp.literal()).value());
-  }
-
-  @Test
-  void stripWildcardsPreservesSquareStarInsideDoubleQuotedLiteral() {
-    // Regression: stripWildcards must NOT remove [*] inside a "..." literal,
-    // just as it doesn't inside a '...' literal. The opening quote (single or
-    // double) opens a quote-active region until the same opening char repeats.
-    JsonPathSortAst.SortPath p =
-        parser.parse("$.arr[?(@.label == \"[*]\")].value");
-    JsonPathSortAst.ComparisonPredicate cp =
-        (JsonPathSortAst.ComparisonPredicate) p.hops().get(0).predicate();
-    assertEquals("[*]", ((JsonPathSortAst.StringLiteral) cp.literal()).value());
   }
 
   @Test

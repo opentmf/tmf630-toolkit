@@ -57,12 +57,12 @@ class Tmf630PredicateJpaParityIT {
     int index = 0;
     for (JsonNode node : root) {
       JpaServiceOrderEntity entity = new JpaServiceOrderEntity();
-      entity.setId(node.path("id").asText());
-      entity.setHref(node.path("href").asText());
-      entity.setCategory(node.path("category").asText());
-      entity.setExternalId(node.path("externalId").asText());
-      entity.setRequestedStartDate(node.path("requestedStartDate").asText());
-      entity.setState(node.path("state").asText());
+      entity.setId(node.path("id").asString());
+      entity.setHref(node.path("href").asString());
+      entity.setCategory(node.path("category").asString());
+      entity.setExternalId(node.path("externalId").asString());
+      entity.setRequestedStartDate(node.path("requestedStartDate").asString());
+      entity.setState(node.path("state").asString());
       // Deterministic length() fixture: exactly one entity carries 3 tags and one
       // carries 2 tags; the rest have 0. Anchoring on index keeps counts stable if
       // the fixture is reordered.

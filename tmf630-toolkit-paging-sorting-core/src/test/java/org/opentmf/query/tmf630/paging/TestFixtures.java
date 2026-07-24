@@ -15,6 +15,6 @@ final class TestFixtures {
 
   private static class ControllerStub {
     @SuppressWarnings("unused")
-    void search(Pageable pageable) {}
+    void search(Pageable pageable) { /* signature-only stub for MethodParameter reflection */ }
   }
 }

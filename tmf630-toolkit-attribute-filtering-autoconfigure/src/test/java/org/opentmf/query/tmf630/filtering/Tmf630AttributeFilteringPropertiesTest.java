@@ -13,8 +13,7 @@ import org.opentmf.query.tmf630.filtering.config.UnknownParamBehavior;
 
 class Tmf630AttributeFilteringPropertiesTest {
 
-  @Test
-  void mapsNestedPropertiesToSettings() {
+  private static Tmf630AttributeFilteringProperties fullyPopulated() {
     Tmf630AttributeFilteringProperties properties = new Tmf630AttributeFilteringProperties();
     properties.setEnabled(true);
     properties.setImplicitEqEnabled(false);
@@ -46,8 +45,12 @@ class Tmf630AttributeFilteringPropertiesTest {
     allowlist.setMode(AllowlistMode.ALLOW_ALL);
     allowlist.setEntities(Map.of("Entity", List.of("name")));
     properties.setAllowlist(allowlist);
+    return properties;
+  }
 
-    var settings = properties.toSettings();
+  @Test
+  void propertiesReflectSetValues() {
+    Tmf630AttributeFilteringProperties properties = fullyPopulated();
 
     assertTrue(properties.isEnabled());
     assertFalse(properties.isImplicitEqEnabled());
@@ -56,6 +59,7 @@ class Tmf630AttributeFilteringPropertiesTest {
     assertTrue(properties.isAllowNestedPathsDocdb());
     assertEquals(UnknownParamBehavior.IGNORE, properties.getOnUnknownField());
     assertEquals(UnknownParamBehavior.IGNORE, properties.getOnUnknownOperator());
+    assertEquals(UnknownParamBehavior.REJECT, properties.getOnUnknownJsonPathField());
     assertTrue(properties.getRegex().isEnabled());
     assertEquals(99, properties.getRegex().getMaxLength());
     assertEquals(12, properties.getLimits().getMaxClauses());
@@ -64,6 +68,12 @@ class Tmf630AttributeFilteringPropertiesTest {
     assertEquals(999, properties.getJsonPathFilter().getMaxLength());
     assertEquals(AllowlistMode.ALLOW_ALL, properties.getAllowlist().getMode());
     assertEquals(Map.of("Entity", List.of("name")), properties.getAllowlist().getEntities());
+  }
+
+  @Test
+  void toSettingsMapsAllNestedProperties() {
+    var settings = fullyPopulated().toSettings();
+
     assertFalse(settings.implicitEqEnabled());
     assertEquals(CombineMode.AND, settings.combineRepeatedValues());
     assertFalse(settings.allowNestedPathsJpa());
@@ -76,7 +86,6 @@ class Tmf630AttributeFilteringPropertiesTest {
     assertEquals(UnknownParamBehavior.IGNORE, settings.onUnknownField());
     assertEquals(UnknownParamBehavior.IGNORE, settings.onUnknownOperator());
     assertEquals(UnknownParamBehavior.REJECT, settings.onUnknownJsonPathField());
-    assertEquals(UnknownParamBehavior.REJECT, properties.getOnUnknownJsonPathField());
     assertTrue(settings.jsonPathFilterEnabled());
     assertEquals(999, settings.jsonPathMaxLength());
   }

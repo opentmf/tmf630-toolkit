@@ -109,6 +109,19 @@ class ValueConverterTest {
   }
 
   @Test
+  void errorMessageIncludesFieldNameEvenWhenTypeHasNoFormatHint() {
+    // Covers ValueConverter.buildCannotConvertMessage's fieldName-set-but-no-hint
+    // branch: Integer has no entry in TYPE_FORMAT_HINTS, but fieldName is passed
+    // through, so the message should quote the field name without a hint suffix.
+    TmfFilteringException ex =
+        assertThrows(
+            TmfFilteringException.class,
+            () -> converter.convert("x", NoConverter.class, "someBusinessField"));
+    assertTrue(ex.getMessage().contains("\"someBusinessField\""));
+    assertTrue(ex.getMessage().contains("NoConverter"));
+  }
+
+  @Test
   void allKnownTemporalTypesHaveFormatHints() {
     assertTrue(ValueConverter.TYPE_FORMAT_HINTS.containsKey(LocalDate.class));
     assertTrue(ValueConverter.TYPE_FORMAT_HINTS.containsKey(LocalDateTime.class));
@@ -135,6 +148,9 @@ class ValueConverterTest {
   enum StatusWithNullFactory {
     ACTIVE, INACTIVE;
 
+    // Factory shape must accept a single String even though this variant always
+    // returns null; ValueConverter's factory-method discovery filters by signature.
+    @SuppressWarnings("java:S1172")
     public static StatusWithNullFactory tryParse(String value) {
       return null;
     }

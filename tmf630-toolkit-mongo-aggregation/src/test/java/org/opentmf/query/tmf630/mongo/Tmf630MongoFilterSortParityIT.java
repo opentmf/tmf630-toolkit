@@ -82,6 +82,9 @@ class Tmf630MongoFilterSortParityIT {
             new KeyedOrder(new Key("S4", "acme"), List.of(new Item("L3", "b-sku")), "hold")));
   }
 
+  // sonar java:S125 — inline enum-body comments describe dotted path fragments
+  // (e.g. `item.0.id`, `[N]`) that Sonar mis-detects as commented-out code.
+  @SuppressWarnings("java:S125")
   enum FilterCase {
     COMPOSITE_SERIAL_EQ(ROOT.getString("key.serial").eq("S1"), Set.of("S1")),
     COMPOSITE_TENANT_EQ(ROOT.getString("key.tenant").eq("acme"), Set.of("S1", "S2", "S4")),
@@ -171,16 +174,17 @@ class Tmf630MongoFilterSortParityIT {
     return orders.stream().map(o -> o.key.serial).toList();
   }
 
+  private static Comparator<String> sortKeyComparator(Map<String, String> sortKey) {
+    return Comparator.comparing(sortKey::get, Comparator.nullsLast(Comparator.naturalOrder()));
+  }
+
   private static List<String> expectedOrder(FilterCase filter, SortCase sort) {
     Comparator<String> bySerial = Comparator.naturalOrder();
     Map<String, String> sortKey = sort == SortCase.JSONPATH_INDEX ? INDEX0_SKU : L1_SKU;
     Comparator<String> cmp =
         sort == SortCase.PLAIN
             ? bySerial
-            : Comparator.comparing(
-                    (String id) -> sortKey.get(id),
-                    Comparator.nullsLast(Comparator.naturalOrder()))
-                .thenComparing(bySerial);
+            : sortKeyComparator(sortKey).thenComparing(bySerial);
     return filter.expectedIds.stream().sorted(cmp).toList();
   }
 

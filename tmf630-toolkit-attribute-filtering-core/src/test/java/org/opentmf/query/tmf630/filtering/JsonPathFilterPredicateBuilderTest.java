@@ -1,5 +1,6 @@
 package org.opentmf.query.tmf630.filtering;
 
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -27,6 +28,15 @@ import org.opentmf.query.tmf630.filtering.predicate.PredicateFactory;
 import org.opentmf.query.tmf630.filtering.predicate.ValueConverter;
 import org.springframework.format.support.DefaultFormattingConversionService;
 
+/**
+ * Sonar S5976 suggests parameterizing tests that share a common assertion shape. Several clusters
+ * here (successful-build tests, {@code assertThrows(...builder.build)} rejection tests, and the
+ * shorthand-rewriter cluster) do share that shape, but each test carries a distinct edge-case
+ * name and an explanatory comment that documents the specific TMF-630 / Jayway invariant it
+ * pins. Collapsing them into three parameterized giants would lose that per-behavior
+ * traceability in test reports, so the rule is suppressed at the class level with intent.
+ */
+@SuppressWarnings("java:S5976")
 class JsonPathFilterPredicateBuilderTest {
 
   @Test
@@ -88,8 +98,9 @@ class JsonPathFilterPredicateBuilderTest {
     Predicate insensitive = regexEnabledBuild("$[?(@.name =~ /^ab.*/i)]");
 
     assertTrue(insensitive.toString().contains("^ab.*"));
-    assertFalse(
-        sensitive.toString().equals(insensitive.toString()),
+    assertNotEquals(
+        sensitive.toString(),
+        insensitive.toString(),
         "/pattern/i must map to the ignore-case regex predicate");
   }
 
@@ -118,15 +129,12 @@ class JsonPathFilterPredicateBuilderTest {
     JsonPathFilterPredicateBuilder builder =
         new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
 
+    PathBuilder<?> root = pathResolver.createRootPath(Entity.class);
+    Tmf630FilterSettings cfg = settings(UnknownParamBehavior.REJECT, true);
+    Set<String> allowlist = Set.of("name");
     assertThrows(
         TmfFilteringException.class,
-        () ->
-            builder.build(
-                Entity.class,
-                pathResolver.createRootPath(Entity.class),
-                "$[?(@.name =~ /^ab.*/)]",
-                Set.of("name"),
-                settings(UnknownParamBehavior.REJECT, true)));
+        () -> builder.build(Entity.class, root, "$[?(@.name =~ /^ab.*/)]", allowlist, cfg));
   }
 
   @Test
@@ -245,15 +253,14 @@ class JsonPathFilterPredicateBuilderTest {
         new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
 
     // Unbalanced parens — missing closing ')' before ']'
+    PathBuilder<?> root = pathResolver.createRootPath(Entity.class);
+    Tmf630FilterSettings cfg = settings(UnknownParamBehavior.REJECT, true);
+    Set<String> allowlist = Set.of("externalReference");
     assertThrows(
         TmfFilteringException.class,
         () ->
             builder.build(
-                Entity.class,
-                pathResolver.createRootPath(Entity.class),
-                "externalReference[?(@.name == 'X']",
-                Set.of("externalReference"),
-                settings(UnknownParamBehavior.REJECT, true)));
+                Entity.class, root, "externalReference[?(@.name == 'X']", allowlist, cfg));
   }
 
   @Test
@@ -267,15 +274,14 @@ class JsonPathFilterPredicateBuilderTest {
     // The leading dotted path must be a clean identifier path. Embedded illegal chars
     // (here a space) cause the shorthand to be rejected; falls through to "must be a
     // filter expression" with the documented message.
+    PathBuilder<?> root = pathResolver.createRootPath(Entity.class);
+    Tmf630FilterSettings cfg = settings(UnknownParamBehavior.REJECT, true);
+    Set<String> allowlist = Set.of("externalReference");
     assertThrows(
         TmfFilteringException.class,
         () ->
             builder.build(
-                Entity.class,
-                pathResolver.createRootPath(Entity.class),
-                "external Reference[?(@.name == 'X')]",
-                Set.of("externalReference"),
-                settings(UnknownParamBehavior.REJECT, true)));
+                Entity.class, root, "external Reference[?(@.name == 'X')]", allowlist, cfg));
   }
 
   @Test
@@ -288,15 +294,14 @@ class JsonPathFilterPredicateBuilderTest {
 
     // Anything after the closing `]` (other than whitespace) is rejected — the
     // shorthand must terminate at the predicate.
+    PathBuilder<?> root = pathResolver.createRootPath(Entity.class);
+    Tmf630FilterSettings cfg = settings(UnknownParamBehavior.REJECT, true);
+    Set<String> allowlist = Set.of("externalReference");
     assertThrows(
         TmfFilteringException.class,
         () ->
             builder.build(
-                Entity.class,
-                pathResolver.createRootPath(Entity.class),
-                "externalReference[?(@.name == 'X')].extra",
-                Set.of("externalReference"),
-                settings(UnknownParamBehavior.REJECT, true)));
+                Entity.class, root, "externalReference[?(@.name == 'X')].extra", allowlist, cfg));
   }
 
   @Test
@@ -380,15 +385,14 @@ class JsonPathFilterPredicateBuilderTest {
     // Just `$.` followed by `[?(...)]` — after stripping `$.` the path is empty.
     // This isn't valid sub-array shorthand and isn't a wrapper either; falls through
     // to the same standard "must be a filter expression" rejection.
+    PathBuilder<?> root = pathResolver.createRootPath(Entity.class);
+    Tmf630FilterSettings cfg = settings(UnknownParamBehavior.REJECT, true);
+    Set<String> allowlist = Set.of("externalReference");
     assertThrows(
         TmfFilteringException.class,
         () ->
             builder.build(
-                Entity.class,
-                pathResolver.createRootPath(Entity.class),
-                "$.[?(@.name == 'X')]",
-                Set.of("externalReference"),
-                settings(UnknownParamBehavior.REJECT, true)));
+                Entity.class, root, "$.[?(@.name == 'X')]", allowlist, cfg));
   }
 
   @Test
@@ -399,15 +403,12 @@ class JsonPathFilterPredicateBuilderTest {
     JsonPathFilterPredicateBuilder builder =
         new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
 
+    PathBuilder<?> root = pathResolver.createRootPath(Entity.class);
+    Tmf630FilterSettings cfg = settings(UnknownParamBehavior.REJECT, true);
+    Set<String> allowlist = Set.of("name", "age");
     assertThrows(
         TmfFilteringException.class,
-        () ->
-            builder.build(
-                Entity.class,
-                pathResolver.createRootPath(Entity.class),
-                "$.name",
-                Set.of("name", "age"),
-                settings(UnknownParamBehavior.REJECT, true)));
+        () -> builder.build(Entity.class, root, "$.name", allowlist, cfg));
   }
 
   @Test
@@ -418,15 +419,12 @@ class JsonPathFilterPredicateBuilderTest {
     JsonPathFilterPredicateBuilder builder =
         new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
 
+    PathBuilder<?> root = pathResolver.createRootPath(Entity.class);
+    Tmf630FilterSettings cfg = settings(UnknownParamBehavior.REJECT, true);
+    Set<String> allowlist = Set.of("name", "age");
     assertThrows(
         TmfFilteringException.class,
-        () ->
-            builder.build(
-                Entity.class,
-                pathResolver.createRootPath(Entity.class),
-                "$[?(@.name =~ 'abc')]",
-                Set.of("name", "age"),
-                settings(UnknownParamBehavior.REJECT, true)));
+        () -> builder.build(Entity.class, root, "$[?(@.name =~ 'abc')]", allowlist, cfg));
   }
 
   @Test
@@ -483,6 +481,7 @@ class JsonPathFilterPredicateBuilderTest {
   }
 
   @Test
+  @SuppressWarnings("java:S125") // inline BSON-shape prose triggers "commented code" false positive
   void regexiSerializesToMongoCaseInsensitiveRegex() {
     // Spot-check that regexi specifically produces a case-insensitive Mongo
     // regex query — not just "doesn't throw." The exact BSON shape is
@@ -579,15 +578,18 @@ class JsonPathFilterPredicateBuilderTest {
     JsonPathFilterPredicateBuilder builder =
         new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
 
+    PathBuilder<?> root = pathResolver.createRootPath(Entity.class);
+    Tmf630FilterSettings cfg = settings(UnknownParamBehavior.REJECT, true);
+    Set<String> allowlist = Set.of("externalReference", "externalReference.name");
     assertThrows(
         TmfFilteringException.class,
         () ->
             builder.build(
                 Entity.class,
-                pathResolver.createRootPath(Entity.class),
+                root,
                 "$.externalReference[?(@.name == 'abc')].sub[?(@.kind == 'X')]",
-                Set.of("externalReference", "externalReference.name"),
-                settings(UnknownParamBehavior.REJECT, true)));
+                allowlist,
+                cfg));
   }
 
   @Test
@@ -637,15 +639,18 @@ class JsonPathFilterPredicateBuilderTest {
     JsonPathFilterPredicateBuilder builder =
         new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
 
+    PathBuilder<?> root = pathResolver.createRootPath(Entity.class);
+    Tmf630FilterSettings cfg = settings(UnknownParamBehavior.REJECT, true);
+    Set<String> allowlist = Set.of("externalReference", "externalReference.id");
     assertThrows(
         TmfFilteringException.class,
         () ->
             builder.build(
                 Entity.class,
-                pathResolver.createRootPath(Entity.class),
+                root,
                 "$[?(!@.externalReference[?(@.id == 'X')])]",
-                Set.of("externalReference", "externalReference.id"),
-                settings(UnknownParamBehavior.REJECT, true)));
+                allowlist,
+                cfg));
   }
 
   @Test
@@ -702,15 +707,12 @@ class JsonPathFilterPredicateBuilderTest {
     JsonPathFilterPredicateBuilder builder =
         new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
 
+    PathBuilder<?> root = pathResolver.createRootPath(Entity.class);
+    Tmf630FilterSettings cfg = settings(UnknownParamBehavior.REJECT, true);
+    Set<String> allowlist = Set.of("name");
     assertThrows(
         TmfFilteringException.class,
-        () ->
-            builder.build(
-                Entity.class,
-                pathResolver.createRootPath(Entity.class),
-                "$[?(@.name > null)]",
-                Set.of("name"),
-                settings(UnknownParamBehavior.REJECT, true)));
+        () -> builder.build(Entity.class, root, "$[?(@.name > null)]", allowlist, cfg));
   }
 
   @Test
@@ -721,15 +723,12 @@ class JsonPathFilterPredicateBuilderTest {
     JsonPathFilterPredicateBuilder builder =
         new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
 
+    PathBuilder<?> root = pathResolver.createRootPath(Entity.class);
+    Tmf630FilterSettings cfg = settings(UnknownParamBehavior.REJECT, true);
+    Set<String> allowlist = Set.of("name", "age");
     assertThrows(
         TmfFilteringException.class,
-        () ->
-            builder.build(
-                Entity.class,
-                pathResolver.createRootPath(Entity.class),
-                "$[?(@.unknown == 'x')]",
-                Set.of("name", "age"),
-                settings(UnknownParamBehavior.REJECT, true)));
+        () -> builder.build(Entity.class, root, "$[?(@.unknown == 'x')]", allowlist, cfg));
   }
 
   @Test
@@ -758,15 +757,13 @@ class JsonPathFilterPredicateBuilderTest {
             10,
             settings.onUnknownJsonPathField());
 
+    PathBuilder<?> root = pathResolver.createRootPath(Entity.class);
+    Set<String> allowlist = Set.of("name");
     assertThrows(
         TmfFilteringException.class,
         () ->
             builder.build(
-                Entity.class,
-                pathResolver.createRootPath(Entity.class),
-                "$[?(@.name == 'abcdefghijklmnop')]",
-                Set.of("name"),
-                limitedSettings));
+                Entity.class, root, "$[?(@.name == 'abcdefghijklmnop')]", allowlist, limitedSettings));
   }
 
   @Test
@@ -864,19 +861,23 @@ class JsonPathFilterPredicateBuilderTest {
     JsonPathFilterPredicateBuilder builder =
         new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
 
+    PathBuilder<?> root = pathResolver.createRootPath(Entity.class);
+    Tmf630FilterSettings cfg = settings(UnknownParamBehavior.REJECT, true);
+    Set<String> allowlist =
+        Set.of(
+            "nonExistentArray",
+            "nonExistentArray.id",
+            "externalReference",
+            "externalReference.id");
     assertThrows(
         TmfFilteringException.class,
         () ->
             builder.build(
                 Entity.class,
-                pathResolver.createRootPath(Entity.class),
+                root,
                 "$[?(@.nonExistentArray[?(@.id == 'X')])]",
-                Set.of(
-                    "nonExistentArray",
-                    "nonExistentArray.id",
-                    "externalReference",
-                    "externalReference.id"),
-                settings(UnknownParamBehavior.REJECT, true)));
+                allowlist,
+                cfg));
   }
 
   @Test
@@ -887,15 +888,12 @@ class JsonPathFilterPredicateBuilderTest {
     JsonPathFilterPredicateBuilder builder =
         new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
 
+    PathBuilder<?> root = pathResolver.createRootPath(Entity.class);
+    Tmf630FilterSettings cfg = settings(UnknownParamBehavior.REJECT, false);
+    Set<String> allowlist = Set.of("name");
     assertThrows(
         TmfFilteringException.class,
-        () ->
-            builder.build(
-                Entity.class,
-                pathResolver.createRootPath(Entity.class),
-                "$[?(@.name == 'x')]",
-                Set.of("name"),
-                settings(UnknownParamBehavior.REJECT, false)));
+        () -> builder.build(Entity.class, root, "$[?(@.name == 'x')]", allowlist, cfg));
   }
 
   @Test
@@ -925,15 +923,18 @@ class JsonPathFilterPredicateBuilderTest {
     JsonPathFilterPredicateBuilder builder =
         new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
 
+    PathBuilder<?> root = pathResolver.createRootPath(JpaLikeEntity.class);
+    Tmf630FilterSettings cfg = settings(UnknownParamBehavior.REJECT, true);
+    Set<String> allowlist = Set.of("externalReference.name", "externalReference.id");
     assertThrows(
         TmfFilteringException.class,
         () ->
             builder.build(
                 JpaLikeEntity.class,
-                pathResolver.createRootPath(JpaLikeEntity.class),
+                root,
                 "$[?(@.externalReference[?(@.name == 'ORDER_REFERENCE' && @.id == 'OPCO-ORDER-012')])]",
-                Set.of("externalReference.name", "externalReference.id"),
-                settings(UnknownParamBehavior.REJECT, true)));
+                allowlist,
+                cfg));
   }
 
   @Test
@@ -944,15 +945,14 @@ class JsonPathFilterPredicateBuilderTest {
     JsonPathFilterPredicateBuilder builder =
         new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
 
+    PathBuilder<?> root = pathResolver.createRootPath(ScalarEntity.class);
+    Tmf630FilterSettings cfg = settings(UnknownParamBehavior.REJECT, true);
+    Set<String> allowlist = Set.of("name");
     assertThrows(
         TmfFilteringException.class,
         () ->
             builder.build(
-                ScalarEntity.class,
-                pathResolver.createRootPath(ScalarEntity.class),
-                "$[?(@.name[?(@.id == 'x')])]",
-                Set.of("name"),
-                settings(UnknownParamBehavior.REJECT, true)));
+                ScalarEntity.class, root, "$[?(@.name[?(@.id == 'x')])]", allowlist, cfg));
   }
 
   @Test
@@ -963,15 +963,18 @@ class JsonPathFilterPredicateBuilderTest {
     JsonPathFilterPredicateBuilder builder =
         new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
 
+    PathBuilder<?> root = pathResolver.createRootPath(NestedEntity.class);
+    Tmf630FilterSettings cfg = settings(UnknownParamBehavior.REJECT, true, false);
+    Set<String> allowlist = Set.of("wrapper.externalReference.name");
     assertThrows(
         TmfFilteringException.class,
         () ->
             builder.build(
                 NestedEntity.class,
-                pathResolver.createRootPath(NestedEntity.class),
+                root,
                 "$[?(@.wrapper.externalReference[?(@.name == 'ORDER_REFERENCE')])]",
-                Set.of("wrapper.externalReference.name"),
-                settings(UnknownParamBehavior.REJECT, true, false)));
+                allowlist,
+                cfg));
   }
 
   @Test
@@ -1046,15 +1049,18 @@ class JsonPathFilterPredicateBuilderTest {
     JsonPathFilterPredicateBuilder builder =
         new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
 
+    PathBuilder<?> root = pathResolver.createRootPath(Entity.class);
+    Tmf630FilterSettings cfg = settings(UnknownParamBehavior.REJECT, true);
+    Set<String> allowlist = Set.of("missingArray.id");
     assertThrows(
         TmfFilteringException.class,
         () ->
             builder.build(
                 Entity.class,
-                pathResolver.createRootPath(Entity.class),
+                root,
                 "$[?(@.missingArray[?(@.id == 'x')])]",
-                Set.of("missingArray.id"),
-                settings(UnknownParamBehavior.REJECT, true)));
+                allowlist,
+                cfg));
   }
 
   @Test
@@ -1065,15 +1071,18 @@ class JsonPathFilterPredicateBuilderTest {
     JsonPathFilterPredicateBuilder builder =
         new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
 
+    PathBuilder<?> root = pathResolver.createRootPath(Entity.class);
+    Tmf630FilterSettings cfg = settings(UnknownParamBehavior.REJECT, true);
+    Set<String> allowlist = Set.of("externalReference.id");
     assertThrows(
         TmfFilteringException.class,
         () ->
             builder.build(
                 Entity.class,
-                pathResolver.createRootPath(Entity.class),
+                root,
                 "$[?(@.[?(@.id == 'x')])]",
-                Set.of("externalReference.id"),
-                settings(UnknownParamBehavior.REJECT, true)));
+                allowlist,
+                cfg));
   }
 
   @Test
@@ -1084,15 +1093,18 @@ class JsonPathFilterPredicateBuilderTest {
     JsonPathFilterPredicateBuilder builder =
         new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
 
+    PathBuilder<?> root = pathResolver.createRootPath(Entity.class);
+    Tmf630FilterSettings cfg = settings(UnknownParamBehavior.REJECT, true);
+    Set<String> allowlist = Set.of("externalReference.id");
     assertThrows(
         TmfFilteringException.class,
         () ->
             builder.build(
                 Entity.class,
-                pathResolver.createRootPath(Entity.class),
+                root,
                 "$[?(@.externalReference[?(@.id == 'x'))]",
-                Set.of("externalReference.id"),
-                settings(UnknownParamBehavior.REJECT, true)));
+                allowlist,
+                cfg));
   }
 
   @Test
@@ -1103,15 +1115,18 @@ class JsonPathFilterPredicateBuilderTest {
     JsonPathFilterPredicateBuilder builder =
         new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
 
+    PathBuilder<?> root = pathResolver.createRootPath(RawListEntity.class);
+    Tmf630FilterSettings cfg = settings(UnknownParamBehavior.REJECT, true);
+    Set<String> allowlist = Set.of("externalReference.id");
     assertThrows(
         TmfFilteringException.class,
         () ->
             builder.build(
                 RawListEntity.class,
-                pathResolver.createRootPath(RawListEntity.class),
+                root,
                 "$[?(@.externalReference[?(@.id == 'x')])]",
-                Set.of("externalReference.id"),
-                settings(UnknownParamBehavior.REJECT, true)));
+                allowlist,
+                cfg));
   }
 
   // ---------- TMF630 Part 6 positional index [N] in filter paths ----------
@@ -1164,16 +1179,19 @@ class JsonPathFilterPredicateBuilderTest {
     JsonPathFilterPredicateBuilder builder =
         new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
 
+    PathBuilder<?> root = pathResolver.createRootPath(JpaLikeEntity.class);
+    Tmf630FilterSettings cfg = settings(UnknownParamBehavior.REJECT, true);
+    Set<String> allowlist = Set.of("externalReference.id");
     TmfFilteringException ex =
         assertThrows(
             TmfFilteringException.class,
             () ->
                 builder.build(
                     JpaLikeEntity.class,
-                    pathResolver.createRootPath(JpaLikeEntity.class),
+                    root,
                     "$[?(@.externalReference[2].id == 'X')]",
-                    Set.of("externalReference.id"),
-                    settings(UnknownParamBehavior.REJECT, true)));
+                    allowlist,
+                    cfg));
     assertTrue(ex.getMessage().contains("document databases"));
   }
 
@@ -1185,15 +1203,14 @@ class JsonPathFilterPredicateBuilderTest {
     JsonPathFilterPredicateBuilder builder =
         new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
 
+    PathBuilder<?> root = pathResolver.createRootPath(ScalarEntity.class);
+    Tmf630FilterSettings cfg = settings(UnknownParamBehavior.REJECT, true);
+    Set<String> allowlist = Set.of("name");
     assertThrows(
         TmfFilteringException.class,
         () ->
             builder.build(
-                ScalarEntity.class,
-                pathResolver.createRootPath(ScalarEntity.class),
-                "$[?(@.name[0] == 'X')]",
-                Set.of("name"),
-                settings(UnknownParamBehavior.REJECT, true)));
+                ScalarEntity.class, root, "$[?(@.name[0] == 'X')]", allowlist, cfg));
   }
 
   @Test
@@ -1303,16 +1320,15 @@ class JsonPathFilterPredicateBuilderTest {
     JsonPathFilterPredicateBuilder builder =
         new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
 
+    PathBuilder<?> root = pathResolver.createRootPath(Entity.class);
+    Tmf630FilterSettings cfg = settings(UnknownParamBehavior.REJECT, true);
+    Set<String> allowlist = Set.of("name");
     TmfFilteringException ex =
         assertThrows(
             TmfFilteringException.class,
             () ->
                 builder.build(
-                    Entity.class,
-                    pathResolver.createRootPath(Entity.class),
-                    "$[?(@.name.length()==5)]",
-                    Set.of("name"),
-                    settings(UnknownParamBehavior.REJECT, true)));
+                    Entity.class, root, "$[?(@.name.length()==5)]", allowlist, cfg));
     assertTrue(ex.getMessage().contains("collection fields"), ex.getMessage());
   }
 
@@ -1355,16 +1371,13 @@ class JsonPathFilterPredicateBuilderTest {
     }
     String expression = "$[?(" + open + "@.name == 'x'" + close + ")]";
 
+    PathBuilder<?> root = pathResolver.createRootPath(Entity.class);
+    Tmf630FilterSettings cfg = settingsWithLongMaxLength(UnknownParamBehavior.REJECT, true);
+    Set<String> allowlist = Set.of("name");
     TmfFilteringException ex =
         assertThrows(
             TmfFilteringException.class,
-            () ->
-                builder.build(
-                    Entity.class,
-                    pathResolver.createRootPath(Entity.class),
-                    expression,
-                    Set.of("name"),
-                    settingsWithLongMaxLength(UnknownParamBehavior.REJECT, true)));
+            () -> builder.build(Entity.class, root, expression, allowlist, cfg));
     assertTrue(ex.getMessage().contains("nesting is too deep"), ex.getMessage());
   }
 
@@ -1385,16 +1398,19 @@ class JsonPathFilterPredicateBuilderTest {
     }
     String expression = "$[?(" + inner + ")]";
 
+    PathBuilder<?> root = pathResolver.createRootPath(Entity.class);
+    Tmf630FilterSettings cfg = settingsWithLongMaxLength(UnknownParamBehavior.REJECT, true);
+    Set<String> allowlist = Set.of("externalReference", "externalReference.name");
     TmfFilteringException ex =
         assertThrows(
             TmfFilteringException.class,
             () ->
                 builder.build(
                     Entity.class,
-                    pathResolver.createRootPath(Entity.class),
+                    root,
                     expression,
-                    Set.of("externalReference", "externalReference.name"),
-                    settingsWithLongMaxLength(UnknownParamBehavior.REJECT, true)));
+                    allowlist,
+                    cfg));
     assertTrue(ex.getMessage().contains("nesting is too deep"), ex.getMessage());
   }
 

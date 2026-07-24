@@ -97,9 +97,9 @@ class TmfRichPageableHandlerMethodArgumentResolverTest {
 
   private static class ControllerStub {
     @SuppressWarnings("unused")
-    void rich(TmfRichPageable pageable) {}
+    void rich(TmfRichPageable pageable) { /* signature-only stub for MethodParameter reflection */ }
 
     @SuppressWarnings("unused")
-    void plain(Pageable pageable) {}
+    void plain(Pageable pageable) { /* signature-only stub for MethodParameter reflection */ }
   }
 }

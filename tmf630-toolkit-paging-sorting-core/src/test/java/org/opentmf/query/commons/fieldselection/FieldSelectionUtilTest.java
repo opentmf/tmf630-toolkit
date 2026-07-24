@@ -647,7 +647,7 @@ class FieldSelectionUtilTest {
       return "x";
     }
 
-    public void setVirtual(String ignored) {}
+    public void setVirtual(String ignored) { /* virtual property has no backing field */ }
   }
 
   static class WildcardHolder {

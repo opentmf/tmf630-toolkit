@@ -37,43 +37,49 @@ public class TmfSortParser {
       if (!StringUtils.hasText(sortParam)) {
         continue;
       }
-      List<String> tokens = splitTopLevel(sortParam);
-      for (String rawToken : tokens) {
-        String token = rawToken.trim();
-        if (token.isEmpty()) {
-          continue;
+      for (String rawToken : splitTopLevel(sortParam)) {
+        TmfSortTerm term = parseToken(rawToken, acceptCorrelated);
+        if (term != null) {
+          termList.add(term);
         }
-
-        Sort.Direction direction = Sort.Direction.ASC;
-        if (token.startsWith("-")) {
-          direction = Sort.Direction.DESC;
-          token = token.substring(1);
-        } else if (token.startsWith("+")) {
-          token = token.substring(1);
-        }
-
-        String expression = token.trim();
-        if (!StringUtils.hasText(expression)) {
-          continue;
-        }
-
-        TmfSortTerm.Kind kind = classify(expression);
-        if (kind != TmfSortTerm.Kind.PLAIN && !acceptCorrelated) {
-          throw new TmfPagingException(
-              "Correlated sort terms ("
-                  + kind.name().toLowerCase().replace('_', '-')
-                  + ") are not supported in this context: "
-                  + expression);
-        }
-
-        if (kind == TmfSortTerm.Kind.PLAIN) {
-          validateProperty(expression);
-        }
-        termList.add(new TmfSortTerm(direction, kind, expression));
       }
     }
 
     return new TmfSort(termList);
+  }
+
+  private TmfSortTerm parseToken(String rawToken, boolean acceptCorrelated) {
+    String token = rawToken.trim();
+    if (token.isEmpty()) {
+      return null;
+    }
+
+    Sort.Direction direction = Sort.Direction.ASC;
+    if (token.startsWith("-")) {
+      direction = Sort.Direction.DESC;
+      token = token.substring(1);
+    } else if (token.startsWith("+")) {
+      token = token.substring(1);
+    }
+
+    String expression = token.trim();
+    if (!StringUtils.hasText(expression)) {
+      return null;
+    }
+
+    TmfSortTerm.Kind kind = classify(expression);
+    if (kind != TmfSortTerm.Kind.PLAIN && !acceptCorrelated) {
+      throw new TmfPagingException(
+          "Correlated sort terms ("
+              + kind.name().toLowerCase().replace('_', '-')
+              + ") are not supported in this context: "
+              + expression);
+    }
+
+    if (kind == TmfSortTerm.Kind.PLAIN) {
+      validateProperty(expression);
+    }
+    return new TmfSortTerm(direction, kind, expression);
   }
 
   private void validateProperty(String property) {

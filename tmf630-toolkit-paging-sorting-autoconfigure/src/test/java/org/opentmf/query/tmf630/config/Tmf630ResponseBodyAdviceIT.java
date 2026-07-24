@@ -126,6 +126,7 @@ class Tmf630ResponseBodyAdviceIT {
   }
 
   @Test
+  @SuppressWarnings("java:S125") // depth semantics notes reference field names Sonar mis-detects as code
   void methodLevelDepthOneExpandsFirstLevelButNotSecond() throws Exception {
     // depth=1: address is mapped explicitly → only its scalar fields (city);
     // country (a nested complex field inside address) is NOT included.

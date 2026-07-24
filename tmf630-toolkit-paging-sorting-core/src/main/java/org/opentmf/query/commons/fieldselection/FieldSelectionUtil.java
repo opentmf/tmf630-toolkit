@@ -356,31 +356,59 @@ public final class FieldSelectionUtil {
     if (fields.isEmpty() || level > 10) {
       return;
     }
-    List<PropertyDescriptor> properties = getProperties(beanClass);
-    for (PropertyDescriptor pd : properties) {
-      String name = pd.getName();
-      Class<?> propertyType = getType(pd);
+    for (PropertyDescriptor pd : getProperties(beanClass)) {
       if (FIELD_HELPER.isEmbeddedId(beanClass, pd)) {
-        parseFieldsRecursive(propertyType, fields, map, base, level, name, depth);
+        parseFieldsRecursive(getType(pd), fields, map, base, level, pd.getName(), depth);
       } else {
-        String path = base + name;
-        List<PropertyDescriptor> nestedProperties = getProperties(propertyType);
-        if (fields.contains(path)) {
-          if (nestedProperties.isEmpty()) {
-            map.put(name, new FieldNode(embeddedIdFieldName));
-          } else {
-            Map<String, FieldNode> nestedMap = resolveProperties(propertyType, depth - 1);
-            map.put(name, nestedMap.isEmpty() ? new FieldNode() : new FieldNode(nestedMap));
-          }
-          fields.remove(path);
-        } else if (!nestedProperties.isEmpty()) {
-          Map<String, FieldNode> nestedMap = new LinkedHashMap<>();
-          parseFieldsRecursive(propertyType, fields, nestedMap, path + ".", level + 1, null, depth);
-          if (!nestedMap.isEmpty()) {
-            map.put(name, new FieldNode(nestedMap));
-          }
-        }
+        parseNonEmbeddedProperty(pd, fields, map, base, level, embeddedIdFieldName, depth);
       }
+    }
+  }
+
+  private static void parseNonEmbeddedProperty(
+      PropertyDescriptor pd,
+      SortedSet<String> fields,
+      Map<String, FieldNode> map,
+      String base,
+      int level,
+      String embeddedIdFieldName,
+      int depth) {
+    String name = pd.getName();
+    Class<?> propertyType = getType(pd);
+    String path = base + name;
+    List<PropertyDescriptor> nestedProperties = getProperties(propertyType);
+    if (fields.contains(path)) {
+      map.put(name, nodeForRequestedField(propertyType, nestedProperties, embeddedIdFieldName, depth));
+      fields.remove(path);
+    } else if (!nestedProperties.isEmpty()) {
+      recurseIntoNested(propertyType, fields, map, name, path, level, depth);
+    }
+  }
+
+  private static FieldNode nodeForRequestedField(
+      Class<?> propertyType,
+      List<PropertyDescriptor> nestedProperties,
+      String embeddedIdFieldName,
+      int depth) {
+    if (nestedProperties.isEmpty()) {
+      return new FieldNode(embeddedIdFieldName);
+    }
+    Map<String, FieldNode> nestedMap = resolveProperties(propertyType, depth - 1);
+    return nestedMap.isEmpty() ? new FieldNode() : new FieldNode(nestedMap);
+  }
+
+  private static void recurseIntoNested(
+      Class<?> propertyType,
+      SortedSet<String> fields,
+      Map<String, FieldNode> map,
+      String name,
+      String path,
+      int level,
+      int depth) {
+    Map<String, FieldNode> nestedMap = new LinkedHashMap<>();
+    parseFieldsRecursive(propertyType, fields, nestedMap, path + ".", level + 1, null, depth);
+    if (!nestedMap.isEmpty()) {
+      map.put(name, new FieldNode(nestedMap));
     }
   }
 

@@ -31,6 +31,15 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
       "opentmf.tmf630.attribute-filtering.onUnknownOperator=REJECT"
     })
 @AutoConfigureMockMvc
+/**
+ * {@code TestEntity} declares JavaBean-style fields ({@code transformationId}, {@code createdOn},
+ * {@code status}) that are never read from Java code — Spring's {@link QuerydslPredicate} argument
+ * resolver binds request parameters to them reflectively through the entity's declared fields.
+ * Sonar S1068 flags the fields as "unused" because it does not model that reflective binding;
+ * deleting them would silently break the resolver contract these tests pin. Suppress at class
+ * level with intent.
+ */
+@SuppressWarnings("java:S1068")
 class Tmf630PredicateArgumentResolverIT {
 
   @org.springframework.beans.factory.annotation.Autowired

@@ -386,6 +386,7 @@ class Tmf630CorrelatedSortHttpIT {
   }
 
   @Test
+  @SuppressWarnings("java:S125") // inline prose about num() coercion looks like code to Sonar
   void simpleRichNumCoercionFailureYieldsNullSortingLastAscending() throws Exception {
     mongoTemplate.dropCollection(Product.class);
     mongoTemplate.insertAll(

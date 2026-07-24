@@ -98,9 +98,9 @@ class TmfRichSortHandlerMethodArgumentResolverTest {
 
   private static class ControllerStub {
     @SuppressWarnings("unused")
-    void searchRich(TmfSort sort) {}
+    void searchRich(TmfSort sort) { /* signature-only stub for MethodParameter reflection */ }
 
     @SuppressWarnings("unused")
-    void searchPlain(Sort sort) {}
+    void searchPlain(Sort sort) { /* signature-only stub for MethodParameter reflection */ }
   }
 }

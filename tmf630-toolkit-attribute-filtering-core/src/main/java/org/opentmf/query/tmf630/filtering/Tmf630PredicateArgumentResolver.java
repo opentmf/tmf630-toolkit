@@ -4,6 +4,7 @@ import com.querydsl.core.BooleanBuilder;
 import com.querydsl.core.types.Predicate;
 import com.querydsl.core.types.dsl.PathBuilder;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -117,119 +118,196 @@ public class Tmf630PredicateArgumentResolver implements HandlerMethodArgumentRes
       Set<String> allowed,
       boolean allowNestedPaths) {
     BooleanBuilder result = new BooleanBuilder();
-    int clauseCount = 0;
-
+    ClauseCounter counter = new ClauseCounter(settings.limits().maxClauses());
     for (Map.Entry<String, String[]> entry : parameterMap.entrySet()) {
-      String rawKey = entry.getKey();
-      if (RESERVED_PARAMS.contains(rawKey)
-          || FILTER_PARAM.equals(rawKey)
-          || FILTER_COMBINE_PARAM.equals(rawKey)) {
-        continue;
-      }
-
-      String[] values = entry.getValue();
-      NormalizedParam encoded = normalizeEncodedOperatorKey(rawKey, values);
-      if (encoded != null) {
-        rawKey = encoded.key();
-        values = encoded.values();
-      }
-
-      Optional<ParsedParamKey> parsedOpt = keyParser.parse(rawKey);
-      if (parsedOpt.isEmpty()) {
-        handleUnknownOperator(rawKey);
-        continue;
-      }
-
-      ParsedParamKey parsed = parsedOpt.get();
-      String fieldPath = parsed.fieldPath();
-      if (!isAllowedField(fieldPath, allowed)) {
-        handleUnknownField(fieldPath);
-        continue;
-      }
-
-      ResolvedField resolvedField;
-      try {
-        resolvedField = pathResolver.resolve(rootEntity, fieldPath, allowNestedPaths);
-      } catch (TmfFilteringException ex) {
-        handleUnknownField(fieldPath);
-        continue;
-      }
-
-      TmfOperator operator = parsed.operator();
-      Predicate clause;
-
-      if (operator.isNoValueOperator()) {
-        clauseCount = incrementClauseCount(clauseCount);
-        clause = predicateFactory.buildNoValue(rootPath, resolvedField, operator);
-        result.and(clause);
-        continue;
-      }
-
-      if (values == null || values.length == 0) {
-        continue;
-      }
-      if (values.length > settings.limits().maxValuesPerKey()) {
-        throw new TmfFilteringException("Too many values for key: " + rawKey);
-      }
-
-      if (operator.isMultiValueOperator()) {
-        clauseCount = incrementClauseCount(clauseCount);
-        List<Object> typedValues = new ArrayList<>();
-        for (String rawValue : values) {
-          for (String element : splitCsvForMultiValue(rawValue)) {
-            typedValues.add(
-                valueConverter.convert(element, resolvedField.javaType(), resolvedField.fieldPath()));
-          }
-        }
-        if (typedValues.size() > settings.limits().maxValuesPerKey()) {
-          throw new TmfFilteringException("Too many values for key: " + rawKey);
-        }
-        clause = predicateFactory.buildMulti(rootPath, resolvedField, operator, typedValues);
-        result.and(clause);
-        continue;
-      }
-
-      // TMF630 value-list semantics: an implicit-eq value is an OR list separated by commas
-      // (?attr=a,b) or, per Part 1 §4.4 explicit ORing, by semicolons (?attr=a;b and the
-      // repeated-pair form ?attr=a;attr=b, whose redundant "<sameKey>=" prefixes are
-      // stripped). Only the implicit spelling splits — every explicit single-value operator
-      // (including .eq) keeps its raw value as one literal, which is the documented escape
-      // hatch for values that legitimately contain a separator (as is the \, / \; escape).
-      boolean implicitEqList = operator == TmfOperator.EQ && parsed.implicitEq();
-      boolean splitCsv = implicitEqList && settings.implicitEqCsvOr();
-      boolean splitSemicolon = implicitEqList && settings.implicitEqSemicolonOr();
-      BooleanBuilder perKey = new BooleanBuilder();
-      int elementCount = 0;
-      for (String rawValue : values) {
-        List<String> elements =
-            splitCsv || splitSemicolon
-                ? splitValueList(rawValue, splitSemicolon, splitCsv, rawKey + "=")
-                : Collections.singletonList(rawValue);
-        BooleanBuilder perValue = new BooleanBuilder();
-        for (String element : elements) {
-          clauseCount = incrementClauseCount(clauseCount);
-          elementCount++;
-          Object typedValue =
-              valueConverter.convert(element, resolvedField.javaType(), resolvedField.fieldPath());
-          perValue.or(predicateFactory.build(rootPath, resolvedField, operator, typedValue));
-        }
-        if (!perValue.hasValue()) {
-          continue;
-        }
-        if (settings.combineRepeatedValues() == CombineMode.AND) {
-          perKey.and(perValue);
-        } else {
-          perKey.or(perValue);
-        }
-      }
-      if (elementCount > settings.limits().maxValuesPerKey()) {
-        throw new TmfFilteringException("Too many values for key: " + rawKey);
-      }
-      if (perKey.hasValue()) {
-        result.and(perKey);
-      }
+      applyAttributeEntry(entry, rootEntity, rootPath, allowed, allowNestedPaths, result, counter);
     }
     return result;
+  }
+
+  private void applyAttributeEntry(
+      Map.Entry<String, String[]> entry,
+      Class<?> rootEntity,
+      PathBuilder<?> rootPath,
+      Set<String> allowed,
+      boolean allowNestedPaths,
+      BooleanBuilder result,
+      ClauseCounter counter) {
+    if (isReservedKey(entry.getKey())) {
+      return;
+    }
+    NormalizedParam normalized = normalize(entry.getKey(), entry.getValue());
+    ParsedParamKey parsed = parseAndAllowlist(normalized.key(), allowed);
+    if (parsed == null) {
+      return;
+    }
+    ResolvedField resolvedField = resolveField(rootEntity, parsed.fieldPath(), allowNestedPaths);
+    if (resolvedField == null) {
+      return;
+    }
+    Predicate clause =
+        clauseFor(normalized.key(), normalized.values(), parsed, resolvedField, rootPath, counter);
+    if (clause != null) {
+      result.and(clause);
+    }
+  }
+
+  private boolean isReservedKey(String rawKey) {
+    return RESERVED_PARAMS.contains(rawKey)
+        || FILTER_PARAM.equals(rawKey)
+        || FILTER_COMBINE_PARAM.equals(rawKey);
+  }
+
+  private NormalizedParam normalize(String rawKey, String[] rawValues) {
+    NormalizedParam encoded = normalizeEncodedOperatorKey(rawKey, rawValues);
+    if (encoded != null) {
+      return encoded;
+    }
+    return new NormalizedParam(rawKey, rawValues == null ? List.of() : Arrays.asList(rawValues));
+  }
+
+  private ParsedParamKey parseAndAllowlist(String rawKey, Set<String> allowed) {
+    Optional<ParsedParamKey> parsedOpt = keyParser.parse(rawKey);
+    if (parsedOpt.isEmpty()) {
+      handleUnknownOperator(rawKey);
+      return null;
+    }
+    ParsedParamKey parsed = parsedOpt.get();
+    if (!isAllowedField(parsed.fieldPath(), allowed)) {
+      handleUnknownField(parsed.fieldPath());
+      return null;
+    }
+    return parsed;
+  }
+
+  private ResolvedField resolveField(Class<?> rootEntity, String fieldPath, boolean allowNested) {
+    try {
+      return pathResolver.resolve(rootEntity, fieldPath, allowNested);
+    } catch (TmfFilteringException ex) {
+      handleUnknownField(fieldPath);
+      return null;
+    }
+  }
+
+  private Predicate clauseFor(
+      String rawKey,
+      List<String> values,
+      ParsedParamKey parsed,
+      ResolvedField resolvedField,
+      PathBuilder<?> rootPath,
+      ClauseCounter counter) {
+    TmfOperator operator = parsed.operator();
+    if (operator.isNoValueOperator()) {
+      counter.bump();
+      return predicateFactory.buildNoValue(rootPath, resolvedField, operator);
+    }
+    if (values.isEmpty()) {
+      return null;
+    }
+    enforceMaxValuesPerKey(rawKey, values.size());
+    if (operator.isMultiValueOperator()) {
+      return buildMultiValueClause(rawKey, values, rootPath, resolvedField, operator, counter);
+    }
+    return buildRepeatedValueClause(rawKey, values, rootPath, resolvedField, parsed, counter);
+  }
+
+  private void enforceMaxValuesPerKey(String rawKey, int size) {
+    if (size > settings.limits().maxValuesPerKey()) {
+      throw new TmfFilteringException("Too many values for key: " + rawKey);
+    }
+  }
+
+  private Predicate buildMultiValueClause(
+      String rawKey,
+      List<String> values,
+      PathBuilder<?> rootPath,
+      ResolvedField resolvedField,
+      TmfOperator operator,
+      ClauseCounter counter) {
+    counter.bump();
+    List<Object> typedValues = new ArrayList<>();
+    for (String rawValue : values) {
+      for (String element : splitCsvForMultiValue(rawValue)) {
+        typedValues.add(
+            valueConverter.convert(element, resolvedField.javaType(), resolvedField.fieldPath()));
+      }
+    }
+    enforceMaxValuesPerKey(rawKey, typedValues.size());
+    return predicateFactory.buildMulti(rootPath, resolvedField, operator, typedValues);
+  }
+
+  // TMF630 value-list semantics: an implicit-eq value is an OR list separated by commas
+  // (?attr=a,b) or, per Part 1 §4.4 explicit ORing, by semicolons (?attr=a;b and the
+  // repeated-pair form ?attr=a;attr=b, whose redundant "<sameKey>=" prefixes are
+  // stripped). Only the implicit spelling splits — every explicit single-value operator
+  // (including .eq) keeps its raw value as one literal, which is the documented escape
+  // hatch for values that legitimately contain a separator (as is the \, / \; escape).
+  private Predicate buildRepeatedValueClause(
+      String rawKey,
+      List<String> values,
+      PathBuilder<?> rootPath,
+      ResolvedField resolvedField,
+      ParsedParamKey parsed,
+      ClauseCounter counter) {
+    SplitPolicy split = SplitPolicy.forOperator(parsed, settings);
+    BooleanBuilder perKey = new BooleanBuilder();
+    int elementCount = 0;
+    for (String rawValue : values) {
+      List<String> elements = split.split(rawValue, rawKey);
+      BooleanBuilder perValue = new BooleanBuilder();
+      for (String element : elements) {
+        counter.bump();
+        elementCount++;
+        Object typedValue =
+            valueConverter.convert(element, resolvedField.javaType(), resolvedField.fieldPath());
+        perValue.or(predicateFactory.build(rootPath, resolvedField, parsed.operator(), typedValue));
+      }
+      appendPerValueToPerKey(perKey, perValue);
+    }
+    enforceMaxValuesPerKey(rawKey, elementCount);
+    return perKey.hasValue() ? perKey : null;
+  }
+
+  private void appendPerValueToPerKey(BooleanBuilder perKey, BooleanBuilder perValue) {
+    if (!perValue.hasValue()) {
+      return;
+    }
+    if (settings.combineRepeatedValues() == CombineMode.AND) {
+      perKey.and(perValue);
+    } else {
+      perKey.or(perValue);
+    }
+  }
+
+  private record SplitPolicy(boolean semicolon, boolean comma) {
+    static SplitPolicy forOperator(ParsedParamKey parsed, Tmf630FilterSettings settings) {
+      boolean implicitEqList = parsed.operator() == TmfOperator.EQ && parsed.implicitEq();
+      return new SplitPolicy(
+          implicitEqList && settings.implicitEqSemicolonOr(),
+          implicitEqList && settings.implicitEqCsvOr());
+    }
+
+    List<String> split(String rawValue, String rawKey) {
+      if (!semicolon && !comma) {
+        return Collections.singletonList(rawValue);
+      }
+      return splitValueList(rawValue, semicolon, comma, rawKey + "=");
+    }
+  }
+
+  private static final class ClauseCounter {
+    private final int max;
+    private int count;
+
+    ClauseCounter(int max) {
+      this.max = max;
+    }
+
+    void bump() {
+      if (++count > max) {
+        throw new TmfFilteringException("Maximum clause limit exceeded.");
+      }
+    }
   }
 
   private Predicate buildJsonPathPredicate(
@@ -266,14 +344,6 @@ public class Tmf630PredicateArgumentResolver implements HandlerMethodArgumentRes
     }
     throw new TmfFilteringException(
         "Invalid filter.combineWithAttributes value. Supported values: AND, OR.");
-  }
-
-  private int incrementClauseCount(int clauseCount) {
-    int next = clauseCount + 1;
-    if (next > settings.limits().maxClauses()) {
-      throw new TmfFilteringException("Maximum clause limit exceeded.");
-    }
-    return next;
   }
 
   private boolean isAllowedField(String fieldPath, Set<String> allowlist) {
@@ -314,7 +384,7 @@ public class Tmf630PredicateArgumentResolver implements HandlerMethodArgumentRes
     return splitValueList(raw, false, true, null);
   }
 
-  private record NormalizedParam(String key, String[] values) {}
+  private record NormalizedParam(String key, List<String> values) {}
 
   /**
    * TMF630 Part 1 §4.4 URL-encoded operator literal form. The operator arrives embedded in
@@ -331,42 +401,55 @@ public class Tmf630PredicateArgumentResolver implements HandlerMethodArgumentRes
    */
   private static NormalizedParam normalizeEncodedOperatorKey(String rawKey, String[] values) {
     for (int i = 0; i < rawKey.length(); i++) {
-      char c = rawKey.charAt(i);
-      if (c != '>' && c != '<' && c != '=') {
+      if (!isOperatorLiteralStart(rawKey.charAt(i))) {
         continue;
       }
-      char next = i + 1 < rawKey.length() ? rawKey.charAt(i + 1) : 0;
-      TmfOperator op;
-      int opLength;
-      if (c == '>') {
-        op = next == '=' ? TmfOperator.GTE : TmfOperator.GT;
-        opLength = next == '=' ? 2 : 1;
-      } else if (c == '<') {
-        op = next == '=' ? TmfOperator.LTE : TmfOperator.LT;
-        opLength = next == '=' ? 2 : 1;
-      } else if (next == '=') {
-        op = TmfOperator.EQ;
-        opLength = 2;
-      } else if (next == '~') {
-        op = TmfOperator.REGEX;
-        opLength = 2;
-      } else {
+      OperatorMatch match = matchOperatorAt(rawKey, i);
+      if (match == null) {
         return null;
       }
       String fieldPath = rawKey.substring(0, i);
       if (fieldPath.isEmpty()) {
         return null;
       }
-      String remainder = rawKey.substring(i + opLength);
-      String[] newValues =
-          remainder.isEmpty()
-              ? values
-              : splitValueList(remainder, true, false, rawKey.substring(0, i + opLength))
-                  .toArray(String[]::new);
-      return new NormalizedParam(fieldPath + "." + op.suffix(), newValues);
+      List<String> newValues = collectEncodedValues(rawKey, values, i, match.length());
+      return new NormalizedParam(fieldPath + "." + match.op().suffix(), newValues);
     }
     return null;
   }
+
+  private static boolean isOperatorLiteralStart(char c) {
+    return c == '>' || c == '<' || c == '=';
+  }
+
+  private static OperatorMatch matchOperatorAt(String rawKey, int i) {
+    char c = rawKey.charAt(i);
+    char next = i + 1 < rawKey.length() ? rawKey.charAt(i + 1) : 0;
+    return switch (c) {
+      case '>' -> new OperatorMatch(
+          next == '=' ? TmfOperator.GTE : TmfOperator.GT, next == '=' ? 2 : 1);
+      case '<' -> new OperatorMatch(
+          next == '=' ? TmfOperator.LTE : TmfOperator.LT, next == '=' ? 2 : 1);
+      case '=' -> switch (next) {
+        case '=' -> new OperatorMatch(TmfOperator.EQ, 2);
+        case '~' -> new OperatorMatch(TmfOperator.REGEX, 2);
+        default -> null;
+      };
+      default -> null;
+    };
+  }
+
+  private static List<String> collectEncodedValues(
+      String rawKey, String[] values, int operatorPosition, int operatorLength) {
+    String remainder = rawKey.substring(operatorPosition + operatorLength);
+    if (remainder.isEmpty()) {
+      return Arrays.asList(values);
+    }
+    return splitValueList(
+        remainder, true, false, rawKey.substring(0, operatorPosition + operatorLength));
+  }
+
+  private record OperatorMatch(TmfOperator op, int length) {}
 
   /**
    * Single-pass splitter behind both value-list forms: the comma list shared with the

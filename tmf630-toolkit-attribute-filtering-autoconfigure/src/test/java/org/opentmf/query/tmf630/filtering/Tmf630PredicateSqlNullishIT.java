@@ -8,7 +8,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
-import java.util.stream.Collectors;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -124,7 +123,7 @@ class Tmf630PredicateSqlNullishIT {
         SqlCaptureInspector.snapshot().stream()
             .filter(sql -> sql.trim().toUpperCase(Locale.ROOT).startsWith("SELECT"))
             .map(sql -> sql.toLowerCase(Locale.ROOT))
-            .collect(Collectors.toList());
+            .toList();
     assertThat(selects).isNotEmpty();
     return selects.get(0);
   }

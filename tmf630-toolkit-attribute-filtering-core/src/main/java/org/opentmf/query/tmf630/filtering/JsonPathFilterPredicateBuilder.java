@@ -160,22 +160,18 @@ public class JsonPathFilterPredicateBuilder {
           inQuotes = false;
         }
         i++;
-        continue;
-      }
-      if (c == '\'') {
+      } else if (c == '\'') {
         out.append(c);
         inQuotes = true;
         i++;
-        continue;
-      }
-      if (c == '[' && i + 2 < input.length()
+      } else if (c == '[' && i + 2 < input.length()
           && input.charAt(i + 1) == '*'
           && input.charAt(i + 2) == ']') {
         i += 3;
-        continue;
+      } else {
+        out.append(c);
+        i++;
       }
-      out.append(c);
-      i++;
     }
     return out.toString();
   }
@@ -277,155 +273,214 @@ public class JsonPathFilterPredicateBuilder {
       String allowlistPrefix,
       boolean allowNestedPaths) {
     if (node instanceof LogicalNode logical) {
-      Optional<Predicate> left =
-          toPredicate(
-              logical.left(),
-              rootEntity,
-              rootPath,
-              allowlist,
-              settings,
-              allowlistPrefix,
-              allowNestedPaths);
-      Optional<Predicate> right =
-          toPredicate(
-              logical.right(),
-              rootEntity,
-              rootPath,
-              allowlist,
-              settings,
-              allowlistPrefix,
-              allowNestedPaths);
-      if (left.isEmpty()) {
-        return right;
-      }
-      if (right.isEmpty()) {
-        return left;
-      }
-
-      BooleanBuilder builder = new BooleanBuilder();
-      if (logical.operator() == LogicalOperator.AND) {
-        builder.and(left.get()).and(right.get());
-      } else {
-        builder.or(left.get()).or(right.get());
-      }
-      return Optional.of(builder);
+      return predicateForLogical(
+          logical, rootEntity, rootPath, allowlist, settings, allowlistPrefix, allowNestedPaths);
     }
-
-    if (node instanceof ArrayMatchNode arrayMatchNode) {
-      if (isJpaEntity(rootEntity)) {
-        throw new TmfFilteringException(
-            "Array correlation in jsonPath filter is supported only for document databases.");
-      }
-      final ResolvedArrayPath resolvedArrayPath;
-      try {
-        resolvedArrayPath =
-            resolveArrayPath(rootEntity, rootPath, arrayMatchNode.arrayPath(), allowNestedPaths);
-      } catch (TmfFilteringException ex) {
-        if (settings.onUnknownJsonPathField() == UnknownParamBehavior.REJECT) {
-          throw ex;
-        }
-        return Optional.empty();
-      }
-      String nestedAllowlistPrefix =
-          allowlistPrefix + normalizeArrayPathForAllowlist(arrayMatchNode.arrayPath()) + ".";
-      PathBuilder<?> elementRootPath = pathResolver.createRootPath(resolvedArrayPath.elementType());
-      Optional<Predicate> nested =
-          toPredicate(
-              arrayMatchNode.inner(),
-              resolvedArrayPath.elementType(),
-              elementRootPath,
-              allowlist,
-              settings,
-              nestedAllowlistPrefix,
-              allowNestedPaths);
-      return nested.map(p -> buildElemMatchPredicate(resolvedArrayPath.collectionPath(), p));
+    if (node instanceof ArrayMatchNode arrayMatch) {
+      return predicateForArrayMatch(
+          arrayMatch, rootEntity, rootPath, allowlist, settings, allowlistPrefix, allowNestedPaths);
     }
-
     if (node instanceof LengthComparisonNode length) {
-      String effectivePath = allowlistPrefix + stripPositionalIndices(length.fieldPath());
-      if (!isAllowedField(effectivePath, allowlist, settings.allowlistMode())) {
-        if (settings.onUnknownJsonPathField() == UnknownParamBehavior.REJECT) {
-          throw new TmfFilteringException("Unknown or disallowed field: " + effectivePath);
-        }
-        return Optional.empty();
-      }
-      final ResolvedField resolvedField;
-      try {
-        resolvedField = pathResolver.resolve(rootEntity, length.fieldPath(), allowNestedPaths);
-      } catch (TmfFilteringException ex) {
-        if (settings.onUnknownJsonPathField() == UnknownParamBehavior.REJECT) {
-          throw ex;
-        }
-        return Optional.empty();
-      }
-      if (!resolvedField.leafIsCollection()) {
-        throw new TmfFilteringException(
-            "length() is supported only on collection fields: " + length.fieldPath());
-      }
-      return Optional.of(predicateFactory.buildLength(rootPath, resolvedField, length.size()));
+      return predicateForLength(
+          length, rootEntity, rootPath, allowlist, settings, allowlistPrefix, allowNestedPaths);
     }
-
-    if (!(node instanceof ComparisonNode comparison)) {
-      throw new TmfFilteringException("Unsupported jsonPath filter expression.");
+    if (node instanceof ComparisonNode comparison) {
+      return predicateForComparison(
+          comparison, rootEntity, rootPath, allowlist, settings, allowlistPrefix, allowNestedPaths);
     }
+    throw new TmfFilteringException("Unsupported jsonPath filter expression.");
+  }
 
-    if (isJpaEntity(rootEntity) && containsPositionalIndex(comparison.fieldPath())) {
+  private Optional<Predicate> predicateForLogical(
+      LogicalNode logical,
+      Class<?> rootEntity,
+      PathBuilder<?> rootPath,
+      Set<String> allowlist,
+      Tmf630FilterSettings settings,
+      String allowlistPrefix,
+      boolean allowNestedPaths) {
+    Optional<Predicate> left =
+        toPredicate(
+            logical.left(), rootEntity, rootPath, allowlist, settings, allowlistPrefix, allowNestedPaths);
+    Optional<Predicate> right =
+        toPredicate(
+            logical.right(), rootEntity, rootPath, allowlist, settings, allowlistPrefix, allowNestedPaths);
+    if (left.isEmpty()) {
+      return right;
+    }
+    if (right.isEmpty()) {
+      return left;
+    }
+    BooleanBuilder builder = new BooleanBuilder();
+    if (logical.operator() == LogicalOperator.AND) {
+      builder.and(left.get()).and(right.get());
+    } else {
+      builder.or(left.get()).or(right.get());
+    }
+    return Optional.of(builder);
+  }
+
+  private Optional<Predicate> predicateForArrayMatch(
+      ArrayMatchNode arrayMatch,
+      Class<?> rootEntity,
+      PathBuilder<?> rootPath,
+      Set<String> allowlist,
+      Tmf630FilterSettings settings,
+      String allowlistPrefix,
+      boolean allowNestedPaths) {
+    if (isJpaEntity(rootEntity)) {
       throw new TmfFilteringException(
-          "Positional index [N] in jsonPath filter is supported only for document databases.");
+          "Array correlation in jsonPath filter is supported only for document databases.");
     }
-
-    // The allowlist is authored by JavaBean field name; positional index [N] narrows
-    // which element, not which field, so it is stripped before the allowlist check.
-    String effectiveFieldPath = allowlistPrefix + stripPositionalIndices(comparison.fieldPath());
-    if (!isAllowedField(effectiveFieldPath, allowlist, settings.allowlistMode())) {
-      if (settings.onUnknownJsonPathField() == UnknownParamBehavior.REJECT) {
-        throw new TmfFilteringException("Unknown or disallowed field: " + effectiveFieldPath);
-      }
+    Optional<ResolvedArrayPath> resolved =
+        resolveArrayPathOrEmpty(rootEntity, rootPath, arrayMatch.arrayPath(), allowNestedPaths, settings);
+    if (resolved.isEmpty()) {
       return Optional.empty();
     }
+    ResolvedArrayPath resolvedArrayPath = resolved.get();
+    String nestedAllowlistPrefix =
+        allowlistPrefix + normalizeArrayPathForAllowlist(arrayMatch.arrayPath()) + ".";
+    PathBuilder<?> elementRootPath = pathResolver.createRootPath(resolvedArrayPath.elementType());
+    Optional<Predicate> nested =
+        toPredicate(
+            arrayMatch.inner(),
+            resolvedArrayPath.elementType(),
+            elementRootPath,
+            allowlist,
+            settings,
+            nestedAllowlistPrefix,
+            allowNestedPaths);
+    return nested.map(p -> buildElemMatchPredicate(resolvedArrayPath.collectionPath(), p));
+  }
 
-    final ResolvedField resolvedField;
+  private Optional<ResolvedArrayPath> resolveArrayPathOrEmpty(
+      Class<?> rootEntity,
+      PathBuilder<?> rootPath,
+      String arrayPath,
+      boolean allowNestedPaths,
+      Tmf630FilterSettings settings) {
     try {
-      resolvedField = pathResolver.resolve(rootEntity, comparison.fieldPath(), allowNestedPaths);
+      return Optional.of(resolveArrayPath(rootEntity, rootPath, arrayPath, allowNestedPaths));
     } catch (TmfFilteringException ex) {
       if (settings.onUnknownJsonPathField() == UnknownParamBehavior.REJECT) {
         throw ex;
       }
       return Optional.empty();
     }
+  }
 
-    if (comparison.literal().kind() == LiteralKind.NULL) {
-      if (comparison.operator() == ComparisonOperator.EQ) {
-        return Optional.of(
-            predicateFactory.buildNoValue(rootPath, resolvedField, TmfOperator.IS_NULL));
-      }
-      if (comparison.operator() == ComparisonOperator.NE) {
-        return Optional.of(
-            predicateFactory.buildNoValue(rootPath, resolvedField, TmfOperator.IS_NOT_NULL));
-      }
-      throw new TmfFilteringException("Null literal only supports == and != operators.");
+  private Optional<Predicate> predicateForLength(
+      LengthComparisonNode length,
+      Class<?> rootEntity,
+      PathBuilder<?> rootPath,
+      Set<String> allowlist,
+      Tmf630FilterSettings settings,
+      String allowlistPrefix,
+      boolean allowNestedPaths) {
+    String effectivePath = allowlistPrefix + stripPositionalIndices(length.fieldPath());
+    if (!isAllowedFieldOrReport(effectivePath, allowlist, settings)) {
+      return Optional.empty();
     }
+    Optional<ResolvedField> resolved =
+        resolveFieldOrEmpty(rootEntity, length.fieldPath(), allowNestedPaths, settings);
+    if (resolved.isEmpty()) {
+      return Optional.empty();
+    }
+    ResolvedField resolvedField = resolved.get();
+    if (!resolvedField.leafIsCollection()) {
+      throw new TmfFilteringException(
+          "length() is supported only on collection fields: " + length.fieldPath());
+    }
+    return Optional.of(predicateFactory.buildLength(rootPath, resolvedField, length.size()));
+  }
 
+  private Optional<Predicate> predicateForComparison(
+      ComparisonNode comparison,
+      Class<?> rootEntity,
+      PathBuilder<?> rootPath,
+      Set<String> allowlist,
+      Tmf630FilterSettings settings,
+      String allowlistPrefix,
+      boolean allowNestedPaths) {
+    if (isJpaEntity(rootEntity) && containsPositionalIndex(comparison.fieldPath())) {
+      throw new TmfFilteringException(
+          "Positional index [N] in jsonPath filter is supported only for document databases.");
+    }
+    // The allowlist is authored by JavaBean field name; positional index [N] narrows
+    // which element, not which field, so it is stripped before the allowlist check.
+    String effectivePath = allowlistPrefix + stripPositionalIndices(comparison.fieldPath());
+    if (!isAllowedFieldOrReport(effectivePath, allowlist, settings)) {
+      return Optional.empty();
+    }
+    Optional<ResolvedField> resolved =
+        resolveFieldOrEmpty(rootEntity, comparison.fieldPath(), allowNestedPaths, settings);
+    if (resolved.isEmpty()) {
+      return Optional.empty();
+    }
+    ResolvedField resolvedField = resolved.get();
+    if (comparison.literal().kind() == LiteralKind.NULL) {
+      return Optional.of(buildNullPredicate(comparison.operator(), rootPath, resolvedField));
+    }
     if (comparison.operator() == ComparisonOperator.REGEX) {
       return Optional.of(buildRegexPredicate(rootPath, resolvedField, comparison.literal()));
     }
+    return Optional.of(buildTypedPredicate(comparison, rootPath, resolvedField));
+  }
 
+  private boolean isAllowedFieldOrReport(
+      String effectivePath, Set<String> allowlist, Tmf630FilterSettings settings) {
+    if (isAllowedField(effectivePath, allowlist, settings.allowlistMode())) {
+      return true;
+    }
+    if (settings.onUnknownJsonPathField() == UnknownParamBehavior.REJECT) {
+      throw new TmfFilteringException("Unknown or disallowed field: " + effectivePath);
+    }
+    return false;
+  }
+
+  private Optional<ResolvedField> resolveFieldOrEmpty(
+      Class<?> rootEntity, String fieldPath, boolean allowNestedPaths, Tmf630FilterSettings settings) {
+    try {
+      return Optional.of(pathResolver.resolve(rootEntity, fieldPath, allowNestedPaths));
+    } catch (TmfFilteringException ex) {
+      if (settings.onUnknownJsonPathField() == UnknownParamBehavior.REJECT) {
+        throw ex;
+      }
+      return Optional.empty();
+    }
+  }
+
+  private Predicate buildNullPredicate(
+      ComparisonOperator op, PathBuilder<?> rootPath, ResolvedField resolvedField) {
+    if (op == ComparisonOperator.EQ) {
+      return predicateFactory.buildNoValue(rootPath, resolvedField, TmfOperator.IS_NULL);
+    }
+    if (op == ComparisonOperator.NE) {
+      return predicateFactory.buildNoValue(rootPath, resolvedField, TmfOperator.IS_NOT_NULL);
+    }
+    throw new TmfFilteringException("Null literal only supports == and != operators.");
+  }
+
+  private Predicate buildTypedPredicate(
+      ComparisonNode comparison, PathBuilder<?> rootPath, ResolvedField resolvedField) {
     Object typedValue =
-        valueConverter.convert(comparison.literal().valueAsString(), resolvedField.javaType(), resolvedField.fieldPath());
+        valueConverter.convert(
+            comparison.literal().valueAsString(),
+            resolvedField.javaType(),
+            resolvedField.fieldPath());
+    return predicateFactory.build(rootPath, resolvedField, toTmfOperator(comparison.operator()), typedValue);
+  }
 
-    TmfOperator tmfOperator =
-        switch (comparison.operator()) {
-          case EQ -> TmfOperator.EQ;
-          case NE -> TmfOperator.NE;
-          case GT -> TmfOperator.GT;
-          case GTE -> TmfOperator.GTE;
-          case LT -> TmfOperator.LT;
-          case LTE -> TmfOperator.LTE;
-          case REGEX ->
-              throw new IllegalStateException("REGEX is handled before typed conversion");
-        };
-
-    return Optional.of(predicateFactory.build(rootPath, resolvedField, tmfOperator, typedValue));
+  private static TmfOperator toTmfOperator(ComparisonOperator op) {
+    return switch (op) {
+      case EQ -> TmfOperator.EQ;
+      case NE -> TmfOperator.NE;
+      case GT -> TmfOperator.GT;
+      case GTE -> TmfOperator.GTE;
+      case LT -> TmfOperator.LT;
+      case LTE -> TmfOperator.LTE;
+      case REGEX -> throw new IllegalStateException("REGEX is handled before typed conversion");
+    };
   }
 
   /**
@@ -480,6 +535,12 @@ public class JsonPathFilterPredicateBuilder {
     return fieldPath.replaceAll("\\[\\d+]", "");
   }
 
+  // sonar java:S1872 — comparing the annotation's FQN string rather than doing
+  // `instanceof Entity` is deliberate: attribute-filtering-core declares
+  // jakarta.persistence-api as an optional dep so downstream services that don't
+  // use JPA aren't burdened. String-based detection keeps the core module
+  // backend-agnostic even when the annotation type is off the classpath.
+  @SuppressWarnings("java:S1872")
   private boolean isJpaEntity(Class<?> type) {
     for (Annotation annotation : type.getAnnotations()) {
       if ("jakarta.persistence.Entity".equals(annotation.annotationType().getName())) {
@@ -839,181 +900,233 @@ public class JsonPathFilterPredicateBuilder {
     private static List<Token> tokenize(String input) {
       List<Token> tokens = new ArrayList<>();
       int i = 0;
-
       while (i < input.length()) {
-        char ch = input.charAt(i);
-        if (Character.isWhitespace(ch)) {
-          i++;
-          continue;
-        }
-        if (ch == '(') {
-          tokens.add(new Token(TokenType.LPAREN, "("));
-          i++;
-          continue;
-        }
-        if (ch == ')') {
-          tokens.add(new Token(TokenType.RPAREN, ")"));
-          i++;
-          continue;
-        }
-        if (i + 1 < input.length()) {
-          String two = input.substring(i, i + 2);
-          Token twoCharToken = switch (two) {
-            case "&&" -> new Token(TokenType.AND, "&&");
-            case "||" -> new Token(TokenType.OR, "||");
-            case "==", "!=", ">=", "<=", "=~" -> new Token(TokenType.OPERATOR, two);
-            default -> null;
-          };
-          if (twoCharToken != null) {
-            tokens.add(twoCharToken);
-            i += 2;
-            continue;
-          }
-        }
-        if (ch == '>' || ch == '<') {
-          tokens.add(new Token(TokenType.OPERATOR, String.valueOf(ch)));
-          i++;
-          continue;
-        }
-        if (ch == '!') {
-          tokens.add(new Token(TokenType.NOT, "!"));
-          i++;
-          continue;
-        }
-        if (ch == '@') {
-          int start = i;
-          i++;
-          while (i < input.length()) {
-            char c = input.charAt(i);
-            if (Character.isLetterOrDigit(c) || c == '_' || c == '.' || c == '@') {
-              i++;
-            } else if (c == '[' && input.startsWith("[?(", i)) {
-              int depth = 1;
-              i += 3;
-              while (i < input.length() && depth > 0) {
-                char current = input.charAt(i);
-                if (current == '(') {
-                  depth++;
-                } else if (current == ')') {
-                  depth--;
-                }
-                i++;
-              }
-              if (depth != 0 || i >= input.length() || input.charAt(i) != ']') {
-                throw new TmfFilteringException("Invalid array filter syntax in jsonPath filter.");
-              }
-              i++;
-            } else if (c == '[' && i + 1 < input.length() && Character.isDigit(input.charAt(i + 1))) {
-              // TMF630 Part 6 JSONPath positional index `[N]` — kept in the FIELD token
-              // verbatim so FieldPathResolver can translate it into a dotted numeric hop
-              // (`arr[2].leaf` → `arr.2.leaf`) that Mongo resolves natively.
-              int j = i + 1;
-              while (j < input.length() && Character.isDigit(input.charAt(j))) {
-                j++;
-              }
-              if (j >= input.length() || input.charAt(j) != ']') {
-                throw new TmfFilteringException("Malformed positional index in jsonPath filter.");
-              }
-              i = j + 1;
-            } else {
-              break;
-            }
-          }
-          String field = input.substring(start, i);
-          if (!field.startsWith("@.")) {
-            throw new TmfFilteringException("jsonPath field must start with @.: " + field);
-          }
-          // TMF630 Part 6 Functions table lists `length()` returning Integer.
-          // Consumed as part of the field token so parsePrimary can dispatch to
-          // the length-comparison branch instead of the plain field comparison.
-          if (field.endsWith(".length") && input.startsWith("()", i)) {
-            i += 2;
-            String base = field.substring(0, field.length() - ".length".length());
-            tokens.add(new Token(TokenType.FIELD_LENGTH, base));
-            continue;
-          }
-          tokens.add(new Token(TokenType.FIELD, field));
-          continue;
-        }
-        if (ch == '/') {
-          // TMF630 Part 6 regex literal for =~: /pattern/flags. The '\' escape keeps a
-          // literal '/' inside the pattern; trailing letters are flags.
-          int start = i;
-          i++;
-          boolean closed = false;
-          boolean escaped = false;
-          while (i < input.length()) {
-            char c = input.charAt(i);
-            i++;
-            if (escaped) {
-              escaped = false;
-            } else if (c == '\\') {
-              escaped = true;
-            } else if (c == '/') {
-              closed = true;
-              break;
-            }
-          }
-          if (!closed) {
-            throw new TmfFilteringException("Unterminated regex literal in jsonPath filter.");
-          }
-          while (i < input.length() && Character.isLetter(input.charAt(i))) {
-            i++;
-          }
-          tokens.add(new Token(TokenType.LITERAL, input.substring(start, i)));
-          continue;
-        }
-        if (ch == '\'' || ch == '"') {
-          int start = i;
-          i++;
-          boolean escaped = false;
-          while (i < input.length()) {
-            char c = input.charAt(i);
-            if (c == '\\' && !escaped) {
-              escaped = true;
-              i++;
-              continue;
-            }
-            if (c == ch && !escaped) {
-              i++;
-              break;
-            }
-            escaped = false;
-            i++;
-          }
-          if (i > input.length() || input.charAt(i - 1) != ch) {
-            throw new TmfFilteringException("Unterminated string literal in jsonPath filter.");
-          }
-          tokens.add(new Token(TokenType.LITERAL, input.substring(start, i)));
-          continue;
-        }
-
-        if (Character.isDigit(ch) || ch == '-' || ch == 't' || ch == 'f' || ch == 'n') {
-          int start = i;
-          while (i < input.length()) {
-            char c = input.charAt(i);
-            if (Character.isLetterOrDigit(c) || c == '_' || c == '.' || c == '-') {
-              i++;
-            } else {
-              break;
-            }
-          }
-          String token = input.substring(start, i);
-          String lowered = token.toLowerCase(Locale.ROOT);
-          if (lowered.equals("true")
-              || lowered.equals("false")
-              || lowered.equals("null")
-              || isNumericToken(token)) {
-            tokens.add(new Token(TokenType.LITERAL, token));
-            continue;
-          }
-        }
-
-        throw new TmfFilteringException("Unsupported token in jsonPath filter near: " + input.substring(i));
+        i = scanNextToken(input, i, tokens);
       }
-
       tokens.add(new Token(TokenType.EOF, ""));
       return tokens;
+    }
+
+    private static int scanNextToken(String input, int i, List<Token> tokens) {
+      char ch = input.charAt(i);
+      if (Character.isWhitespace(ch)) {
+        return i + 1;
+      }
+      Integer punct = tryScanPunctuation(ch, tokens);
+      if (punct != null) {
+        return i + punct;
+      }
+      int twoChar = tryScanTwoCharOperator(input, i, tokens);
+      if (twoChar >= 0) {
+        return twoChar;
+      }
+      Integer singleOp = tryScanSingleCharOperator(ch, tokens);
+      if (singleOp != null) {
+        return i + singleOp;
+      }
+      return scanValueOrThrow(input, i, tokens, ch);
+    }
+
+    private static Integer tryScanPunctuation(char ch, List<Token> tokens) {
+      if (ch == '(') {
+        tokens.add(new Token(TokenType.LPAREN, "("));
+        return 1;
+      }
+      if (ch == ')') {
+        tokens.add(new Token(TokenType.RPAREN, ")"));
+        return 1;
+      }
+      return null;
+    }
+
+    private static int tryScanTwoCharOperator(String input, int i, List<Token> tokens) {
+      if (i + 1 >= input.length()) {
+        return -1;
+      }
+      String two = input.substring(i, i + 2);
+      Token token = switch (two) {
+        case "&&" -> new Token(TokenType.AND, "&&");
+        case "||" -> new Token(TokenType.OR, "||");
+        case "==", "!=", ">=", "<=", "=~" -> new Token(TokenType.OPERATOR, two);
+        default -> null;
+      };
+      if (token == null) {
+        return -1;
+      }
+      tokens.add(token);
+      return i + 2;
+    }
+
+    private static Integer tryScanSingleCharOperator(char ch, List<Token> tokens) {
+      if (ch == '>' || ch == '<') {
+        tokens.add(new Token(TokenType.OPERATOR, String.valueOf(ch)));
+        return 1;
+      }
+      if (ch == '!') {
+        tokens.add(new Token(TokenType.NOT, "!"));
+        return 1;
+      }
+      return null;
+    }
+
+    private static int scanValueOrThrow(String input, int i, List<Token> tokens, char ch) {
+      if (ch == '@') {
+        return scanFieldToken(input, i, tokens);
+      }
+      if (ch == '/') {
+        return scanRegexLiteral(input, i, tokens);
+      }
+      if (ch == '\'' || ch == '"') {
+        return scanStringLiteral(input, i, tokens, ch);
+      }
+      int lit = tryScanNumberOrKeywordLiteral(input, i, tokens, ch);
+      if (lit >= 0) {
+        return lit;
+      }
+      throw new TmfFilteringException("Unsupported token in jsonPath filter near: " + input.substring(i));
+    }
+
+    private static int scanFieldToken(String input, int start, List<Token> tokens) {
+      int i = start + 1;
+      while (i < input.length()) {
+        char c = input.charAt(i);
+        if (Character.isLetterOrDigit(c) || c == '_' || c == '.' || c == '@') {
+          i++;
+        } else if (c == '[' && input.startsWith("[?(", i)) {
+          i = skipCorrelationBrackets(input, i);
+        } else if (c == '[' && i + 1 < input.length() && Character.isDigit(input.charAt(i + 1))) {
+          // TMF630 Part 6 JSONPath positional index `[N]` — kept in the FIELD token
+          // verbatim so FieldPathResolver can translate it into a dotted numeric hop
+          // (`arr[2].leaf` → `arr.2.leaf`) that Mongo resolves natively.
+          i = skipPositionalIndex(input, i);
+        } else {
+          break;
+        }
+      }
+      String field = input.substring(start, i);
+      if (!field.startsWith("@.")) {
+        throw new TmfFilteringException("jsonPath field must start with @.: " + field);
+      }
+      // TMF630 Part 6 Functions table lists `length()` returning Integer.
+      // Consumed as part of the field token so parsePrimary can dispatch to
+      // the length-comparison branch instead of the plain field comparison.
+      if (field.endsWith(".length") && input.startsWith("()", i)) {
+        String base = field.substring(0, field.length() - ".length".length());
+        tokens.add(new Token(TokenType.FIELD_LENGTH, base));
+        return i + 2;
+      }
+      tokens.add(new Token(TokenType.FIELD, field));
+      return i;
+    }
+
+    private static int skipCorrelationBrackets(String input, int i) {
+      int depth = 1;
+      i += 3;
+      while (i < input.length() && depth > 0) {
+        char current = input.charAt(i);
+        if (current == '(') {
+          depth++;
+        } else if (current == ')') {
+          depth--;
+        }
+        i++;
+      }
+      if (depth != 0 || i >= input.length() || input.charAt(i) != ']') {
+        throw new TmfFilteringException("Invalid array filter syntax in jsonPath filter.");
+      }
+      return i + 1;
+    }
+
+    private static int skipPositionalIndex(String input, int i) {
+      int j = i + 1;
+      while (j < input.length() && Character.isDigit(input.charAt(j))) {
+        j++;
+      }
+      if (j >= input.length() || input.charAt(j) != ']') {
+        throw new TmfFilteringException("Malformed positional index in jsonPath filter.");
+      }
+      return j + 1;
+    }
+
+    // TMF630 Part 6 regex literal for =~: /pattern/flags. The '\' escape keeps a
+    // literal '/' inside the pattern; trailing letters are flags.
+    private static int scanRegexLiteral(String input, int start, List<Token> tokens) {
+      int i = start + 1;
+      boolean closed = false;
+      boolean escaped = false;
+      while (i < input.length()) {
+        char c = input.charAt(i);
+        i++;
+        if (escaped) {
+          escaped = false;
+        } else if (c == '\\') {
+          escaped = true;
+        } else if (c == '/') {
+          closed = true;
+          break;
+        }
+      }
+      if (!closed) {
+        throw new TmfFilteringException("Unterminated regex literal in jsonPath filter.");
+      }
+      while (i < input.length() && Character.isLetter(input.charAt(i))) {
+        i++;
+      }
+      tokens.add(new Token(TokenType.LITERAL, input.substring(start, i)));
+      return i;
+    }
+
+    private static int scanStringLiteral(String input, int start, List<Token> tokens, char quote) {
+      int i = start + 1;
+      boolean escaped = false;
+      while (i < input.length()) {
+        char c = input.charAt(i);
+        if (c == '\\' && !escaped) {
+          escaped = true;
+          i++;
+        } else if (c == quote && !escaped) {
+          i++;
+          break;
+        } else {
+          escaped = false;
+          i++;
+        }
+      }
+      if (i > input.length() || input.charAt(i - 1) != quote) {
+        throw new TmfFilteringException("Unterminated string literal in jsonPath filter.");
+      }
+      tokens.add(new Token(TokenType.LITERAL, input.substring(start, i)));
+      return i;
+    }
+
+    private static int tryScanNumberOrKeywordLiteral(
+        String input, int start, List<Token> tokens, char ch) {
+      if (!(Character.isDigit(ch) || ch == '-' || ch == 't' || ch == 'f' || ch == 'n')) {
+        return -1;
+      }
+      int i = start;
+      while (i < input.length()) {
+        char c = input.charAt(i);
+        if (Character.isLetterOrDigit(c) || c == '_' || c == '.' || c == '-') {
+          i++;
+        } else {
+          break;
+        }
+      }
+      String token = input.substring(start, i);
+      if (!isBooleanNullOrNumeric(token)) {
+        return -1;
+      }
+      tokens.add(new Token(TokenType.LITERAL, token));
+      return i;
+    }
+
+    private static boolean isBooleanNullOrNumeric(String token) {
+      String lowered = token.toLowerCase(Locale.ROOT);
+      return lowered.equals("true")
+          || lowered.equals("false")
+          || lowered.equals("null")
+          || isNumericToken(token);
     }
 
     private static boolean isNumericToken(String value) {

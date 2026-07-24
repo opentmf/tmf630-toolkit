@@ -174,6 +174,12 @@ public class PredicateFactory {
     return w.getValue();
   }
 
+  // sonar java:S1872 — comparing the annotation's FQN string rather than doing
+  // `instanceof Document` is deliberate: attribute-filtering-core must not
+  // compile-depend on spring-data-mongodb (an optional runtime dep declared by
+  // the mongo-aggregation module). String-based detection keeps the core module
+  // backend-agnostic.
+  @SuppressWarnings("java:S1872")
   private static boolean isMongoRoot(PathBuilder<?> root) {
     Class<?> type = root.getType();
     if (type == null) {

@@ -4,22 +4,16 @@ import java.util.ArrayList;
 import java.util.List;
 import org.springframework.data.domain.Sort;
 
-public final class TmfSort {
+public record TmfSort(List<TmfSortTerm> terms) {
 
   private static final TmfSort EMPTY = new TmfSort(List.of());
 
-  private final List<TmfSortTerm> terms;
-
-  public TmfSort(List<TmfSortTerm> terms) {
-    this.terms = terms == null ? List.of() : List.copyOf(terms);
+  public TmfSort {
+    terms = terms == null ? List.of() : List.copyOf(terms);
   }
 
   public static TmfSort empty() {
     return EMPTY;
-  }
-
-  public List<TmfSortTerm> terms() {
-    return terms;
   }
 
   public boolean isEmpty() {

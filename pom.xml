@@ -73,6 +73,7 @@
     <maven.gpg.plugin.version>3.2.8</maven.gpg.plugin.version>
     <maven.release.plugin.version>3.3.1</maven.release.plugin.version>
     <central.publishing.maven.plugin.version>0.11.0</central.publishing.maven.plugin.version>
+    <sonar.maven.plugin.version>5.0.0.4389</sonar.maven.plugin.version>
     <failsafe.includes.pattern>**/*IT.java</failsafe.includes.pattern>
     <tmf630.sql.it.datasource.url>jdbc:tc:postgresql:18.1-alpine:///db</tmf630.sql.it.datasource.url>
   </properties>
@@ -386,6 +387,65 @@
               <publishingServerId>publish-to-central</publishingServerId>
               <autoPublish>true</autoPublish>
             </configuration>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+
+    <!--
+      Opt-in local Sonar analysis. Enable with `mvn -Psonar clean verify`.
+      Authentication is not baked in — pass a token via the SONAR_TOKEN env var
+      or `-Dsonar.token=…` at runtime. The default `sonar.host.url` points at a
+      locally-running SonarQube (http://localhost:9000); override with
+      `-Dsonar.host.url=…` for other environments.
+
+      The `sonar:sonar` execution binds to the `verify` phase in every module.
+      The plugin's own reactor-detection logic notices the multi-module build
+      and defers the actual scan to fire exactly once at the end (the log line
+      "Delaying SonarQube Scanner to the end of multi-module project" marks the
+      deferral). `sonar.qualitygate.wait=true` blocks the build until Sonar
+      returns the Quality Gate verdict, and Maven fails the build on a red gate.
+    -->
+    <profile>
+      <id>sonar</id>
+      <properties>
+        <sonar.host.url>http://localhost:9000</sonar.host.url>
+        <sonar.projectKey>org.opentmf.query:tmf630-toolkit</sonar.projectKey>
+        <sonar.qualitygate.wait>true</sonar.qualitygate.wait>
+        <!--
+          Multi-module Jacoco coverage merge: `sonar.coverage.jacoco.xmlReportPaths`
+          takes a comma-separated list of report files, and Sonar unions their
+          coverage before attributing to source classes. Without this, each
+          module's report only credits its OWN tests — so a class in `filter-core`
+          exercised only by an IT in `filtering-autoconfigure` (typical for
+          isMongoRoot-style backend probes) shows as uncovered in `filter-core`'s
+          per-module report, dragging new_coverage below the Quality Gate
+          threshold on downstream scans. The path list below covers every module
+          that generates a report.
+        -->
+        <sonar.coverage.jacoco.xmlReportPaths>
+          ${maven.multiModuleProjectDirectory}/tmf630-toolkit-paging-sorting-core/target/site/jacoco/jacoco.xml,
+          ${maven.multiModuleProjectDirectory}/tmf630-toolkit-paging-sorting-autoconfigure/target/site/jacoco/jacoco.xml,
+          ${maven.multiModuleProjectDirectory}/tmf630-toolkit-attribute-filtering-core/target/site/jacoco/jacoco.xml,
+          ${maven.multiModuleProjectDirectory}/tmf630-toolkit-attribute-filtering-autoconfigure/target/site/jacoco/jacoco.xml,
+          ${maven.multiModuleProjectDirectory}/tmf630-toolkit-mongo-aggregation/target/site/jacoco/jacoco.xml
+        </sonar.coverage.jacoco.xmlReportPaths>
+      </properties>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.sonarsource.scanner.maven</groupId>
+            <artifactId>sonar-maven-plugin</artifactId>
+            <version>${sonar.maven.plugin.version}</version>
+            <executions>
+              <execution>
+                <id>sonar-analysis</id>
+                <phase>verify</phase>
+                <goals>
+                  <goal>sonar</goal>
+                </goals>
+              </execution>
+            </executions>
           </plugin>
         </plugins>
       </build>

@@ -12,6 +12,8 @@ public final class AggregationKeyTranslator {
   /** Mongo aggregation operator used to fold an array-valued leaf to a scalar. */
   public static final String MAX_REDUCER = "$max";
 
+  private static final String INPUT_KEY = "input";
+
   private AggregationKeyTranslator() {}
 
   public static Document translate(JsonPathSortAst.SortPath sortPath) {
@@ -61,7 +63,7 @@ public final class AggregationKeyTranslator {
         new Document(
             "$filter",
             new Document()
-                .append("input", new Document("$ifNull", List.of(inputRef, List.of())))
+                .append(INPUT_KEY, new Document("$ifNull", List.of(inputRef, List.of())))
                 .append("as", "c")
                 .append("cond", translatePredicate(hop.predicate(), "$$c", resolver, elementType)));
 
@@ -138,7 +140,7 @@ public final class AggregationKeyTranslator {
           new Document(
               "$map",
               new Document()
-                  .append("input", filterStage)
+                  .append(INPUT_KEY, filterStage)
                   .append("as", "c")
                   .append("in", translatePerElement(agg.inner(), "$$c", resolver, elementType)));
       String op =
@@ -211,7 +213,7 @@ public final class AggregationKeyTranslator {
             new Document(
                 "$map",
                 new Document()
-                    .append("input", new Document("$ifNull", List.of(pathExpr, List.of())))
+                    .append(INPUT_KEY, new Document("$ifNull", List.of(pathExpr, List.of())))
                     .append("as", "e")
                     .append("in", buildCoercionChain(leaf, "$$e")));
         return new Document(leafArrayReducerOp, mapStage);
@@ -274,7 +276,7 @@ public final class AggregationKeyTranslator {
     return new Document(
         "$convert",
         new Document()
-            .append("input", input)
+            .append(INPUT_KEY, input)
             .append("to", type.mongoTypeName())
             .append("onError", null));
   }

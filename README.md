@@ -2575,6 +2575,28 @@ making them resolvable from downstream projects on the same machine. `verify` ru
 tests and integration tests but stops before installation, so a downstream project
 building against the current `-SNAPSHOT` would not find the artifacts.
 
+### Local Sonar analysis (opt-in)
+
+An opt-in `sonar` Maven profile runs the SonarScanner against a locally-running
+SonarQube and blocks the build on Quality Gate failure. Authentication is not baked
+into the pom — pass a token via env var or CLI:
+
+```bash
+# Against local SonarQube (http://localhost:9000) — the profile default:
+SONAR_TOKEN=<your-local-token> mvn -Psonar clean verify
+
+# Against a non-default host:
+mvn -Psonar -Dsonar.host.url=https://sonar.example -Dsonar.token=<token> clean verify
+```
+
+The scanner binds to the `verify` phase in every module; the plugin's own
+reactor-detection defers the actual scan to fire exactly once at the end of the
+build (watch for `Delaying SonarQube Scanner to the end of multi-module project`
+in the log — that's the deferral confirmation). `sonar.qualitygate.wait=true`
+blocks the build until Sonar returns the Quality Gate verdict; a red gate fails
+the build. Without `-Psonar`, no Sonar plugin is activated and the build behaves
+exactly as before.
+
 ## License
 
 Apache License 2.0.

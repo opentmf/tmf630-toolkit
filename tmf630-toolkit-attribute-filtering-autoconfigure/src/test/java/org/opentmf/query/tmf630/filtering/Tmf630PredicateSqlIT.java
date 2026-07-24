@@ -8,7 +8,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
-import java.util.stream.Collectors;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -72,10 +71,11 @@ class Tmf630PredicateSqlIT {
         .andExpect(status().isOk());
 
     String sql = firstSelectSql();
-    assertThat(sql).contains(" where ");
-    assertThat(sql).contains("=");
-    assertThat(sql).containsAnyOf("<>", "!=");
-    assertThat(sql).contains("lower(");
+    assertThat(sql)
+        .contains(" where ")
+        .contains("=")
+        .containsAnyOf("<>", "!=")
+        .contains("lower(");
   }
 
   @Test
@@ -93,11 +93,12 @@ class Tmf630PredicateSqlIT {
         .andExpect(status().isOk());
 
     String sql = firstSelectSql();
-    assertThat(sql).contains(">");
-    assertThat(sql).contains("<");
-    assertThat(sql).contains(">=");
-    assertThat(sql).contains("<=");
-    assertThat(sql).contains("between");
+    assertThat(sql)
+        .contains(">")
+        .contains("<")
+        .contains(">=")
+        .contains("<=")
+        .contains("between");
   }
 
   @Test
@@ -114,10 +115,11 @@ class Tmf630PredicateSqlIT {
         .andExpect(status().isOk());
 
     String sql = firstSelectSql();
-    assertThat(sql).contains(" in ");
-    assertThat(sql).contains(" not in ");
-    assertThat(sql).contains(" is null");
-    assertThat(sql).contains(" is not null");
+    assertThat(sql)
+        .contains(" in ")
+        .contains(" not in ")
+        .contains(" is null")
+        .contains(" is not null");
   }
 
   @Test
@@ -139,11 +141,13 @@ class Tmf630PredicateSqlIT {
                 .contentType(MediaType.APPLICATION_JSON))
         .andExpect(status().isOk());
 
+    // Querydsl StringPath.matches is rendered as LIKE for this stack/dialect —
+    // hence the third `.contains(" like ")` in addition to the substring "like".
     String sql = firstSelectSql();
-    assertThat(sql).contains("like");
-    assertThat(sql).contains("lower(");
-    // Querydsl StringPath.matches is rendered as LIKE for this stack/dialect.
-    assertThat(sql).contains(" like ");
+    assertThat(sql)
+        .contains("like")
+        .contains("lower(")
+        .contains(" like ");
   }
 
   @Test
@@ -161,12 +165,13 @@ class Tmf630PredicateSqlIT {
         .andExpect(status().isOk());
 
     String sql = firstSelectSql();
-    assertThat(sql).contains(" where ");
-    assertThat(sql).contains("=");
-    assertThat(sql).contains(">=");
-    assertThat(sql).contains(" in ");
-    assertThat(sql).contains(" is null");
-    assertThat(sql).contains(" like ");
+    assertThat(sql)
+        .contains(" where ")
+        .contains("=")
+        .contains(">=")
+        .contains(" in ")
+        .contains(" is null")
+        .contains(" like ");
   }
 
   @Test
@@ -180,9 +185,10 @@ class Tmf630PredicateSqlIT {
         .andExpect(status().isOk());
 
     String sql = firstSelectSql();
-    assertThat(sql).contains("status");
-    assertThat(sql).contains("priority");
-    assertThat(sql).contains(" where ");
+    assertThat(sql)
+        .contains("status")
+        .contains("priority")
+        .contains(" where ");
   }
 
   @Test
@@ -218,8 +224,7 @@ class Tmf630PredicateSqlIT {
     // shape check just confirms the OR fold reached QueryDSL — the exact SQL text depends
     // on the dialect (Hibernate reshuffles equalities into IN(?,?) on the same column).
     String sql = firstSelectSql();
-    assertThat(sql).contains(" where ");
-    assertThat(sql).containsAnyOf(" or ", " in ");
+    assertThat(sql).contains(" where ").containsAnyOf(" or ", " in ");
   }
 
   @Test
@@ -256,10 +261,7 @@ class Tmf630PredicateSqlIT {
         .andExpect(status().isOk());
 
     String sql = firstSelectSql();
-    assertThat(sql).contains(">");
-    assertThat(sql).contains("<");
-    assertThat(sql).contains(">=");
-    assertThat(sql).contains("<=");
+    assertThat(sql).contains(">").contains("<").contains(">=").contains("<=");
   }
 
   @Test
@@ -275,12 +277,13 @@ class Tmf630PredicateSqlIT {
                 .contentType(MediaType.APPLICATION_JSON))
         .andExpect(status().isOk());
 
-    String sql = firstSelectSql();
-    assertThat(sql).contains(" where ");
-    assertThat(sql).contains("status");
     // Case-insensitive regex on JPA goes through Ops.MATCHES_IC → lower(...) LIKE lower(?)
     // in Hibernate's default rendering for this dialect.
-    assertThat(sql).containsAnyOf(" like ", " matches ");
+    String sql = firstSelectSql();
+    assertThat(sql)
+        .contains(" where ")
+        .contains("status")
+        .containsAnyOf(" like ", " matches ");
   }
 
   private static SqlSearchEntity entity(
@@ -299,7 +302,7 @@ class Tmf630PredicateSqlIT {
         SqlCaptureInspector.snapshot().stream()
             .filter(sql -> sql.trim().toUpperCase(Locale.ROOT).startsWith("SELECT"))
             .map(sql -> sql.toLowerCase(Locale.ROOT))
-            .collect(Collectors.toList());
+            .toList();
     assertThat(selects).isNotEmpty();
     return selects.get(0);
   }

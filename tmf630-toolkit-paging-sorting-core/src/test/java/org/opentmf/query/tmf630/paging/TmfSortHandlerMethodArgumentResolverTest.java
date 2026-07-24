@@ -42,6 +42,6 @@ class TmfSortHandlerMethodArgumentResolverTest {
 
   private static class ControllerStub {
     @SuppressWarnings("unused")
-    void search(Sort sort) {}
+    void search(Sort sort) { /* signature-only stub for MethodParameter reflection */ }
   }
 }

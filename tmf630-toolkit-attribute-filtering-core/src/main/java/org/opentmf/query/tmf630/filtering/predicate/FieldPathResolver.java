@@ -11,6 +11,11 @@ import java.util.Collection;
 
 public class FieldPathResolver {
 
+  // sonar java:S1452 — root entity type is only known at runtime (arrives from
+  // controller-side @QuerydslPredicate resolution as Class<?>), so PathBuilder<?>
+  // is the only honest return type here. Removing the wildcard would require
+  // unchecked casts at every call site.
+  @SuppressWarnings("java:S1452")
   public PathBuilder<?> createRootPath(Class<?> rootEntity) {
     return new PathBuilder<>(rootEntity, Introspector.decapitalize(rootEntity.getSimpleName()));
   }
@@ -28,36 +33,46 @@ public class FieldPathResolver {
     StringBuilder resolvedPath = new StringBuilder();
     String[] segments = fieldPath.split("\\.");
     for (int i = 0; i < segments.length; i++) {
-      String segment = segments[i];
-      int bracket = segment.indexOf('[');
-      String name = bracket < 0 ? segment : segment.substring(0, bracket);
-      String indexDigits = bracket < 0 ? null : extractIndexDigits(segment, bracket, fieldPath);
-
-      Field field = findField(current, name);
-      if (field == null) {
-        throw new TmfFilteringException("Unknown field path: " + fieldPath);
-      }
-
-      if (resolvedPath.length() > 0) {
-        resolvedPath.append('.');
-      }
-      resolvedPath.append(name);
-
-      boolean fieldIsCollection = Collection.class.isAssignableFrom(field.getType());
-      if (indexDigits != null) {
-        if (!fieldIsCollection) {
-          throw new TmfFilteringException(
-              "Positional index [N] requires a collection field: " + fieldPath);
-        }
-        resolvedPath.append('.').append(indexDigits);
-      }
+      SegmentResolution resolution = resolveSegment(segments[i], current, fieldPath);
+      appendSegment(resolvedPath, resolution.name(), resolution.indexDigits());
       boolean isLastSegment = i == segments.length - 1;
-      leafIsCollection = isLastSegment && fieldIsCollection && indexDigits == null;
-      current = resolveFieldType(field);
+      leafIsCollection = isLastSegment && resolution.fieldIsCollection() && resolution.indexDigits() == null;
+      current = resolveFieldType(resolution.field());
     }
 
     return new ResolvedField(resolvedPath.toString(), current, leafIsCollection);
   }
+
+  private SegmentResolution resolveSegment(String segment, Class<?> current, String fieldPath) {
+    int bracket = segment.indexOf('[');
+    String name = bracket < 0 ? segment : segment.substring(0, bracket);
+    String indexDigits = bracket < 0 ? null : extractIndexDigits(segment, bracket, fieldPath);
+
+    Field field = findField(current, name);
+    if (field == null) {
+      throw new TmfFilteringException("Unknown field path: " + fieldPath);
+    }
+
+    boolean fieldIsCollection = Collection.class.isAssignableFrom(field.getType());
+    if (indexDigits != null && !fieldIsCollection) {
+      throw new TmfFilteringException(
+          "Positional index [N] requires a collection field: " + fieldPath);
+    }
+    return new SegmentResolution(field, name, indexDigits, fieldIsCollection);
+  }
+
+  private static void appendSegment(StringBuilder resolvedPath, String name, String indexDigits) {
+    if (!resolvedPath.isEmpty()) {
+      resolvedPath.append('.');
+    }
+    resolvedPath.append(name);
+    if (indexDigits != null) {
+      resolvedPath.append('.').append(indexDigits);
+    }
+  }
+
+  private record SegmentResolution(
+      Field field, String name, String indexDigits, boolean fieldIsCollection) {}
 
   private String extractIndexDigits(String segment, int bracket, String fullPath) {
     if (!segment.endsWith("]")) {

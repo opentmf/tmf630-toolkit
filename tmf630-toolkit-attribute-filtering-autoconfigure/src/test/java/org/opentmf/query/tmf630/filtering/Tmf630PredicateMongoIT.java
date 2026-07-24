@@ -423,6 +423,7 @@ class Tmf630PredicateMongoIT {
   }
 
   @Test
+  @SuppressWarnings("java:S125") // regression notes contain $arrayElemAt/$convert tokens Sonar mis-detects as code
   void outerNumWrapperWithArrayIntermediateSortsNumericallyLikeInnerForm() throws Exception {
     // Regression for the silent-drop bug found during 2.1.0-SNAPSHOT pre-release
     // testing. When the dotted leaf path of an outer-wrapper sort crosses an

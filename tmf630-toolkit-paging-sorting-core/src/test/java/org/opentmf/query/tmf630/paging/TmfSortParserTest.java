@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.data.domain.Sort;
 
 class TmfSortParserTest {
@@ -36,7 +38,8 @@ class TmfSortParserTest {
   @Test
   void parseRejectsNonAllowlistedField() {
     TmfSortParser parser = new TmfSortParser(List.of("id"), false);
-    assertThrows(IllegalArgumentException.class, () -> parser.parse(List.of("-createdOn")));
+    List<String> terms = List.of("-createdOn");
+    assertThrows(IllegalArgumentException.class, () -> parser.parse(terms));
   }
 
   @Test
@@ -51,7 +54,8 @@ class TmfSortParserTest {
   @Test
   void parseRejectsNestedPropertyWhenDisabled() {
     TmfSortParser parser = new TmfSortParser(List.of(), false);
-    assertThrows(IllegalArgumentException.class, () -> parser.parse(List.of("customer.name")));
+    List<String> terms = List.of("customer.name");
+    assertThrows(IllegalArgumentException.class, () -> parser.parse(terms));
   }
 
   @Test
@@ -142,41 +146,25 @@ class TmfSortParserTest {
     assertEquals(TmfSortTerm.Kind.JSONPATH, TmfSortParser.classify("arr[*].value"));
   }
 
-  @Test
-  void parseRejectsJsonPathTermAsNotYetSupported() {
+  @ParameterizedTest(name = "parse rejects non-plain sort term \"{0}\" with message fragment \"{1}\"")
+  @CsvSource({
+      "$.arr[?(@.id == 'X')].value, jsonpath",
+      "arr[id=X].value, simple-rich",
+      "-$.arr[?(@.id == 'X')].value, $.arr",
+  })
+  void parseRejectsNonPlainTermsAsNotYetSupported(String term, String messageFragment) {
     TmfSortParser parser = new TmfSortParser(List.of(), true);
+    List<String> terms = List.of(term);
     IllegalArgumentException ex =
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> parser.parse(List.of("$.arr[?(@.id == 'X')].value")));
-    assertTrue(ex.getMessage().contains("jsonpath"));
-  }
-
-  @Test
-  void parseRejectsSimpleRichTermAsNotYetSupported() {
-    TmfSortParser parser = new TmfSortParser(List.of(), true);
-    IllegalArgumentException ex =
-        assertThrows(
-            IllegalArgumentException.class, () -> parser.parse(List.of("arr[id=X].value")));
-    assertTrue(ex.getMessage().contains("simple-rich"));
+        assertThrows(IllegalArgumentException.class, () -> parser.parse(terms));
+    assertTrue(ex.getMessage().contains(messageFragment));
   }
 
   @Test
   void parseRejectsMixedPlainAndJsonPathTermsBecauseOneIsNonPlain() {
     TmfSortParser parser = new TmfSortParser(List.of(), true);
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> parser.parse(List.of("name,$.arr[?(@.id == 'X')].value")));
-  }
-
-  @Test
-  void parseHonoursDirectionPrefixOnNonPlainTermBeforeRejecting() {
-    TmfSortParser parser = new TmfSortParser(List.of(), true);
-    IllegalArgumentException ex =
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> parser.parse(List.of("-$.arr[?(@.id == 'X')].value")));
-    assertTrue(ex.getMessage().contains("$.arr"));
+    List<String> terms = List.of("name,$.arr[?(@.id == 'X')].value");
+    assertThrows(IllegalArgumentException.class, () -> parser.parse(terms));
   }
 
   @Test
@@ -226,8 +214,8 @@ class TmfSortParserTest {
   @Test
   void parseRichRunsAllowlistOnPlainTermsOnly() {
     TmfSortParser parser = new TmfSortParser(List.of("name"), true);
-    assertThrows(
-        IllegalArgumentException.class, () -> parser.parseRich(List.of("createdOn")));
+    List<String> disallowed = List.of("createdOn");
+    assertThrows(IllegalArgumentException.class, () -> parser.parseRich(disallowed));
     TmfSort rich = parser.parseRich(List.of("$.arr[?(@.id == 'X')].value"));
     assertEquals(1, rich.terms().size());
     assertEquals(TmfSortTerm.Kind.JSONPATH, rich.terms().get(0).kind());

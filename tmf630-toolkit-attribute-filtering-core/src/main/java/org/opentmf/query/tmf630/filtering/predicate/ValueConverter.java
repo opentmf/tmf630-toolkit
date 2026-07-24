@@ -19,6 +19,8 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class ValueConverter {
 
+  private static final String FIELD_PREFIX = "Field \"";
+
   private static final Map<Class<?>, Class<?>> PRIMITIVE_TO_WRAPPER = new HashMap<>();
   static final Map<Class<?>, FormatHint> TYPE_FORMAT_HINTS = new HashMap<>();
 
@@ -83,7 +85,7 @@ public class ValueConverter {
 
   private static String buildCannotConvertMessage(String fieldName, Class<?> type) {
     String base = fieldName != null
-        ? "Field \"" + fieldName + "\" has type " + type.getSimpleName() + " which cannot be converted from a String."
+        ? FIELD_PREFIX + fieldName + "\" has type " + type.getSimpleName() + " which cannot be converted from a String."
         : "Cannot convert value to type: " + type.getName();
     FormatHint hint = TYPE_FORMAT_HINTS.get(type);
     return hint != null ? base + " Expected format: " + hint.format() + ", example: " + hint.example() : base;
@@ -91,7 +93,7 @@ public class ValueConverter {
 
   private static String buildConversionFailedMessage(String rawValue, String fieldName, Class<?> type) {
     String base = fieldName != null
-        ? "Field \"" + fieldName + "\" (" + type.getSimpleName() + ") could not be parsed from value \"" + rawValue + "\"."
+        ? FIELD_PREFIX + fieldName + "\" (" + type.getSimpleName() + ") could not be parsed from value \"" + rawValue + "\"."
         : "Failed to convert value '" + rawValue + "' to " + type.getSimpleName() + ".";
     FormatHint hint = TYPE_FORMAT_HINTS.get(type);
     return hint != null ? base + " Expected format: " + hint.format() + ", example: " + hint.example() : base;
@@ -108,6 +110,8 @@ public class ValueConverter {
           return result;
         }
       } catch (Exception ignored) {
+        // Intentionally swallow: a factory that throws for one input should not
+        // block subsequent factories or the Enum.valueOf fallback below.
       }
     }
 
@@ -115,7 +119,7 @@ public class ValueConverter {
       return Enum.valueOf((Class<Enum>) enumType, rawValue);
     } catch (IllegalArgumentException ex) {
       String msg = fieldName != null
-          ? "Field \"" + fieldName + "\" (" + enumType.getSimpleName() + ") could not be parsed from value \"" + rawValue + "\"."
+          ? FIELD_PREFIX + fieldName + "\" (" + enumType.getSimpleName() + ") could not be parsed from value \"" + rawValue + "\"."
           : "Failed to convert value '" + rawValue + "' to " + enumType.getSimpleName() + ".";
       throw new TmfFilteringException(msg, ex);
     }

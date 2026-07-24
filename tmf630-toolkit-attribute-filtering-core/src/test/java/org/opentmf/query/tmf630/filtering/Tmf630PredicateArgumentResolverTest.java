@@ -11,6 +11,9 @@ import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.springframework.web.context.request.NativeWebRequest;
 import org.opentmf.query.tmf630.filtering.config.AllowlistMode;
 import org.opentmf.query.tmf630.filtering.config.CombineMode;
 import org.opentmf.query.tmf630.filtering.config.PredicateLimits;
@@ -69,35 +72,29 @@ class Tmf630PredicateArgumentResolverTest {
   }
 
   @Test
-  void rejectsUnsupportedParameterWithoutQuerydslRoot() {
+  void rejectsUnsupportedParameterWithoutQuerydslRoot() throws Exception {
     Tmf630PredicateArgumentResolver resolver = newResolver(AllowlistMode.ALLOW_ALL);
     MockHttpServletRequest request = new MockHttpServletRequest();
     request.setParameter("name.eq", "abc");
+    MethodParameter parameter = invalidPredicateParameter();
+    ServletWebRequest webRequest = new ServletWebRequest(request);
 
     assertThrows(
         TmfFilteringException.class,
-        () ->
-            resolver.resolveArgument(
-                invalidPredicateParameter(),
-                null,
-                new ServletWebRequest(request),
-                null));
+        () -> resolver.resolveArgument(parameter, null, webRequest, null));
   }
 
   @Test
-  void rejectsDisallowedFieldWhenAllowlistIsStrict() {
+  void rejectsDisallowedFieldWhenAllowlistIsStrict() throws Exception {
     Tmf630PredicateArgumentResolver resolver = newResolver(AllowlistMode.DENY_ALL);
     MockHttpServletRequest request = new MockHttpServletRequest();
     request.setParameter("forbidden.eq", "abc");
+    MethodParameter parameter = predicateParameter();
+    ServletWebRequest webRequest = new ServletWebRequest(request);
 
     assertThrows(
         TmfFilteringException.class,
-        () ->
-            resolver.resolveArgument(
-                predicateParameter(),
-                null,
-                new ServletWebRequest(request),
-                null));
+        () -> resolver.resolveArgument(parameter, null, webRequest, null));
   }
 
   @Test
@@ -198,7 +195,7 @@ class Tmf630PredicateArgumentResolverTest {
   }
 
   @Test
-  void rejectsWhenPredicateLimitsExceeded() {
+  void rejectsWhenPredicateLimitsExceeded() throws Exception {
     Tmf630FilterSettings settings =
         new Tmf630FilterSettings(
             true,
@@ -231,15 +228,12 @@ class Tmf630PredicateArgumentResolverTest {
 
     MockHttpServletRequest request = new MockHttpServletRequest();
     request.setParameter("name.eq", "a", "b");
+    MethodParameter parameter = predicateParameter();
+    ServletWebRequest webRequest = new ServletWebRequest(request);
 
     assertThrows(
         TmfFilteringException.class,
-        () ->
-            resolver.resolveArgument(
-                predicateParameter(),
-                null,
-                new ServletWebRequest(request),
-                null));
+        () -> resolver.resolveArgument(parameter, null, webRequest, null));
   }
 
   @Test
@@ -259,19 +253,16 @@ class Tmf630PredicateArgumentResolverTest {
   }
 
   @Test
-  void rejectsNonFilterJsonPathExpression() {
+  void rejectsNonFilterJsonPathExpression() throws Exception {
     Tmf630PredicateArgumentResolver resolver = newResolver(AllowlistMode.ALLOW_ALL);
     MockHttpServletRequest request = new MockHttpServletRequest();
     request.setParameter("filter", "$.name");
+    MethodParameter parameter = predicateParameter();
+    ServletWebRequest webRequest = new ServletWebRequest(request);
 
     assertThrows(
         TmfFilteringException.class,
-        () ->
-            resolver.resolveArgument(
-                predicateParameter(),
-                null,
-                new ServletWebRequest(request),
-                null));
+        () -> resolver.resolveArgument(parameter, null, webRequest, null));
   }
 
   @Test
@@ -366,20 +357,17 @@ class Tmf630PredicateArgumentResolverTest {
   }
 
   @Test
-  void rejectsWhenMultipleFilterParametersProvided() {
+  void rejectsWhenMultipleFilterParametersProvided() throws Exception {
     Tmf630PredicateArgumentResolver resolver = newResolver(AllowlistMode.ALLOW_ALL);
     MockHttpServletRequest request = new MockHttpServletRequest();
     request.addParameter("filter", "$[?(@.name == 'a')]");
     request.addParameter("filter", "$[?(@.name == 'b')]");
+    MethodParameter parameter = predicateParameter();
+    ServletWebRequest webRequest = new ServletWebRequest(request);
 
     assertThrows(
         TmfFilteringException.class,
-        () ->
-            resolver.resolveArgument(
-                predicateParameter(),
-                null,
-                new ServletWebRequest(request),
-                null));
+        () -> resolver.resolveArgument(parameter, null, webRequest, null));
   }
 
   @Test
@@ -420,7 +408,7 @@ class Tmf630PredicateArgumentResolverTest {
   }
 
   @Test
-  void rejectsCsvExpansionThatExceedsMaxValuesPerKey() {
+  void rejectsCsvExpansionThatExceedsMaxValuesPerKey() throws Exception {
     Tmf630FilterSettings settings =
         new Tmf630FilterSettings(
             true,
@@ -451,19 +439,16 @@ class Tmf630PredicateArgumentResolverTest {
                 new PredicateFactory(false, 128)));
     MockHttpServletRequest request = new MockHttpServletRequest();
     request.setParameter("name.in", "a,b,c");
+    MethodParameter parameter = predicateParameter();
+    ServletWebRequest webRequest = new ServletWebRequest(request);
 
     assertThrows(
         TmfFilteringException.class,
-        () ->
-            resolver.resolveArgument(
-                predicateParameter(),
-                null,
-                new ServletWebRequest(request),
-                null));
+        () -> resolver.resolveArgument(parameter, null, webRequest, null));
   }
 
   @Test
-  void rejectsWhenJsonPathFilterIsDisabled() {
+  void rejectsWhenJsonPathFilterIsDisabled() throws Exception {
 
     Tmf630FilterSettings settings =
         new Tmf630FilterSettings(
@@ -495,15 +480,12 @@ class Tmf630PredicateArgumentResolverTest {
             new JsonPathFilterPredicateBuilder(pathResolver, valueConverter, predicateFactory));
     MockHttpServletRequest request = new MockHttpServletRequest();
     request.setParameter("filter", "$[?(@.name == 'x')]");
+    MethodParameter parameter = predicateParameter();
+    ServletWebRequest webRequest = new ServletWebRequest(request);
 
     assertThrows(
         TmfFilteringException.class,
-        () ->
-            resolver.resolveArgument(
-                predicateParameter(),
-                null,
-                new ServletWebRequest(request),
-                null));
+        () -> resolver.resolveArgument(parameter, null, webRequest, null));
   }
 
   // ---------- TMF630 value-list (comma-OR) semantics for implicit eq ----------
@@ -621,16 +603,16 @@ class Tmf630PredicateArgumentResolverTest {
   }
 
   @Test
-  void implicitEqCsvEnforcesMaxValuesPerKeyOnElementCount() {
+  void implicitEqCsvEnforcesMaxValuesPerKeyOnElementCount() throws Exception {
     Tmf630PredicateArgumentResolver resolver = csvResolver(CombineMode.OR, 2, true);
     MockHttpServletRequest request = new MockHttpServletRequest();
     request.setParameter("name", "a,b,c");
+    MethodParameter parameter = predicateParameter();
+    ServletWebRequest webRequest = new ServletWebRequest(request);
 
     assertThrows(
         TmfFilteringException.class,
-        () ->
-            resolver.resolveArgument(
-                predicateParameter(), null, new ServletWebRequest(request), null));
+        () -> resolver.resolveArgument(parameter, null, webRequest, null));
   }
 
   @Test
@@ -687,6 +669,32 @@ class Tmf630PredicateArgumentResolverTest {
     assertEquals("entity.age > 18", resolveToString(resolver, request));
   }
 
+  /**
+   * Two malformed encoded-operator shapes that must fall through as unknown keys.
+   * <ul>
+   *   <li>{@code hello=world} — a lone {@code =} in the middle of the name is not a valid
+   *       {@code ==} or {@code =~} operator, so {@code normalizeEncodedOperatorKey}
+   *       hits its else-branch bailout.</li>
+   *   <li>{@code >5} — an operator character at position 0 leaves an empty fieldPath,
+   *       tripping the empty-fieldPath guard.</li>
+   * </ul>
+   */
+  @ParameterizedTest(name = "rejects malformed encoded operator: name=\"{0}\" value=\"{1}\"")
+  @CsvSource({"hello=world, x", "'>5', abc"})
+  void encodedOperatorMalformedNamesRejectedAsUnknownKey(String name, String value)
+      throws Exception {
+    Tmf630PredicateArgumentResolver resolver = csvResolver(CombineMode.OR, 20, true);
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setParameter(name, value);
+    // Extract single-throwing invocation for assertThrows: S5778 requires the lambda
+    // to contain only one call that might throw.
+    NativeWebRequest webRequest = new ServletWebRequest(request);
+    MethodParameter param = predicateParameter();
+    assertThrows(
+        TmfFilteringException.class,
+        () -> resolver.resolveArgument(param, null, webRequest, null));
+  }
+
   @Test
   void encodedOringExampleFoldsSemicolonSeparatedExpressions() throws Exception {
     // Spec example: ?dateTime%3C2013-04-20;dateTime%3C2017-04-20 — one decoded name
@@ -704,11 +712,11 @@ class Tmf630PredicateArgumentResolverTest {
     Tmf630PredicateArgumentResolver disabled = csvResolver(CombineMode.OR, 20, true);
     MockHttpServletRequest request = new MockHttpServletRequest();
     request.setParameter("name=~^ab.*", "");
+    MethodParameter disabledParam = predicateParameter();
+    ServletWebRequest disabledReq = new ServletWebRequest(request);
     assertThrows(
         TmfFilteringException.class,
-        () ->
-            disabled.resolveArgument(
-                predicateParameter(), null, new ServletWebRequest(request), null));
+        () -> disabled.resolveArgument(disabledParam, null, disabledReq, null));
 
     Tmf630FilterSettings settings =
         new Tmf630FilterSettings(
@@ -816,16 +824,16 @@ class Tmf630PredicateArgumentResolverTest {
   }
 
   @Test
-  void implicitEqSemicolonElementsCountTowardMaxValuesPerKey() {
+  void implicitEqSemicolonElementsCountTowardMaxValuesPerKey() throws Exception {
     Tmf630PredicateArgumentResolver resolver = csvResolver(CombineMode.OR, 2, true);
     MockHttpServletRequest request = new MockHttpServletRequest();
     request.setParameter("name", "a;b;c");
+    MethodParameter parameter = predicateParameter();
+    ServletWebRequest webRequest = new ServletWebRequest(request);
 
     assertThrows(
         TmfFilteringException.class,
-        () ->
-            resolver.resolveArgument(
-                predicateParameter(), null, new ServletWebRequest(request), null));
+        () -> resolver.resolveArgument(parameter, null, webRequest, null));
   }
 
   @Test
@@ -943,12 +951,12 @@ class Tmf630PredicateArgumentResolverTest {
 
   private static class StubController {
     @SuppressWarnings("unused")
-    void search(@QuerydslPredicate(root = Entity.class) com.querydsl.core.types.Predicate predicate) {}
+    void search(@QuerydslPredicate(root = Entity.class) com.querydsl.core.types.Predicate predicate) { /* signature-only stub for MethodParameter reflection */ }
   }
 
   private static class InvalidStubController {
     @SuppressWarnings("unused")
-    void search(com.querydsl.core.types.Predicate predicate) {}
+    void search(com.querydsl.core.types.Predicate predicate) { /* signature-only stub for MethodParameter reflection */ }
   }
 
   private static class Entity {

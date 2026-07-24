@@ -82,9 +82,9 @@ class TmfSortTest {
     TmfSortTerm term =
         new TmfSortTerm(Sort.Direction.ASC, TmfSortTerm.Kind.PLAIN, "id");
     TmfSort sort = new TmfSort(List.of(term));
-    assertThrows(
-        UnsupportedOperationException.class,
-        () -> sort.terms().add(new TmfSortTerm(Sort.Direction.ASC, TmfSortTerm.Kind.PLAIN, "x")));
+    List<TmfSortTerm> terms = sort.terms();
+    TmfSortTerm extra = new TmfSortTerm(Sort.Direction.ASC, TmfSortTerm.Kind.PLAIN, "x");
+    assertThrows(UnsupportedOperationException.class, () -> terms.add(extra));
   }
 
   @Test

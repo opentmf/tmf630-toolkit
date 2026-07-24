@@ -99,177 +99,49 @@ public final class SimpleRichSortParser {
       while (true) {
         String dottedOrCall = readPathSegment();
         if (pos < input.length() && input.charAt(pos) == '[') {
-          pos++;
-          JsonPathSortAst.ComparisonPredicate predicate = parseBracketPredicate();
-          if (pos >= input.length() || input.charAt(pos) != ']') {
-            throw new IllegalArgumentException(
-                "Expected ']' at position " + pos + " in: " + input);
-          }
-          pos++;
-          explicitHops.add(new JsonPathSortAst.ArrayHop(dottedOrCall, predicate));
-          if (pos == input.length()) {
-            throw new IllegalArgumentException(
-                "Sort path is missing a trailing leaf field after the final hop: " + input);
-          }
-          if (input.charAt(pos) != '.') {
-            throw new IllegalArgumentException(
-                "Expected '.' after ']' at position " + pos + " in: " + input);
-          }
-          pos++;
+          explicitHops.add(readBracketHop(dottedOrCall));
         } else {
-          if (explicitHops.isEmpty()) {
-            throw new IllegalArgumentException(
-                "Simple-rich sort term must contain at least one [...] hop: " + input);
-          }
-          if (pos != input.length()) {
-            throw new IllegalArgumentException(
-                "Unexpected trailing input in sort expression: " + input.substring(pos));
-          }
-          return splitTrailing(explicitHops, dottedOrCall);
+          return finishWithTrailingLeaf(explicitHops, dottedOrCall);
         }
       }
+    }
+
+    private JsonPathSortAst.ArrayHop readBracketHop(String dottedOrCall) {
+      pos++;
+      JsonPathSortAst.ComparisonPredicate predicate = parseBracketPredicate();
+      if (pos >= input.length() || input.charAt(pos) != ']') {
+        throw new IllegalArgumentException(
+            "Expected ']' at position " + pos + " in: " + input);
+      }
+      pos++;
+      if (pos == input.length()) {
+        throw new IllegalArgumentException(
+            "Sort path is missing a trailing leaf field after the final hop: " + input);
+      }
+      if (input.charAt(pos) != '.') {
+        throw new IllegalArgumentException(
+            "Expected '.' after ']' at position " + pos + " in: " + input);
+      }
+      pos++;
+      return new JsonPathSortAst.ArrayHop(dottedOrCall, predicate);
+    }
+
+    private JsonPathSortAst.SortPath finishWithTrailingLeaf(
+        List<JsonPathSortAst.ArrayHop> explicitHops, String dottedOrCall) {
+      if (explicitHops.isEmpty()) {
+        throw new IllegalArgumentException(
+            "Simple-rich sort term must contain at least one [...] hop: " + input);
+      }
+      if (pos != input.length()) {
+        throw new IllegalArgumentException(
+            "Unexpected trailing input in sort expression: " + input.substring(pos));
+      }
+      return splitTrailing(explicitHops, dottedOrCall);
     }
 
     private JsonPathSortAst.SortPath splitTrailing(
         List<JsonPathSortAst.ArrayHop> explicitHops, String trailing) {
-      List<String> segments = splitDepthAware(trailing);
-      if (segments.isEmpty() || (segments.size() == 1 && segments.get(0).isEmpty())) {
-        throw new IllegalArgumentException(
-            "Sort path is missing a trailing leaf field after the final hop: " + input);
-      }
-      String lastSegment = segments.get(segments.size() - 1);
-
-      if (lastSegment.indexOf('(') < 0) {
-        // No function call at the leaf — treat the entire trailing path as a single
-        // FieldRef. The translator emits "$$mN.<entire-path>" and Mongo handles object
-        // traversal AND array auto-projection naturally. No naked hops are introduced.
-        for (int i = 0; i < segments.size() - 1; i++) {
-          if (segments.get(i).indexOf('(') >= 0) {
-            throw new IllegalArgumentException(
-                "Function calls are only allowed as the leaf segment, not before more path: "
-                    + segments.get(i));
-          }
-        }
-        return new JsonPathSortAst.SortPath(
-            explicitHops, new JsonPathSortAst.FieldRef(trailing));
-      }
-
-      // Function call at the leaf. Two sub-cases:
-      //   1. The function chain contains an Aggregator (min/max). The aggregator
-      //      needs to $map across an array, so pre-function segments are
-      //      promoted to naked ArrayHops with AlwaysTruePredicate. The
-      //      translator then iterates the right array.
-      //   2. The function chain is pure Coercion (num/str/date). The translator
-      //      handles array intermediates inside Coercion(FieldRef) by emitting
-      //      $map+$convert+$min/$max at the leaf, so naked hops are unnecessary
-      //      AND counter-productive (they would crash on object intermediates
-      //      via $filter on a non-array). Pre-function segments are kept as
-      //      part of the leaf's FieldRef path instead.
-      for (int i = 0; i < segments.size() - 1; i++) {
-        if (segments.get(i).indexOf('(') >= 0) {
-          throw new IllegalArgumentException(
-              "Function call segments are only allowed as the leaf, not before more path: "
-                  + segments.get(i));
-        }
-      }
-      JsonPathSortAst.LeafExpression leaf = parseLeafExpression(lastSegment);
-      if (segments.size() == 1) {
-        return new JsonPathSortAst.SortPath(explicitHops, leaf);
-      }
-      String prePath = String.join(".", segments.subList(0, segments.size() - 1));
-      if (containsAggregator(leaf)) {
-        List<JsonPathSortAst.ArrayHop> all = new ArrayList<>(explicitHops);
-        for (String segment : segments.subList(0, segments.size() - 1)) {
-          all.add(
-              new JsonPathSortAst.ArrayHop(
-                  segment, JsonPathSortAst.AlwaysTruePredicate.INSTANCE));
-        }
-        return new JsonPathSortAst.SortPath(all, leaf);
-      }
-      return new JsonPathSortAst.SortPath(explicitHops, prependPath(leaf, prePath));
-    }
-
-    private static boolean containsAggregator(JsonPathSortAst.LeafExpression leaf) {
-      if (leaf instanceof JsonPathSortAst.Aggregator) {
-        return true;
-      }
-      if (leaf instanceof JsonPathSortAst.Coercion c) {
-        return containsAggregator(c.inner());
-      }
-      return false;
-    }
-
-    private static JsonPathSortAst.LeafExpression prependPath(
-        JsonPathSortAst.LeafExpression leaf, String prefix) {
-      if (leaf instanceof JsonPathSortAst.FieldRef fr) {
-        return new JsonPathSortAst.FieldRef(prefix + "." + fr.fieldPath());
-      }
-      if (leaf instanceof JsonPathSortAst.Coercion c) {
-        return new JsonPathSortAst.Coercion(c.type(), prependPath(c.inner(), prefix));
-      }
-      throw new IllegalStateException(
-          "Aggregator must not reach prependPath (would have taken the naked-hop branch): "
-              + leaf);
-    }
-
-    private static List<String> splitDepthAware(String s) {
-      List<String> parts = new ArrayList<>();
-      int depth = 0;
-      int start = 0;
-      for (int i = 0; i < s.length(); i++) {
-        char c = s.charAt(i);
-        if (c == '(') {
-          depth++;
-        } else if (c == ')') {
-          if (depth == 0) {
-            throw new IllegalArgumentException(
-                "Unbalanced ')' in segment: " + s);
-          }
-          depth--;
-        } else if (c == '.' && depth == 0) {
-          parts.add(s.substring(start, i));
-          start = i + 1;
-        }
-      }
-      if (depth != 0) {
-        throw new IllegalArgumentException("Unbalanced '(' in segment: " + s);
-      }
-      parts.add(s.substring(start));
-      return parts;
-    }
-
-    private static JsonPathSortAst.LeafExpression parseLeafExpression(String text) {
-      if (text.isEmpty()) {
-        throw new IllegalArgumentException("Empty leaf expression");
-      }
-      int paren = text.indexOf('(');
-      if (paren < 0) {
-        return new JsonPathSortAst.FieldRef(text);
-      }
-      if (!text.endsWith(")")) {
-        throw new IllegalArgumentException(
-            "Function call must end with ')' in leaf expression: " + text);
-      }
-      String fnName = text.substring(0, paren);
-      String inner = text.substring(paren + 1, text.length() - 1);
-      JsonPathSortAst.LeafExpression innerExpr = parseLeafExpression(inner);
-      return switch (fnName) {
-        case "max" -> new JsonPathSortAst.Aggregator(
-            JsonPathSortAst.AggregatorOp.MAX, innerExpr);
-        case "min" -> new JsonPathSortAst.Aggregator(
-            JsonPathSortAst.AggregatorOp.MIN, innerExpr);
-        case "str" -> new JsonPathSortAst.Coercion(
-            JsonPathSortAst.CoercionType.STR, innerExpr);
-        case "num" -> new JsonPathSortAst.Coercion(
-            JsonPathSortAst.CoercionType.NUM, innerExpr);
-        case "date" -> new JsonPathSortAst.Coercion(
-            JsonPathSortAst.CoercionType.DATE, innerExpr);
-        default ->
-            throw new IllegalArgumentException(
-                "Unknown function '"
-                    + fnName
-                    + "' in leaf; supported: max, min, str, num, date");
-      };
+      return LeafPathSplitter.splitTrailing(explicitHops, trailing, input);
     }
 
     private String readPathSegment() {
@@ -279,21 +151,7 @@ public final class SimpleRichSortParser {
         if (Character.isLetterOrDigit(c) || c == '_' || c == '.' || c == '-') {
           pos++;
         } else if (c == '(') {
-          int depth = 1;
-          pos++;
-          while (pos < input.length() && depth > 0) {
-            char ch = input.charAt(pos);
-            if (ch == '(') {
-              depth++;
-            } else if (ch == ')') {
-              depth--;
-            }
-            pos++;
-          }
-          if (depth != 0) {
-            throw new IllegalArgumentException(
-                "Unbalanced parentheses starting at position " + start + " in: " + input);
-          }
+          skipBalancedParens(start);
         } else {
           break;
         }
@@ -310,6 +168,24 @@ public final class SimpleRichSortParser {
         throw new IllegalArgumentException("Malformed identifier '" + segment + "' in: " + input);
       }
       return segment;
+    }
+
+    private void skipBalancedParens(int segmentStart) {
+      int depth = 1;
+      pos++;
+      while (pos < input.length() && depth > 0) {
+        char ch = input.charAt(pos);
+        if (ch == '(') {
+          depth++;
+        } else if (ch == ')') {
+          depth--;
+        }
+        pos++;
+      }
+      if (depth != 0) {
+        throw new IllegalArgumentException(
+            "Unbalanced parentheses starting at position " + segmentStart + " in: " + input);
+      }
     }
 
     private JsonPathSortAst.ComparisonPredicate parseBracketPredicate() {

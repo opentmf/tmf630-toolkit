@@ -94,7 +94,7 @@ class TmfPageableHandlerMethodArgumentResolverTest {
   }
 
   @Test
-  void strictModeRejectsInvalidNumericInput() {
+  void strictModeRejectsInvalidNumericInput() throws Exception {
     Tmf630PagingSettings settings =
         new Tmf630PagingSettings(true, 50, 500, true, false, java.util.List.of());
     TmfPageableHandlerMethodArgumentResolver resolver =
@@ -102,15 +102,13 @@ class TmfPageableHandlerMethodArgumentResolverTest {
 
     MockHttpServletRequest request = new MockHttpServletRequest();
     request.setParameter("limit", "abc");
+    MethodParameter parameter = pageableParameter();
+    ModelAndViewContainer mavc = new ModelAndViewContainer();
+    ServletWebRequest webRequest = new ServletWebRequest(request);
 
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            resolver.resolveArgument(
-                pageableParameter(),
-                new ModelAndViewContainer(),
-                new ServletWebRequest(request),
-                null));
+        () -> resolver.resolveArgument(parameter, mavc, webRequest, null));
   }
 
   @Test
@@ -136,33 +134,28 @@ class TmfPageableHandlerMethodArgumentResolverTest {
   }
 
   @Test
-  void rejectsNegativeOffsetAndNonPositiveLimit() {
+  void rejectsNegativeOffsetAndNonPositiveLimit() throws Exception {
     Tmf630PagingSettings settings =
         new Tmf630PagingSettings(true, 50, 500, true, false, java.util.List.of());
     TmfPageableHandlerMethodArgumentResolver resolver =
         new TmfPageableHandlerMethodArgumentResolver(settings);
+    MethodParameter parameter = pageableParameter();
 
     MockHttpServletRequest request1 = new MockHttpServletRequest();
     request1.setParameter("offset", "-1");
+    ModelAndViewContainer mavc1 = new ModelAndViewContainer();
+    ServletWebRequest webRequest1 = new ServletWebRequest(request1);
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            resolver.resolveArgument(
-                pageableParameter(),
-                new ModelAndViewContainer(),
-                new ServletWebRequest(request1),
-                null));
+        () -> resolver.resolveArgument(parameter, mavc1, webRequest1, null));
 
     MockHttpServletRequest request2 = new MockHttpServletRequest();
     request2.setParameter("limit", "0");
+    ModelAndViewContainer mavc2 = new ModelAndViewContainer();
+    ServletWebRequest webRequest2 = new ServletWebRequest(request2);
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            resolver.resolveArgument(
-                pageableParameter(),
-                new ModelAndViewContainer(),
-                new ServletWebRequest(request2),
-                null));
+        () -> resolver.resolveArgument(parameter, mavc2, webRequest2, null));
   }
 
   private MethodParameter pageableParameter() throws Exception {
@@ -172,6 +165,6 @@ class TmfPageableHandlerMethodArgumentResolverTest {
 
   private static class ControllerStub {
     @SuppressWarnings("unused")
-    void search(Pageable pageable) {}
+    void search(Pageable pageable) { /* signature-only stub for MethodParameter reflection */ }
   }
 }

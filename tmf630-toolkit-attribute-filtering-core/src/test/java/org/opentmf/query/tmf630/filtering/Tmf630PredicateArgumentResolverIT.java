@@ -75,7 +75,9 @@ class Tmf630PredicateArgumentResolverIT {
 
   private static class StubController {
     @SuppressWarnings("unused")
-    void search(@QuerydslPredicate(root = Entity.class) com.querydsl.core.types.Predicate predicate) {}
+    void search(@QuerydslPredicate(root = Entity.class) com.querydsl.core.types.Predicate predicate) {
+      /* signature-only stub for MethodParameter reflection */
+    }
   }
 
   private static class Entity {
