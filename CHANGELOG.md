@@ -6,6 +6,31 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 
 ### Added
 
+- **Defensive hardening — JSONPath filter parser recursion cap.** The
+  `JsonPathFilterPredicateBuilder`'s recursive-descent parser is now bounded at 32
+  levels of structural nesting, threaded across both within-Parser recursion (via
+  parenthesised sub-expressions) and across-Parser recursion (nested array-match
+  `[?(...)]` subfilters). Expressions that would previously have blown the JVM stack
+  with a `StackOverflowError` (surfacing as a 500) now cleanly return `400 Bad Request`
+  with the TMF `ErrorMessage` body. The 2048-character `json-path-filter.max-length`
+  cap already bounded input size but not structural depth — a 2048-char string can
+  pack hundreds of nested `((((...))))` parens.
+- **Defensive hardening — FieldSelectionUtil cycle detection.** `resolveProperties`
+  now threads a `Set<Class<?>>` of types currently on the recursion stack; when it
+  would re-enter a type already being resolved (e.g. `Person.friend: Person`), it
+  emits a scalar `FieldNode` placeholder instead of recursing again. Bounds walks on
+  cyclic type graphs at any `depth` setting without dropping the referenced field
+  from the response.
+- **`FieldSelectionUtil` reflection-error split → 500.** The three
+  `IllegalArgumentException` throws in `FieldSelectionUtil` (all reflection
+  catastrophes — `Introspector.getBeanInfo` refuses a class, `PropertyDescriptor`
+  can't be built for a record component, a getter throws in `invoke`) are now
+  `TmfFieldSelectionInternalException` (a new `RuntimeException` subtype in
+  `org.opentmf.query.commons.fieldselection`) and mapped to `500 Internal Server
+  Error` by the new `Tmf630FieldSelectionExceptionHandler` (auto-wired via
+  `Tmf630ExceptionHandlingAutoConfiguration`). Unknown `fields=` values in client
+  requests continue to be silently skipped per TMF-630 Part 1 §4.3 — this handler is
+  reserved for genuine server-side type-integrity failures, never bad user input.
 - **TMF630 Part 1 §4.5 `Link` header for pagination navigation.** Paged
   responses (via `@Tmf630Response` on a `Page<>` return or via
   `Tmf630Util.tmfPage(Page)`) now emit

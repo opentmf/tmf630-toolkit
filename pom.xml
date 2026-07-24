@@ -72,7 +72,7 @@
     <maven.javadoc.plugin.version>3.12.0</maven.javadoc.plugin.version>
     <maven.gpg.plugin.version>3.2.8</maven.gpg.plugin.version>
     <maven.release.plugin.version>3.3.1</maven.release.plugin.version>
-    <central.publishing.maven.plugin.version>0.10.0</central.publishing.maven.plugin.version>
+    <central.publishing.maven.plugin.version>0.11.0</central.publishing.maven.plugin.version>
     <failsafe.includes.pattern>**/*IT.java</failsafe.includes.pattern>
     <tmf630.sql.it.datasource.url>jdbc:tc:postgresql:18.1-alpine:///db</tmf630.sql.it.datasource.url>
   </properties>

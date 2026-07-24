@@ -464,6 +464,39 @@ class FieldSelectionUtilTest {
     assertEquals(Set.of("id", "href", "description", "status"), result.keySet());
   }
 
+  // ---------- Hardening: cyclic type graphs must not runaway ----------
+
+  @Test
+  void cyclicTypeGraphResolvesWithoutStackOverflow() {
+    // CyclicNode has a `friend: CyclicNode` field. Without cycle detection, deep
+    // depth values walked the same type over and over; with cycle detection, the
+    // second occurrence of CyclicNode on the recursion stack yields a scalar
+    // placeholder instead of another expansion.
+    CyclicNode node = new CyclicNode();
+    node.setName("root");
+
+    // depth=50 is deliberately way beyond any legitimate use — the bound must be
+    // the visited-set, not the depth counter.
+    assertDoesNotThrow(() -> FieldSelectionUtil.fieldsToMap(node, 50));
+  }
+
+  @Test
+  void cyclicTypeGraphExpandsOneLevelUnderDepthOne() {
+    CyclicNode friend = new CyclicNode();
+    friend.setName("friend-name");
+    CyclicNode root = new CyclicNode();
+    root.setName("root-name");
+    root.setFriend(friend);
+
+    Map<String, Object> result = FieldSelectionUtil.fieldsToMap(root, 1);
+
+    assertEquals("root-name", result.get("name"));
+    // Depth 1 lets us walk INTO friend once; cycle detection prevents walking further.
+    // The `friend` sub-map exists but its own `friend` field is a scalar reference,
+    // not a further-expanded map.
+    assertNotNull(result.get("friend"));
+  }
+
   private static Ticket ticket() {
     Ticket t = new Ticket();
     t.setId("42");
@@ -725,6 +758,27 @@ class FieldSelectionUtilTest {
 
     public void setStatus(String status) {
       this.status = status;
+    }
+  }
+
+  static class CyclicNode {
+    private String name;
+    private CyclicNode friend;
+
+    public String getName() {
+      return name;
+    }
+
+    public void setName(String name) {
+      this.name = name;
+    }
+
+    public CyclicNode getFriend() {
+      return friend;
+    }
+
+    public void setFriend(CyclicNode friend) {
+      this.friend = friend;
     }
   }
 

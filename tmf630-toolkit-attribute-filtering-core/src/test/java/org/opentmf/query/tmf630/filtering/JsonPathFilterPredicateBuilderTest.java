@@ -18,6 +18,7 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.opentmf.query.tmf630.filtering.config.AllowlistMode;
 import org.opentmf.query.tmf630.filtering.config.CombineMode;
+import org.opentmf.query.tmf630.filtering.config.IsnullSemantics;
 import org.opentmf.query.tmf630.filtering.config.PredicateLimits;
 import org.opentmf.query.tmf630.filtering.config.Tmf630FilterSettings;
 import org.opentmf.query.tmf630.filtering.config.UnknownParamBehavior;
@@ -1332,6 +1333,100 @@ class JsonPathFilterPredicateBuilderTest {
             settings(UnknownParamBehavior.REJECT, true));
 
     assertNotNull(predicate);
+  }
+
+  // ---------- Hardening: JSONPath parser recursion cap ----------
+
+  @Test
+  void parserRejectsPathologicallyNestedParentheses() {
+    FieldPathResolver pathResolver = new FieldPathResolver();
+    ValueConverter converter = new ValueConverter(new DefaultFormattingConversionService());
+    PredicateFactory factory = new PredicateFactory(false, 128);
+    JsonPathFilterPredicateBuilder builder =
+        new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
+
+    // 200 nested parens — comfortably deeper than the MAX_DEPTH=32 cap. Must surface
+    // as a TmfFilteringException (→ 400) rather than a StackOverflowError (→ 500).
+    StringBuilder open = new StringBuilder();
+    StringBuilder close = new StringBuilder();
+    for (int i = 0; i < 200; i++) {
+      open.append('(');
+      close.append(')');
+    }
+    String expression = "$[?(" + open + "@.name == 'x'" + close + ")]";
+
+    TmfFilteringException ex =
+        assertThrows(
+            TmfFilteringException.class,
+            () ->
+                builder.build(
+                    Entity.class,
+                    pathResolver.createRootPath(Entity.class),
+                    expression,
+                    Set.of("name"),
+                    settingsWithLongMaxLength(UnknownParamBehavior.REJECT, true)));
+    assertTrue(ex.getMessage().contains("nesting is too deep"), ex.getMessage());
+  }
+
+  @Test
+  void parserRejectsPathologicallyNestedArrayMatch() {
+    FieldPathResolver pathResolver = new FieldPathResolver();
+    ValueConverter converter = new ValueConverter(new DefaultFormattingConversionService());
+    PredicateFactory factory = new PredicateFactory(false, 128);
+    JsonPathFilterPredicateBuilder builder =
+        new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
+
+    // Nested array-match Parsers share the depth counter via the (String,int)
+    // constructor; enough levels here to trip the cap even though each hop is only
+    // one Parser step deep.
+    StringBuilder inner = new StringBuilder("@.name == 'x'");
+    for (int i = 0; i < 40; i++) {
+      inner = new StringBuilder("@.externalReference[?(").append(inner).append(")]");
+    }
+    String expression = "$[?(" + inner + ")]";
+
+    TmfFilteringException ex =
+        assertThrows(
+            TmfFilteringException.class,
+            () ->
+                builder.build(
+                    Entity.class,
+                    pathResolver.createRootPath(Entity.class),
+                    expression,
+                    Set.of("externalReference", "externalReference.name"),
+                    settingsWithLongMaxLength(UnknownParamBehavior.REJECT, true)));
+    assertTrue(ex.getMessage().contains("nesting is too deep"), ex.getMessage());
+  }
+
+  @Test
+  void parserAcceptsReasonablyNestedExpressions() {
+    // Sanity: a realistic 5-level nesting must still work.
+    FieldPathResolver pathResolver = new FieldPathResolver();
+    ValueConverter converter = new ValueConverter(new DefaultFormattingConversionService());
+    PredicateFactory factory = new PredicateFactory(false, 128);
+    JsonPathFilterPredicateBuilder builder =
+        new JsonPathFilterPredicateBuilder(pathResolver, converter, factory);
+
+    Predicate predicate =
+        builder.build(
+            Entity.class,
+            pathResolver.createRootPath(Entity.class),
+            "$[?((((@.name == 'x' && @.age > 10) || @.active == true)))]",
+            Set.of("name", "age", "active"),
+            settings(UnknownParamBehavior.REJECT, true));
+    assertNotNull(predicate);
+  }
+
+  private static Tmf630FilterSettings settingsWithLongMaxLength(
+      UnknownParamBehavior behavior, boolean jsonPathEnabled) {
+    // The nesting tests intentionally produce long expressions to exercise depth,
+    // not length; raise the length cap so the depth guard is what fires.
+    return new Tmf630FilterSettings(
+        true, true, true, CombineMode.OR, true, true,
+        false, new PredicateLimits(1000, 100, 128),
+        AllowlistMode.ALLOW_ALL, behavior, behavior,
+        jsonPathEnabled, 100_000, behavior,
+        IsnullSemantics.MISSING_ONLY);
   }
 
   private Predicate buildLengthExpression(String expression) {

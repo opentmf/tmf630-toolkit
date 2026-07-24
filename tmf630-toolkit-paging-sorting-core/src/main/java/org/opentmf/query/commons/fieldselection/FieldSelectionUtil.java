@@ -12,6 +12,7 @@ import java.lang.reflect.TypeVariable;
 import java.lang.reflect.WildcardType;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -95,7 +96,7 @@ public final class FieldSelectionUtil {
         }
       }
     } catch (Exception e) {
-      throw new IllegalArgumentException("Error getting properties of class " + clazz.getName(), e);
+      throw new TmfFieldSelectionInternalException("Error getting properties of class " + clazz.getName(), e);
     }
     return readWriteProperties;
   }
@@ -107,7 +108,7 @@ public final class FieldSelectionUtil {
         PropertyDescriptor pd = new PropertyDescriptor(rc.getName(), rc.getAccessor(), null);
         result.add(pd);
       } catch (IntrospectionException e) {
-        throw new IllegalArgumentException(
+        throw new TmfFieldSelectionInternalException(
             "Error creating descriptor for record component " + rc.getName(), e);
       }
     }
@@ -235,42 +236,70 @@ public final class FieldSelectionUtil {
       }
       return value;
     } catch (IntrospectionException | InvocationTargetException | IllegalAccessException e) {
-      throw new IllegalArgumentException("Error getting value of field " + fieldName, e);
+      throw new TmfFieldSelectionInternalException("Error getting value of field " + fieldName, e);
     }
   }
 
   static Map<String, FieldNode> resolveProperties(Class<?> clazz, int depth) {
+    return resolveProperties(clazz, depth, new HashSet<>());
+  }
+
+  /**
+   * Recursion-safe overload. {@code visited} tracks types currently on the recursion
+   * stack; if we would re-enter a type we're already resolving, we return a scalar
+   * placeholder instead of recursing again. This bounds the walk on cyclic type graphs
+   * (e.g. {@code Person.friend: Person}) that would otherwise recurse down to the
+   * {@code depth} limit — same terminal behaviour, but no wasted work AND no
+   * {@link StackOverflowError} risk if {@code depth} is set high.
+   */
+  private static Map<String, FieldNode> resolveProperties(
+      Class<?> clazz, int depth, Set<Class<?>> visited) {
     if (depth < 0) {
       return Collections.emptyMap();
     }
+    if (!visited.add(clazz)) {
+      // Cycle: this type is already being resolved on the current stack. Stop
+      // expanding — the caller will place a scalar FieldNode instead.
+      return Collections.emptyMap();
+    }
+    try {
+      Map<String, FieldNode> fieldMap = new LinkedHashMap<>();
+      List<PropertyDescriptor> props = getProperties(clazz);
 
-    Map<String, FieldNode> fieldMap = new LinkedHashMap<>();
-    List<PropertyDescriptor> props = getProperties(clazz);
-
-    for (PropertyDescriptor pd : props) {
-      String fieldName = pd.getName();
-      Class<?> aClass = getType(pd);
-      if (FIELD_HELPER.isEmbeddedId(clazz, pd)) {
-        Map<String, FieldNode> idFieldMap = resolveProperties(aClass, 0);
-        idFieldMap.forEach(
-            (k, v) -> {
-              v.setEmbeddedIdName(fieldName);
-              fieldMap.put(k, v);
-            });
-      } else {
-        List<PropertyDescriptor> properties = getProperties(aClass);
-        if (properties.isEmpty()) {
-          fieldMap.put(fieldName, new FieldNode());
+      for (PropertyDescriptor pd : props) {
+        String fieldName = pd.getName();
+        Class<?> aClass = getType(pd);
+        if (FIELD_HELPER.isEmbeddedId(clazz, pd)) {
+          Map<String, FieldNode> idFieldMap = resolveProperties(aClass, 0, visited);
+          idFieldMap.forEach(
+              (k, v) -> {
+                v.setEmbeddedIdName(fieldName);
+                fieldMap.put(k, v);
+              });
         } else {
-          Map<String, FieldNode> map = resolveProperties(aClass, depth - 1);
-          if (!map.isEmpty()) {
-            fieldMap.put(fieldName, new FieldNode(map));
+          List<PropertyDescriptor> properties = getProperties(aClass);
+          if (properties.isEmpty()) {
+            fieldMap.put(fieldName, new FieldNode());
+          } else if (visited.contains(aClass)) {
+            // Cycle: `aClass` is already being resolved on the current stack. Include
+            // the field as a scalar reference instead of expanding it again — the
+            // response then carries the raw value (Jackson serialises whatever is
+            // there) rather than a fully-walked cycle. Prevents runaway expansion on
+            // types like `Person.friend: Person`.
+            fieldMap.put(fieldName, new FieldNode());
+          } else {
+            Map<String, FieldNode> map = resolveProperties(aClass, depth - 1, visited);
+            if (!map.isEmpty()) {
+              fieldMap.put(fieldName, new FieldNode(map));
+            }
           }
         }
       }
-    }
 
-    return fieldMap;
+      return fieldMap;
+    } finally {
+      visited.remove(clazz);
+    }
   }
 
   static Map<String, FieldNode> parseFields(Class<?> beanClass, String fieldsParam, int depth) {

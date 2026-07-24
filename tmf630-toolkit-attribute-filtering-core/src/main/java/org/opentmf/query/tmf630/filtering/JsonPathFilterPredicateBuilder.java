@@ -618,16 +618,44 @@ public class JsonPathFilterPredicateBuilder {
   }
 
   private static final class Parser {
+
+    /**
+     * Bounds the recursive-descent stack across both within-Parser recursion (via
+     * parenthesised sub-expressions) and across-Parser recursion (via nested
+     * array-match Parser instances created in {@link #parseArrayMatch(String)}).
+     * The tokenizer's per-expression length cap ({@code json-path-filter.max-length})
+     * bounds input size but not structural depth — a 2048-char string can still pack
+     * hundreds of nested {@code ((((...))))} parens and blow the JVM stack. Rejecting
+     * excessive nesting here surfaces the problem as a clean 400, not a 500 from
+     * {@link StackOverflowError}.
+     */
+    private static final int MAX_DEPTH = 32;
+
     private final List<Token> tokens;
     private int index;
+    private int currentDepth;
 
     private Parser(String expression) {
+      this(expression, 0);
+    }
+
+    private Parser(String expression, int startDepth) {
       this.tokens = tokenize(expression);
       this.index = 0;
+      this.currentDepth = startDepth;
     }
 
     private Node parseExpression() {
-      return parseOr();
+      if (currentDepth >= MAX_DEPTH) {
+        throw new TmfFilteringException(
+            "jsonPath filter expression nesting is too deep (max " + MAX_DEPTH + " levels).");
+      }
+      currentDepth++;
+      try {
+        return parseOr();
+      } finally {
+        currentDepth--;
+      }
     }
 
     private Node parseOr() {
@@ -737,7 +765,7 @@ public class JsonPathFilterPredicateBuilder {
         throw new TmfFilteringException("Array path must not be blank in jsonPath filter.");
       }
       String innerExpression = fieldToken.substring(filterStart + 3, fieldToken.length() - 2);
-      Parser nested = new Parser(innerExpression);
+      Parser nested = new Parser(innerExpression, currentDepth);
       Node nestedRoot = nested.parseExpression();
       nested.ensureEnd();
       return new ArrayMatchNode(arrayPath, nestedRoot);

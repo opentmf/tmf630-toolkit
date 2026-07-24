@@ -797,6 +797,12 @@ Page<Simple> simple(Pageable pageable) { ... }
 Explicit dot-paths in `fields=` (e.g. `fields=address.country.code`) always resolve
 regardless of `depth`.
 
+**Cyclic type graphs** — types with self-referential fields (`Person.friend: Person`)
+are safe at any `depth`. The recursive walk tracks visited types on the current stack
+and stops expanding when it would re-enter a type it's already resolving. The
+cyclically-referenced field still appears in the output as a scalar placeholder rather
+than being dropped entirely.
+
 #### Examples
 
 `fields=none` — identity fields only:
@@ -1167,11 +1173,34 @@ response.
 
 #### `fields=` errors
 
-Malformed `fields=` values that can't be introspected (e.g. `fields=nonExistentProperty`
-on a type that doesn't expose it) currently fall through to Spring's default 400
-translator with the non-TMF body — this is a known audit gap
-([`docs/TMF630_COMPLIANCE_AUDIT.md`](./docs/TMF630_COMPLIANCE_AUDIT.md)) and is on the
-2.1.6 candidate list. Behaviour is HTTP 400; body shape is Spring's default.
+Two distinct paths, deliberately treated differently:
+
+- **Unknown field name in the request** (`fields=nonExistentProperty` on a type that
+  doesn't expose that property) — silently skipped. No error. The response contains
+  whatever fields DID resolve, plus the mandatory `id`/`href` per TMF-630 Part 1 §4.3.
+  This is the spec-defensible behaviour ("unknown fields don't error"); the request
+  isn't malformed, the field just doesn't exist on this type.
+- **Reflection catastrophe inside `FieldSelectionUtil`** (`Introspector.getBeanInfo`
+  refuses a class, a `PropertyDescriptor` can't be constructed for a record component,
+  a getter blows up in `invoke`) — surfaced as `TmfFieldSelectionInternalException`
+  and mapped to `500 Internal Server Error` with the same TMF `ErrorMessage` body
+  shape as the other handlers. These are genuine server-side type-integrity failures,
+  not bad client input, so a 500 is semantically correct.
+
+Example 500 body:
+
+```json
+{
+  "code": "500",
+  "status": "Internal Server Error",
+  "reason": "Field selection failed due to an internal reflection error.",
+  "message": "Error getting properties of class com.example.Broken"
+}
+```
+
+If you see this in production, the fix is almost always on the entity side — a broken
+getter, a JavaBean spec violation, or a class that fails introspection. Log the full
+stack from the `TmfFieldSelectionInternalException` cause for details.
 
 ### 10) Avoiding JPA lazy-load cascades
 
@@ -2280,6 +2309,7 @@ invalid `filter=` usage, including:
 - positional index `[N]` in filter paths on JPA backends
 - `length()` used with any comparator other than `==`, or on a non-collection leaf
 - `filter=` exceeds configured max length
+- `filter=` expression nesting exceeds 32 levels (hardening cap against paren-bomb stack overflow — bounds both within-Parser recursion and across-Parser nested array-match)
 - JSONPath filter feature is disabled by configuration
 
 All these return the TMF `ErrorMessage` body — see
@@ -2302,10 +2332,10 @@ Since 2.1.5, sort/paging errors also return the TMF `ErrorMessage` body (via
   - Zero or negative value → *"limit must be > 0"*
   - Non-numeric value → *"limit must be numeric"*
 
-**`fields=`** errors — malformed values that can't be introspected currently fall
-through to Spring's default 400 translator. This is a known audit gap tracked in
-[`docs/TMF630_COMPLIANCE_AUDIT.md`](./docs/TMF630_COMPLIANCE_AUDIT.md) and is on the
-2.1.6 candidate list.
+**`fields=`** errors — unknown field names in the request are silently skipped (per
+TMF-630 Part 1 §4.3 convention). Reflection catastrophes inside `FieldSelectionUtil`
+surface as `500` with the TMF error body via `Tmf630FieldSelectionExceptionHandler` —
+see [Error response shapes](#9-error-response-shapes) for the split.
 
 ### Spring Data Mongo entity-mapping gotchas
 
