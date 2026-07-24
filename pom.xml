@@ -35,6 +35,11 @@
       <name>Abdullah Beker</name>
       <email>abdullah.beker@dnext-technology.com</email>
     </developer>
+    <developer>
+      <id>asli-nurdan-keskin</id>
+      <name>Aslı Nurdan Keskin</name>
+      <email>aslinurdan.keskin@dnext-technology.com</email>
+    </developer>
   </developers>
 
   <licenses>
