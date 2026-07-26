@@ -77,7 +77,7 @@ public class Tmf630JsonbFilterExecutor {
     boolean hasWhere =
         !"TRUE".equals(effectiveWhere.sql()) && !effectiveWhere.sql().isEmpty();
 
-    String orderBy = sortBuilder.buildOrderByClause(sort, fieldTypeResolver);
+    JsonbClause orderBy = sortBuilder.buildOrderByClause(sort, fieldTypeResolver);
     JsonbClause paging = sortBuilder.buildPagingClause(pageable);
 
     StringBuilder sql = new StringBuilder();
@@ -85,16 +85,21 @@ public class Tmf630JsonbFilterExecutor {
     if (hasWhere) {
       sql.append(" WHERE ").append(effectiveWhere.sql());
     }
-    if (!orderBy.isEmpty()) {
-      sql.append(" ORDER BY ").append(orderBy);
+    if (!orderBy.sql().isEmpty()) {
+      sql.append(" ORDER BY ").append(orderBy.sql());
     }
     if (!paging.sql().isEmpty()) {
       sql.append(" ").append(paging.sql());
     }
 
+    // Param binding order matches emission order: WHERE first, then ORDER BY
+    // (correlated-sort terms bind their SQL/JSON path here), then LIMIT/OFFSET.
     JdbcClient.StatementSpec statement = jdbcClient.sql(sql.toString());
     int paramIndex = 1;
     for (Object param : effectiveWhere.params()) {
+      statement = statement.param(paramIndex++, param);
+    }
+    for (Object param : orderBy.params()) {
       statement = statement.param(paramIndex++, param);
     }
     for (Object param : paging.params()) {

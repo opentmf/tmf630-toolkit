@@ -6,6 +6,44 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 
 ### Added (PostgreSQL-with-JSONB backend — v3.0.0 Phase (b), incremental)
 
+- **`JsonbCorrelatedSortTranslator` + `JsonbSortBuilder` refactor for correlated
+  sort** (Phase b.6 of V3 roadmap). Extends the JSONB sort story with
+  correlated grammars — the canonical TMF "characteristics" pattern now works
+  on JSONB payloads via Postgres's native `jsonb_path_query_first`.
+
+  Handles two source grammars, both converging to the same target Postgres
+  SQL/JSON path:
+  - `SIMPLE_RICH` `hop[key=value].leaf` → `$.hop[*] ? (@.key == "value").leaf`
+  - `JSONPATH` `$.hop[?(@.key == 'value')].leaf` → same target
+
+  Rendered as:
+  ```sql
+  ((jsonb_path_query_first(payload, ?::jsonpath)) #>> '{}')::cast DIR [NULLS LAST]
+  ```
+  The `#>> '{}'` step strips JSON quoting from scalar results so the cast
+  operates on raw text. The path expression is passed as a JDBC parameter, not
+  inlined — no SQL injection risk from user sort input.
+
+  `JsonbSortBuilder` refactored: `buildOrderByClause` now returns a
+  `JsonbClause` (SQL + params) instead of a bare String. This lets sort params
+  flow through the executor's param-binding order alongside where / paging
+  params — WHERE first, ORDER BY second, LIMIT/OFFSET last.
+  `Tmf630JsonbFilterExecutor` updated accordingly.
+
+  Scope in b.6: single-hop correlated sort with a single equality predicate.
+  Multi-hop chains, positional `[N]`, wildcards `[*]`, aggregators
+  (`min()`/`max()`), and coercions (`num()`/`str()`/`date()`) rejected with
+  clear messages. Aggregators + coercions land in b.7.
+
+  Test coverage: 12 unit tests on `JsonbCorrelatedSortTranslator` +
+  4 new tests on the refactored `JsonbSortBuilder` (simple-rich, JsonPath,
+  mixed plain+correlated) + 2 end-to-end IT scenarios via
+  `Tmf630JsonbFilterExecutorIT` proving the SQL/JSON path syntax is accepted
+  by real Postgres 18 and produces the expected row ordering.
+
+  Total JSONB module test count now 108 (88 unit + 12 IT + 8 others). Full
+  reactor `mvn verify` clean.
+
 - **`JsonbJsonPathTranslator` — Jayway JsonPath `filter=` → Postgres SQL/JSON
   path translator** (Phase b.3 of V3 roadmap). Bridges the toolkit's
   Jayway-flavour `filter=` grammar to Postgres SQL/JSON path expressions,

@@ -1,13 +1,17 @@
 package org.opentmf.query.tmf630.jsonb.it;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**
  * TMF-resource-style domain POJO deserialized from the JSONB payload column of
- * {@link JsonbTestRow}. Kept small — just enough fields to exercise the b.5 executor
- * across the different Postgres casts (text, bigint, timestamptz).
+ * {@link JsonbTestRow}. Kept small — just enough fields to exercise the executor
+ * across the different Postgres casts (text, bigint, timestamptz). Payloads seeded
+ * by correlated-sort ITs also include a {@code characteristics} array that this POJO
+ * doesn't model; {@link JsonIgnoreProperties#ignoreUnknown()} keeps Jackson happy.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class JsonbTestDomain {
 
   private String id;

@@ -181,6 +181,71 @@ class Tmf630JsonbFilterExecutorIT {
   }
 
   @Test
+  @DisplayName(
+      "Phase (b.6): SIMPLE_RICH correlated sort orders rows by a value inside a "
+          + "correlated child element of the payload")
+  void correlatedSortSimpleRich() throws Exception {
+    // Seed a fresh dataset where each parent has an item array with a price
+    // characteristic. Sort should order parents by that characteristic's value.
+    repository.deleteAll();
+    seedWithCharacteristic("P1", 300);
+    seedWithCharacteristic("P2", 100);
+    seedWithCharacteristic("P3", 200);
+
+    TmfSort sort =
+        new TmfSort(
+            List.of(
+                new TmfSortTerm(
+                    Sort.Direction.ASC,
+                    TmfSortTerm.Kind.SIMPLE_RICH,
+                    "characteristics[name=price].value")));
+    Page<JsonbTestDomain> page =
+        executor.findAll(
+            JsonbTestDomain.class, JsonbClause.alwaysTrue(), sort, Pageable.unpaged(),
+            field -> Integer.class);
+    // ASC by numeric price: P2 (100) < P3 (200) < P1 (300).
+    assertThat(page.getContent()).extracting(JsonbTestDomain::getId).containsExactly("P2", "P3", "P1");
+  }
+
+  @Test
+  @DisplayName(
+      "Phase (b.6): JSONPATH correlated sort produces the same ordering as SIMPLE_RICH")
+  void correlatedSortJsonPath() throws Exception {
+    repository.deleteAll();
+    seedWithCharacteristic("Q1", 500);
+    seedWithCharacteristic("Q2", 50);
+    seedWithCharacteristic("Q3", 250);
+
+    TmfSort sort =
+        new TmfSort(
+            List.of(
+                new TmfSortTerm(
+                    Sort.Direction.DESC,
+                    TmfSortTerm.Kind.JSONPATH,
+                    "$.characteristics[?(@.name=='price')].value")));
+    Page<JsonbTestDomain> page =
+        executor.findAll(
+            JsonbTestDomain.class, JsonbClause.alwaysTrue(), sort, Pageable.unpaged(),
+            field -> Integer.class);
+    // DESC by numeric price: Q1 (500) > Q3 (250) > Q2 (50).
+    assertThat(page.getContent()).extracting(JsonbTestDomain::getId).containsExactly("Q1", "Q3", "Q2");
+  }
+
+  private void seedWithCharacteristic(String id, int priceValue) throws Exception {
+    String json =
+        "{\"id\":\""
+            + id
+            + "\",\"characteristics\":[{\"name\":\"color\",\"value\":\"red\"},"
+            + "{\"name\":\"price\",\"value\":"
+            + priceValue
+            + "}]}";
+    JsonbTestRow row = new JsonbTestRow();
+    row.setId(id);
+    row.setPayload(json);
+    repository.save(row);
+  }
+
+  @Test
   @DisplayName("combined filter + sort + paging composes cleanly")
   void combined() {
     JsonbClause where =
