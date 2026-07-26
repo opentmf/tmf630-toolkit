@@ -120,6 +120,67 @@ class MongoSplitAwareFilterTranslatorTest {
   }
 
   @Test
+  @DisplayName("router: blank filter → null (caller uses normal path)")
+  void routerBlankReturnsNull() {
+    assertThat(translator.route(FixtureParent.class, null)).isNull();
+    assertThat(translator.route(FixtureParent.class, "  ")).isNull();
+  }
+
+  @Test
+  @DisplayName("router: parent-only filter → null (caller's translator is a superset)")
+  void routerParentOnlyReturnsNull() {
+    assertThat(translator.route(FixtureParent.class, "$[?(@.status == 'X')]")).isNull();
+  }
+
+  @Test
+  @DisplayName(
+      "router: AND-shaped split-touching filter → SplitAwareAggregation on the parent collection")
+  void routerAndDispatchesToParentFirst() {
+    SplitAwareAggregation packaged =
+        translator.route(
+            FixtureParent.class,
+            "$[?(@.status == 'X' && @.items[?(@.state == 'Y')])]");
+    assertThat(packaged).isNotNull();
+    assertThat(packaged.targetCollection()).isEqualTo("fixtureParent");
+    // Parent-first pipeline: top stage is $match (parent-side), then $lookup, etc.
+    List<org.bson.Document> stages =
+        packaged
+            .pipeline()
+            .toPipeline(
+                org.springframework.data.mongodb.core.aggregation.TypedAggregation
+                    .DEFAULT_CONTEXT);
+    assertThat(stages).isNotEmpty();
+    assertThat(stages.get(0)).containsKey("$match");
+    // Second stage should be the $lookup (parent-first shape).
+    assertThat(stages.get(1)).containsKey("$lookup");
+  }
+
+  @Test
+  @DisplayName(
+      "router: OR-shaped filter → SplitAwareAggregation with the $unionWith shape's target")
+  void routerOrDispatchesToUnionWith() {
+    SplitAwareAggregation packaged =
+        translator.route(
+            FixtureParent.class,
+            "$[?(@.status == 'X' || @.items[?(@.state == 'Y')])]");
+    assertThat(packaged).isNotNull();
+    // Parent-only clause present → target = parent collection.
+    assertThat(packaged.targetCollection()).isEqualTo("fixtureParent");
+    List<org.bson.Document> stages =
+        packaged
+            .pipeline()
+            .toPipeline(
+                org.springframework.data.mongodb.core.aggregation.TypedAggregation
+                    .DEFAULT_CONTEXT);
+    // Union-with shape: $match, $unionWith, $group (dedup), $replaceRoot.
+    assertThat(stages).hasSize(4);
+    assertThat(stages.get(0)).containsKey("$match");
+    assertThat(stages.get(1)).containsKey("$unionWith");
+    assertThat(stages.get(2)).containsKey("$group");
+    assertThat(stages.get(3)).containsKey("$replaceRoot");
+  }
+
+  @Test
   @DisplayName("parent type with zero splits registered → null (defensive)")
   void parentWithoutSplitsReturnsNull() {
     // No @Tmf630MongoSplitBacked type has zero splits in practice — the registry

@@ -4,6 +4,49 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 
 ## [3.0.0] - 2026-07-26
 
+### Added (shape-selection router — Mongo API ergonomics — v3.0.0)
+
+- **`MongoSplitAwareFilterTranslator.route(parentType, filterExpression)`** —
+  the recommended Mongo entry point going forward. Dispatches on the filter's
+  decomposition shape and returns a `SplitAwareAggregation` uniformly, so
+  callers don't have to reason about which of the four pre-existing entry
+  points fits their filter.
+
+  Routing table (deterministic, no perf-based decisions):
+  - Blank filter → `null` (caller uses their normal filter path).
+  - Parent-only filter → `null` (our parent-side translator is a strict
+    subset of the caller's full TMF grammar; defer to them).
+  - AND-shaped decomposition with at least one split → parent-first
+    `$lookup` pipeline via `translateAsPipeline(...)`, targeting the
+    parent collection.
+  - OR-shaped decomposition with at least one split → `$unionWith`
+    pipeline via `translateAsUnionWithAggregation(...)`, targeting whatever
+    collection the `$unionWith` shape selected (parent or first split's
+    child).
+
+  Item-first (`translateAsItemFirstAggregation`) is intentionally never
+  auto-selected — it's a per-query performance override callers opt into
+  explicitly after measurement, not a routing default.
+
+  Closes the ergonomic gap between the JSONB and Mongo split modules:
+  JSONB has always been "one call returns a runnable clause"
+  (`splitAwareTranslator.translate(...)` + `executor.findAll(...)`);
+  Mongo now offers the same shape via
+  `router.route(...)` + `mongoOperations.aggregate(...)`. Developers no
+  longer need to reason about the four pipeline shapes — the router picks.
+
+  The pre-existing entry points (`translate`, `translateAsPipeline`,
+  `translateAsItemFirstAggregation`, `translateAsUnionWithAggregation`)
+  stay in place for callers who need explicit control (e.g. forcing
+  item-first for perf, or wiring parent-first through a QueryDSL repository
+  that consumes `Criteria`).
+
+  Coverage: 4 new unit tests on the routing table (blank → null,
+  parent-only → null, AND → parent-first shape asserted on emitted BSON,
+  OR → `$unionWith` shape asserted on emitted BSON) + 2 real-Mongo IT
+  scenarios (AND and OR end-to-end via the router). Module test count:
+  90 → 96.
+
 ### Changed / Added (sub-endpoint TMF conformance by default + split-child truncation signal — v3.0.0)
 
 - **Sub-endpoint base classes now carry `@Tmf630Response` on their handlers.**

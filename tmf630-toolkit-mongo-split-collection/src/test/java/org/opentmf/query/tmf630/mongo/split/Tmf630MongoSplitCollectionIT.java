@@ -328,6 +328,48 @@ class Tmf630MongoSplitCollectionIT {
 
   @Test
   @DisplayName(
+      "router: dispatches AND-shaped filter to parent-first pipeline and returns matching parents")
+  void routerEndToEndAnd() {
+    writeExecutor.saveWithSplits(order("RT-A", "OPEN", List.of(item("i", "PENDING"))));
+    writeExecutor.saveWithSplits(order("RT-B", "CANCELLED", List.of(item("i", "PENDING"))));
+    writeExecutor.saveWithSplits(order("RT-C", "OPEN", List.of(item("i", "SHIPPED"))));
+
+    SplitAwareAggregation packaged =
+        splitAwareFilter.route(
+            MongoSplitOrder.class,
+            "$[?(@.status == 'OPEN' && @.items[?(@.state == 'PENDING')])]");
+    assertThat(packaged).isNotNull();
+    List<MongoSplitOrder> matched =
+        mongoOperations
+            .aggregate(packaged.pipeline(), packaged.targetCollection(), MongoSplitOrder.class)
+            .getMappedResults();
+    assertThat(matched).extracting(MongoSplitOrder::getId).containsExactly("RT-A");
+  }
+
+  @Test
+  @DisplayName(
+      "router: dispatches OR-shaped filter to $unionWith pipeline and returns union of matches")
+  void routerEndToEndOr() {
+    writeExecutor.saveWithSplits(order("RTO-1", "CANCELLED", List.of(item("i", "SHIPPED"))));
+    writeExecutor.saveWithSplits(order("RTO-2", "OPEN", List.of(item("i", "PENDING"))));
+    writeExecutor.saveWithSplits(order("RTO-3", "OPEN", List.of(item("i", "SHIPPED"))));
+
+    SplitAwareAggregation packaged =
+        splitAwareFilter.route(
+            MongoSplitOrder.class,
+            "$[?(@.status == 'CANCELLED' || @.items[?(@.state == 'PENDING')])]");
+    assertThat(packaged).isNotNull();
+    List<MongoSplitOrder> matched =
+        mongoOperations
+            .aggregate(packaged.pipeline(), packaged.targetCollection(), MongoSplitOrder.class)
+            .getMappedResults();
+    assertThat(matched)
+        .extracting(MongoSplitOrder::getId)
+        .containsExactlyInAnyOrder("RTO-1", "RTO-2");
+  }
+
+  @Test
+  @DisplayName(
       "childCounter.count: single-parent true count + truncated flag reflects inline cap")
   void childCounterSingleParent() {
     // 2 items — well under 100 cap. Not truncated.

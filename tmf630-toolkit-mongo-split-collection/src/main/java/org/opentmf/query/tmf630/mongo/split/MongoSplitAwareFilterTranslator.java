@@ -180,6 +180,64 @@ public class MongoSplitAwareFilterTranslator {
   }
 
   /**
+   * <strong>Recommended entry point for Mongo consumers.</strong> Dispatches on the
+   * filter's decomposition shape and returns a {@link SplitAwareAggregation}
+   * uniformly, so callers don't have to know which shape their filter needs.
+   *
+   * <p>Routing table (deterministic, no perf-based decisions):
+   *
+   * <ul>
+   *   <li>Blank filter, or filter with no split reference → returns {@code null}
+   *       (caller falls back to its normal filter translator; ours is a strict
+   *       subset for parent-only grammar).
+   *   <li>AND-shaped decomposition with at least one split → parent-first
+   *       {@code $lookup} pipeline via
+   *       {@link #translateAsPipeline(Class, String)}, targeting the parent
+   *       collection.
+   *   <li>OR-shaped decomposition with at least one split → {@code $unionWith}
+   *       pipeline via {@link #translateAsUnionWithAggregation(Class, String)};
+   *       the returned packaging includes the correct target collection
+   *       (parent or first split's child, depending on whether a parent-only
+   *       conjunct is present).
+   * </ul>
+   *
+   * <p>Item-first (see {@link #translateAsItemFirstAggregation(Class, String)}) is
+   * intentionally never auto-selected by the router — it's a per-query performance
+   * override that callers opt into explicitly when measurement shows parent-first
+   * is a bottleneck for their data.
+   *
+   * <p>Execute the returned pipeline uniformly:
+   *
+   * <pre>{@code
+   * SplitAwareAggregation packaged = translator.route(ParentType.class, filter);
+   * if (packaged == null) {
+   *   // fall back to your normal (parent-only) filter path
+   * } else {
+   *   List<ParentType> results = mongoOperations
+   *       .aggregate(packaged.pipeline(), packaged.targetCollection(), ParentType.class)
+   *       .getMappedResults();
+   * }
+   * }</pre>
+   */
+  public SplitAwareAggregation route(Class<?> parentType, String filterExpression) {
+    if (filterExpression == null || filterExpression.isBlank()) return null;
+    MongoSplitEntityMetadata metadata = requireMetadata(parentType);
+    if (metadata.splits().isEmpty()) return null;
+
+    Decomposition decomposition =
+        TmfSplitFilterDecomposer.decompose(filterExpression, splitFieldNames(metadata));
+    if (decomposition.isEmpty() || decomposition.splitClauses().isEmpty()) {
+      return null;
+    }
+    if (decomposition.combinator() == Combinator.OR) {
+      return translateAsUnionWithAggregation(parentType, filterExpression);
+    }
+    Aggregation pipeline = translateAsPipeline(parentType, filterExpression);
+    if (pipeline == null) return null;
+    return new SplitAwareAggregation(pipeline, metadata.parentCollection());
+  }
+
+  /**
    * Phase (d.3) — {@code $unionWith} variant for OR-shaped compound filters.
    * Returns a {@link SplitAwareAggregation} packaging the pipeline together with the
    * target collection (parent when a parent-only clause exists; the first split's
