@@ -176,14 +176,19 @@ class Tmf630PredicateJpaParityIT {
   }
 
   @Test
-  void rejectsArrayCorrelationJsonPathOnJpaFlow() throws Exception {
+  void acceptsArrayCorrelationJsonPathOnJpaFlowForJoinMappedAssociation() throws Exception {
+    // Phase (a.3) of v3.0.0: array correlation on JPA now works when the collection
+    // field is JOIN-mapped (@ElementCollection here). The externalReference field on
+    // JpaServiceOrderEntity is @ElementCollection, so the toolkit emits a correlated
+    // EXISTS subquery via JPAExpressions rather than 400ing. Pre-3.0.0 this returned
+    // 400. See docs/JPA_BACKEND_GAP_ANALYSIS.md §3.3 and docs/V3_ROADMAP.md §2 (a.3).
     mockMvc
         .perform(
             get("/jpa-search")
                 .param(
                     "filter",
                     "$[?(@.externalReference[?(@.name == 'ORDER_REFERENCE' && @.id == 'OPCO-ORDER-012')])]"))
-        .andExpect(status().isBadRequest());
+        .andExpect(status().isOk());
   }
 
   @SpringBootApplication(

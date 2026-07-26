@@ -4,6 +4,29 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 
 ## [3.0.0] - 2026-07-26
 
+### Added (JPA gap closure — v3.0.0 Phase (a))
+
+- **Array correlation in `filter=` JSONPath now works on JPA for JOIN-mapped
+  collections** (Phase a.3 of V3 roadmap). Pre-3.0.0, a URL like
+  `?filter=$[?(@.externalReference[?(@.name == 'X' && @.id == 'Y')])]` returned
+  `400 Bad Request` on any JPA-rooted query (documented as
+  *"Array correlation in jsonPath filter is supported only for document
+  databases"*). Since 3.0.0, when the target collection field on the JPA entity
+  is annotated with `@OneToMany`, `@ManyToMany`, or `@ElementCollection`, the
+  toolkit emits a correlated `EXISTS` subquery via `com.querydsl.jpa.JPAExpressions`
+  (reflectively loaded to keep `attribute-filtering-core` free of a compile-time
+  querydsl-jpa dependency). Multi-condition inner filters get *same-element*
+  semantics — `items[?(@.state == 'X' && @.sku == 'Y')]` compiles to a single
+  `EXISTS (SELECT 1 FROM ... alias WHERE alias.state = ? AND alias.sku = ?)`
+  rather than the cross-element `EXISTS(...state=?) AND EXISTS(...sku=?)` that
+  QueryDSL's naive `.any()` produces. Collections NOT annotated with one of
+  those three JPA relationship annotations (for example, a
+  `@JdbcTypeCode(SqlTypes.JSON)`-mapped list stored as a JSON column) continue
+  to return `400 Bad Request` with an actionable message naming the escape
+  hatch — see [`docs/JPA_BACKEND_GAP_ANALYSIS.md`](./docs/JPA_BACKEND_GAP_ANALYSIS.md)
+  §3.3. Nested `[?(...)]` inside `[?(...)]` composes recursively; each level
+  gets its own uniquely-aliased subquery.
+
 ### Changed
 
 - **`.regex` / `.regexi` on JPA entities rejected by default** (Phase a.2 of V3

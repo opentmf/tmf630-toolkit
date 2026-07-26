@@ -10,6 +10,7 @@ import com.querydsl.core.types.dsl.Expressions;
 import com.querydsl.core.types.dsl.PathBuilder;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
@@ -18,6 +19,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.opentmf.query.tmf630.filtering.config.AllowlistMode;
@@ -51,6 +53,9 @@ public class JsonPathFilterPredicateBuilder {
 
   private static final Pattern BARE_WRAPPER =
       Pattern.compile("^\\s*\\[\\s*\\?\\s*\\((.*)\\)\\s*]\\s*$", Pattern.DOTALL);
+
+  /** Counter for unique JPA correlation-subquery aliases across concurrent requests. */
+  private static final AtomicInteger JPA_CORRELATION_ALIAS_COUNTER = new AtomicInteger();
 
   private final FieldPathResolver pathResolver;
   private final ValueConverter valueConverter;
@@ -328,10 +333,6 @@ public class JsonPathFilterPredicateBuilder {
       Tmf630FilterSettings settings,
       String allowlistPrefix,
       boolean allowNestedPaths) {
-    if (isJpaEntity(rootEntity)) {
-      throw new TmfFilteringException(
-          "Array correlation in jsonPath filter is supported only for document databases.");
-    }
     Optional<ResolvedArrayPath> resolved =
         resolveArrayPathOrEmpty(rootEntity, rootPath, arrayMatch.arrayPath(), allowNestedPaths, settings);
     if (resolved.isEmpty()) {
@@ -340,6 +341,10 @@ public class JsonPathFilterPredicateBuilder {
     ResolvedArrayPath resolvedArrayPath = resolved.get();
     String nestedAllowlistPrefix =
         allowlistPrefix + normalizeArrayPathForAllowlist(arrayMatch.arrayPath()) + ".";
+    if (isJpaEntity(rootEntity)) {
+      return jpaArrayMatch(arrayMatch, resolvedArrayPath, allowlist, settings,
+          nestedAllowlistPrefix, allowNestedPaths);
+    }
     PathBuilder<?> elementRootPath = pathResolver.createRootPath(resolvedArrayPath.elementType());
     Optional<Predicate> nested =
         toPredicate(
@@ -351,6 +356,107 @@ public class JsonPathFilterPredicateBuilder {
             nestedAllowlistPrefix,
             allowNestedPaths);
     return nested.map(p -> buildElemMatchPredicate(resolvedArrayPath.collectionPath(), p));
+  }
+
+  /**
+   * Phase (a.3): array correlation for JOIN-mapped associations on JPA entities. Requires
+   * the collection field to be annotated with one of {@code @OneToMany}, {@code @ManyToMany},
+   * or {@code @ElementCollection}. Rejects any other collection shape (e.g. a
+   * {@code @JdbcTypeCode(SqlTypes.JSON)}-mapped list stored as a JSON column) with a clear
+   * message naming the escape hatch.
+   *
+   * <p>Emits a single correlated {@code EXISTS} subquery via {@code JPAExpressions} (loaded
+   * reflectively to keep this module free of a compile-time querydsl-jpa dependency, mirroring
+   * the existing Mongo {@code ELEM_MATCH} pattern in {@link #resolveElemMatchOperator}). The
+   * nested predicate is built against a single fresh {@link PathBuilder} alias for the element
+   * type, ensuring that multi-condition inner filters (e.g. {@code items.state=='X' && items.sku=='Y'})
+   * translate to a SAME-element check ({@code WHERE alias.state=? AND alias.sku=?}) rather than
+   * the cross-element {@code EXISTS(...WHERE state=?) AND EXISTS(...WHERE sku=?)} that
+   * QueryDSL's {@code CollectionPath.any()} produces natively. See
+   * {@code JPA_BACKEND_GAP_ANALYSIS.md} §3.3.
+   */
+  private Optional<Predicate> jpaArrayMatch(
+      ArrayMatchNode arrayMatch,
+      ResolvedArrayPath resolvedArrayPath,
+      Set<String> allowlist,
+      Tmf630FilterSettings settings,
+      String nestedAllowlistPrefix,
+      boolean allowNestedPaths) {
+    Field collectionField = resolvedArrayPath.collectionField();
+    if (collectionField == null || !isJoinMappedField(collectionField)) {
+      throw new TmfFilteringException(
+          "Array correlation in jsonPath filter on JPA entity requires the collection to be"
+              + " JOIN-mapped via @OneToMany, @ManyToMany, or @ElementCollection. Field: "
+              + arrayMatch.arrayPath()
+              + ". For collections stored as JSON columns (e.g. @JdbcTypeCode(SqlTypes.JSON)),"
+              + " use a JSONB-backed entity (see @Tmf630JsonbBacked) or repository-level"
+              + " QueryDSL for the correlated predicate.");
+    }
+    Class<?> elementType = resolvedArrayPath.elementType();
+    PathBuilder<?> subroot =
+        new PathBuilder<>(
+            elementType, "_jpaCorr_" + JPA_CORRELATION_ALIAS_COUNTER.incrementAndGet());
+    Optional<Predicate> nested =
+        toPredicate(
+            arrayMatch.inner(),
+            elementType,
+            subroot,
+            allowlist,
+            settings,
+            nestedAllowlistPrefix,
+            allowNestedPaths);
+    return nested.map(
+        p -> buildJpaExistsPredicate(resolvedArrayPath.listExpression(), subroot, p));
+  }
+
+  private Predicate buildJpaExistsPredicate(
+      com.querydsl.core.types.CollectionExpression<?, ?> collectionPath,
+      PathBuilder<?> subroot,
+      Predicate nested) {
+    try {
+      Class<?> jpaExpr = Class.forName("com.querydsl.jpa.JPAExpressions");
+      Object selectOne = jpaExpr.getMethod("selectOne").invoke(null);
+      Method fromCollection =
+          selectOne
+              .getClass()
+              .getMethod(
+                  "from",
+                  Class.forName("com.querydsl.core.types.CollectionExpression"),
+                  com.querydsl.core.types.Path.class);
+      Object withFrom = fromCollection.invoke(selectOne, collectionPath, subroot);
+      Method where =
+          withFrom.getClass().getMethod("where", com.querydsl.core.types.Predicate[].class);
+      Object withWhere = where.invoke(withFrom, new Object[] {new Predicate[] {nested}});
+      Method exists = withWhere.getClass().getMethod("exists");
+      return (Predicate) exists.invoke(withWhere);
+    } catch (ClassNotFoundException ex) {
+      throw new TmfFilteringException(
+          "Array correlation on JPA entity requires querydsl-jpa on the classpath.", ex);
+    } catch (ReflectiveOperationException ex) {
+      throw new TmfFilteringException(
+          "Failed to build JPA correlated EXISTS subquery for array-match filter.", ex);
+    }
+  }
+
+  @SuppressWarnings("java:S1872")
+  private static boolean isJoinMappedField(Field field) {
+    for (Annotation annotation : field.getAnnotations()) {
+      String name = annotation.annotationType().getName();
+      switch (name) {
+        case "jakarta.persistence.OneToMany",
+            "jakarta.persistence.ManyToMany",
+            "jakarta.persistence.ElementCollection",
+            "javax.persistence.OneToMany",
+            "javax.persistence.ManyToMany",
+            "javax.persistence.ElementCollection" -> {
+          return true;
+        }
+        default -> {
+          // continue checking
+        }
+      }
+    }
+    return false;
   }
 
   private Optional<ResolvedArrayPath> resolveArrayPathOrEmpty(
@@ -580,8 +686,10 @@ public class JsonPathFilterPredicateBuilder {
         Class<?> elementType = resolveCollectionElementType(field);
         Expression<?> collectionPath = currentPath.get(segment, fieldType);
         PathBuilder<?> elementPath = currentPath.getCollection(segment, elementType).any();
+        com.querydsl.core.types.dsl.ListPath<?, ?> listPath =
+            currentPath.getList(segment, (Class) elementType);
         if (last) {
-          return new ResolvedArrayPath(elementType, collectionPath);
+          return new ResolvedArrayPath(elementType, collectionPath, field, elementPath, listPath);
         }
         currentType = elementType;
         currentPath = elementPath;
@@ -642,7 +750,12 @@ public class JsonPathFilterPredicateBuilder {
 
   private record ArrayMatchNode(String arrayPath, Node inner) implements Node {}
 
-  private record ResolvedArrayPath(Class<?> elementType, Expression<?> collectionPath) {}
+  private record ResolvedArrayPath(
+      Class<?> elementType,
+      Expression<?> collectionPath,
+      Field collectionField,
+      PathBuilder<?> anyElementPath,
+      com.querydsl.core.types.CollectionExpression<?, ?> listExpression) {}
 
   private enum LogicalOperator {
     AND,

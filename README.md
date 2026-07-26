@@ -527,8 +527,14 @@ GET /api/orders?filter=$[?(@.externalReference[?(@.name == 'MARKET_ACCOUNT_ID' &
 ```
 
 - **Mongo**: translated to `$elemMatch`, strict same-element semantics.
-- **JPA**: array-correlation is rejected with `400 Bad Request` (no `$elemMatch`
-  equivalent in JPQL).
+- **JPA (3.0.0)**: array-correlation works when the collection field is
+  JOIN-mapped (`@OneToMany`, `@ManyToMany`, or `@ElementCollection`). The
+  toolkit emits a correlated `EXISTS` subquery with same-element semantics
+  matching Mongo's `$elemMatch`. Collections NOT annotated with one of those
+  three (for example, `@JdbcTypeCode(SqlTypes.JSON)`-mapped lists stored as
+  JSON columns) return `400 Bad Request` with a clear message naming the
+  escape hatch — use a JSONB-backed entity or repository-level QueryDSL for
+  the correlated predicate.
 
 > **Warning — uncorrelated attribute-side matching:** using separate attribute
 > parameters like `externalReference.name.eq=ORDER_REFERENCE&externalReference.id.eq=OPCO-ORDER-012`
