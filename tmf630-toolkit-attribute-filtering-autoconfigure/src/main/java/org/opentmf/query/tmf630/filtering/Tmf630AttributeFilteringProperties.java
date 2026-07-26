@@ -46,7 +46,8 @@ public class Tmf630AttributeFilteringProperties {
         jsonPathFilter.enabled,
         jsonPathFilter.maxLength,
         onUnknownJsonPathField,
-        isnullSemantics);
+        isnullSemantics,
+        regex.allowJpaLikeSemantics);
   }
 
   public boolean isEnabled() {
@@ -172,6 +173,7 @@ public class Tmf630AttributeFilteringProperties {
   public static class Regex {
     private boolean enabled = false;
     private int maxLength = 256;
+    private boolean allowJpaLikeSemantics = false;
 
     public boolean isEnabled() {
       return enabled;
@@ -187,6 +189,14 @@ public class Tmf630AttributeFilteringProperties {
 
     public void setMaxLength(int maxLength) {
       this.maxLength = maxLength;
+    }
+
+    public boolean isAllowJpaLikeSemantics() {
+      return allowJpaLikeSemantics;
+    }
+
+    public void setAllowJpaLikeSemantics(boolean allowJpaLikeSemantics) {
+      this.allowJpaLikeSemantics = allowJpaLikeSemantics;
     }
   }
 

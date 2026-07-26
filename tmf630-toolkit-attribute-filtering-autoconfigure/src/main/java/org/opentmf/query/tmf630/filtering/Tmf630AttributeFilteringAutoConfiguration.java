@@ -66,7 +66,8 @@ public class Tmf630AttributeFilteringAutoConfiguration {
     return new PredicateFactory(
         properties.getRegex().isEnabled(),
         properties.getRegex().getMaxLength(),
-        properties.getIsnullSemantics());
+        properties.getIsnullSemantics(),
+        properties.getRegex().isAllowJpaLikeSemantics());
   }
 
   @Bean

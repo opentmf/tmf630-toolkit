@@ -15,7 +15,8 @@ public record Tmf630FilterSettings(
     boolean jsonPathFilterEnabled,
     int jsonPathMaxLength,
     UnknownParamBehavior onUnknownJsonPathField,
-    IsnullSemantics isnullSemantics) {
+    IsnullSemantics isnullSemantics,
+    boolean allowJpaLikeRegexSemantics) {
 
   /**
    * Back-compat constructor without {@link IsnullSemantics} — used by callers that predate the
@@ -53,7 +54,44 @@ public record Tmf630FilterSettings(
         jsonPathFilterEnabled,
         jsonPathMaxLength,
         onUnknownJsonPathField,
-        IsnullSemantics.MISSING_ONLY);
+        IsnullSemantics.MISSING_ONLY,
+        false);
+  }
+
+  /** Back-compat constructor without {@code allowJpaLikeRegexSemantics} (2.1.4+ callers). */
+  public Tmf630FilterSettings(
+      boolean implicitEqEnabled,
+      boolean implicitEqCsvOr,
+      boolean implicitEqSemicolonOr,
+      CombineMode combineRepeatedValues,
+      boolean allowNestedPathsJpa,
+      boolean allowNestedPathsDocdb,
+      boolean regexEnabled,
+      PredicateLimits limits,
+      AllowlistMode allowlistMode,
+      UnknownParamBehavior onUnknownField,
+      UnknownParamBehavior onUnknownOperator,
+      boolean jsonPathFilterEnabled,
+      int jsonPathMaxLength,
+      UnknownParamBehavior onUnknownJsonPathField,
+      IsnullSemantics isnullSemantics) {
+    this(
+        implicitEqEnabled,
+        implicitEqCsvOr,
+        implicitEqSemicolonOr,
+        combineRepeatedValues,
+        allowNestedPathsJpa,
+        allowNestedPathsDocdb,
+        regexEnabled,
+        limits,
+        allowlistMode,
+        onUnknownField,
+        onUnknownOperator,
+        jsonPathFilterEnabled,
+        jsonPathMaxLength,
+        onUnknownJsonPathField,
+        isnullSemantics,
+        false);
   }
 
   public boolean allowNestedPathsFor(Class<?> rootEntity) {

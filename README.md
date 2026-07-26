@@ -370,6 +370,13 @@ carrying two expressions) folds the same way as repeated parameters.
 - `regex` / `regexi` require `opentmf.tmf630.attribute-filtering.regex.enabled=true`
   (default `false`). Max pattern length is bounded by
   `opentmf.tmf630.attribute-filtering.regex.max-length` (default `256`).
+- **3.0.0**: `regex` / `regexi` on `@Entity` (pure JPA) rooted queries return
+  `400` at parse time — querydsl-jpa renders them as SQL `LIKE` (not real regex),
+  silently differing from Mongo/JSONB semantics. Escape hatch (deprecated):
+  set `opentmf.tmf630.attribute-filtering.regex.allow-jpa-like-semantics=true`
+  to preserve the pre-3.0.0 `LIKE`-based behavior; a one-time `WARN` log is
+  emitted on first use. For real regex on Postgres, use the JSONB backend
+  (native `~` / `~*` operators) — see the JSONB backend handbook.
 - `between`, `in`, `nin` are multi-value operators. Values can be provided either as
   repeated query parameters (`?key.in=A&key.in=B`) or as a single comma-separated list
   (`?key.in=A,B`). A literal comma inside a value can be escaped with `\,`. The two

@@ -9,26 +9,42 @@ import com.querydsl.core.types.dsl.SimplePath;
 import java.lang.annotation.Annotation;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.opentmf.query.tmf630.filtering.TmfFilteringException;
 import org.opentmf.query.tmf630.filtering.TmfOperator;
 import org.opentmf.query.tmf630.filtering.config.IsnullSemantics;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @SuppressWarnings({"rawtypes", "unchecked"})
 public class PredicateFactory {
 
+  private static final Logger log = LoggerFactory.getLogger(PredicateFactory.class);
+  private static final AtomicBoolean JPA_REGEX_COMPAT_WARNED = new AtomicBoolean(false);
+
   private final boolean regexEnabled;
   private final int maxRegexLength;
   private final IsnullSemantics isnullSemantics;
+  private final boolean allowJpaLikeRegexSemantics;
 
   public PredicateFactory(boolean regexEnabled, int maxRegexLength) {
-    this(regexEnabled, maxRegexLength, IsnullSemantics.MISSING_ONLY);
+    this(regexEnabled, maxRegexLength, IsnullSemantics.MISSING_ONLY, false);
   }
 
   public PredicateFactory(
       boolean regexEnabled, int maxRegexLength, IsnullSemantics isnullSemantics) {
+    this(regexEnabled, maxRegexLength, isnullSemantics, false);
+  }
+
+  public PredicateFactory(
+      boolean regexEnabled,
+      int maxRegexLength,
+      IsnullSemantics isnullSemantics,
+      boolean allowJpaLikeRegexSemantics) {
     this.regexEnabled = regexEnabled;
     this.maxRegexLength = maxRegexLength;
     this.isnullSemantics = isnullSemantics;
+    this.allowJpaLikeRegexSemantics = allowJpaLikeRegexSemantics;
   }
 
   public Predicate build(
@@ -217,12 +233,14 @@ public class PredicateFactory {
 
   private Predicate regex(PathBuilder<?> root, String fieldPath, Class<?> type, String pattern) {
     validateRegex(fieldPath, type, pattern);
+    guardJpaRegexSemantics(root, fieldPath, "regex");
     return root.getString(fieldPath).matches(pattern);
   }
 
   private Predicate regexIgnoreCase(
       PathBuilder<?> root, String fieldPath, Class<?> type, String pattern) {
     validateRegex(fieldPath, type, pattern);
+    guardJpaRegexSemantics(root, fieldPath, "regexi");
     // Use Ops.MATCHES_IC directly rather than `lower().matches(lower(pattern))`.
     // QueryDSL's Mongo serializer translates MATCHES_IC into a $regex predicate
     // with $options:"i"; the old form emitted a standalone Ops.LOWER call which
@@ -235,6 +253,60 @@ public class PredicateFactory {
     // builders that emit *_IC ops the Mongo serializer recognises.
     return Expressions.predicate(
         Ops.MATCHES_IC, root.getString(fieldPath), Expressions.constant(pattern));
+  }
+
+  /**
+   * Guard against silently-different semantics for {@code .regex} / {@code .regexi} on JPA
+   * backends. querydsl-jpa's default templates render {@code Ops.MATCHES} / {@code Ops.MATCHES_IC}
+   * as SQL {@code LIKE} / {@code LOWER(x) LIKE LOWER(?)} — Hibernate does not translate regex
+   * metacharacters ({@code ^}, {@code $}, {@code .}, {@code *}, {@code ?}, character classes)
+   * into {@code LIKE} equivalents, so the same URL that produces a real regex on Mongo/JSONB
+   * silently matches by {@code LIKE} on JPA. Rejects by default with an actionable message;
+   * opt-in via {@code opentmf.tmf630.attribute-filtering.regex.allow-jpa-like-semantics=true}
+   * preserves the pre-3.0.0 behavior with a one-time deprecation warning at first use. See
+   * {@code JPA_BACKEND_GAP_ANALYSIS.md} §3.6.
+   */
+  @SuppressWarnings("java:S1872")
+  private void guardJpaRegexSemantics(PathBuilder<?> root, String fieldPath, String opSuffix) {
+    if (!isJpaRoot(root)) {
+      return;
+    }
+    if (!allowJpaLikeRegexSemantics) {
+      throw new TmfFilteringException(
+          "'."
+              + opSuffix
+              + "' on JPA backend renders as SQL LIKE, not real regex — metacharacters (^, $,"
+              + " ., *, ?, character classes) are matched literally, differing from Mongo/JSONB"
+              + " backends. Field: "
+              + fieldPath
+              + ". To acknowledge and use LIKE semantics, set opentmf.tmf630.attribute-filtering"
+              + ".regex.allow-jpa-like-semantics=true (deprecated, to be removed in a future"
+              + " release). For real-regex semantics on relational, use a JSONB-backed entity"
+              + " (see @Tmf630JsonbBacked) or switch to a MongoDB backend.");
+    }
+    if (JPA_REGEX_COMPAT_WARNED.compareAndSet(false, true)) {
+      log.warn(
+          "opentmf.tmf630.attribute-filtering.regex.allow-jpa-like-semantics=true is set — "
+              + "'.regex'/'.regexi' predicates on JPA entities render as SQL LIKE (metacharacters "
+              + "matched literally), NOT real regex. Result sets will differ from Mongo/JSONB "
+              + "backends. This compat flag is deprecated and will be removed in a future "
+              + "release; migrate to a document-shaped backend for real regex semantics.");
+    }
+  }
+
+  @SuppressWarnings("java:S1872")
+  private static boolean isJpaRoot(PathBuilder<?> root) {
+    Class<?> type = root.getType();
+    if (type == null) {
+      return false;
+    }
+    for (Annotation annotation : type.getAnnotations()) {
+      String name = annotation.annotationType().getName();
+      if ("jakarta.persistence.Entity".equals(name) || "javax.persistence.Entity".equals(name)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private void validateRegex(String fieldPath, Class<?> type, String pattern) {

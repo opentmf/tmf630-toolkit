@@ -4,6 +4,29 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 
 ## [3.0.0] - 2026-07-26
 
+### Changed
+
+- **`.regex` / `.regexi` on JPA entities rejected by default** (Phase a.2 of V3
+  roadmap). Attribute-side `?field.regex=` / `?field.regexi=` and JSONPath
+  `filter=$[?(@.field =~ /pattern/)]` targeting an entity annotated
+  `@jakarta.persistence.Entity` (or the legacy `javax.persistence.Entity`) now
+  return `400 Bad Request` at parse time rather than silently rendering as SQL
+  `LIKE`. Rationale: querydsl-jpa's default `HQLTemplates` render `Ops.MATCHES` /
+  `Ops.MATCHES_IC` as `LIKE`/`LOWER(x) LIKE LOWER(?)`, and Hibernate does not
+  translate regex metacharacters (`^`, `$`, `.`, `*`, `?`, character classes)
+  into their `LIKE` equivalents — so the same URL that produces a real regex on
+  Mongo/JSONB backends silently matches by `LIKE` on JPA, with wrong-for-a-regex
+  results (e.g. `^A` matches names literally starting with the caret character,
+  not names starting with `A`). See
+  [`docs/JPA_BACKEND_GAP_ANALYSIS.md`](./docs/JPA_BACKEND_GAP_ANALYSIS.md) §3.6
+  for the full analysis. **Escape hatch (deprecated):** set
+  `opentmf.tmf630.attribute-filtering.regex.allow-jpa-like-semantics=true` to
+  preserve the pre-3.0.0 `LIKE`-based behavior. A one-time `WARN` log is
+  emitted on first regex request when the compat flag is enabled. This flag is
+  slated for removal in a future release; for real-regex semantics on
+  Postgres, use the JSONB backend (native `~` / `~*` operators) shipping in
+  Phase (b) of the same v3.0.0 release.
+
 ### Added
 
 - **Nulls-last-regardless-of-direction property.** New opt-in property
