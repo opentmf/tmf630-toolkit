@@ -4,6 +4,42 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 
 ## [3.0.0] - 2026-07-26
 
+### Changed / Added (sub-endpoint TMF conformance by default + split-child truncation signal — v3.0.0)
+
+- **Sub-endpoint base classes now carry `@Tmf630Response` on their handlers.**
+  Both `Tmf630JsonbSubResourceController.listChildren` /  `.getChild` and
+  `Tmf630MongoSubResourceController.listChildren` / `.getChild` now declare
+  `@Tmf630Response` directly. Concrete subclasses get TMF-conformant
+  pagination headers ({@code Content-Range}, {@code X-Total-Count},
+  {@code X-Result-Count}), HTTP status resolution (200/206/416), and
+  {@code fields=} query-parameter field selection <strong>by default</strong>
+  — no need to remember to annotate the subclass. Subclasses can still
+  override the depth via method-level `@Tmf630Response(depth = ...)`.
+
+  Previously the base javadoc suggested subclasses add it themselves; that's
+  underbaked (silent TMF-conformance drop when the developer forgets).
+
+- **`Tmf630JsonbSplitChildCounter` / `Tmf630MongoSplitChildCounter` —
+  true child-count helpers.** Closes the JSONB design doc §3.4 promise of
+  the {@code X-Total-Count-<ChildName>} header. Both counters expose:
+  - `count(parentType, parentId, childType) → ChildCountInfo(trueCount,
+    maxInlineItems)` — single parent; `info.truncated()` returns whether
+    the merged inline response was capped.
+  - `countAll(parentType, parentIds, childType) → Map<String, Long>` —
+    batch variant for list responses; missing parents map to `0L` so the
+    caller iterates uniformly. JSONB path uses one grouped
+    `SELECT COUNT(*) GROUP BY parent_id`; Mongo path uses one aggregation
+    `$match` + `$group`.
+
+  Wired as auto-configured beans. Not baked into the executor or advice on
+  purpose — header emission is a controller-layer concern. The developer
+  fetches the counts and emits the header in whatever style fits their
+  controller (`HttpServletResponse.setHeader`,
+  `ResponseEntity.header(...)`, etc.).
+
+  Coverage: 4 new IT scenarios (2 per backend: single-parent truncated
+  flag, batch with missing parents mapped to zero).
+
 ### Added (top-level OR across parent + split, plus `$unionWith` shape — v3.0.0)
 
 - **`TmfSplitFilterDecomposer` now accepts top-level `||`.** The returned

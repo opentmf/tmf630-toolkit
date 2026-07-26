@@ -7,6 +7,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -68,6 +69,7 @@ class Tmf630MongoSplitCollectionIT {
   @Autowired private Tmf630MongoSplitWriteExecutor writeExecutor;
   @Autowired private Tmf630MongoSplitReadMerger readMerger;
   @Autowired private MongoSplitAwareFilterTranslator splitAwareFilter;
+  @Autowired private Tmf630MongoSplitChildCounter childCounter;
   @Autowired private MockMvc mockMvc;
   @Autowired private MongoSplitEntityRegistry registry;
 
@@ -322,6 +324,44 @@ class Tmf630MongoSplitCollectionIT {
     assertThat(loaded.getItems()).hasSize(100);
     assertThat(loaded.getItems().get(0).getId()).isEqualTo("i-0");
     assertThat(loaded.getItems().get(99).getId()).isEqualTo("i-99");
+  }
+
+  @Test
+  @DisplayName(
+      "childCounter.count: single-parent true count + truncated flag reflects inline cap")
+  void childCounterSingleParent() {
+    // 2 items — well under 100 cap. Not truncated.
+    writeExecutor.saveWithSplits(
+        order("CC1", "OPEN", List.of(item("a", "P"), item("b", "S"))));
+    Tmf630MongoSplitChildCounter.ChildCountInfo info =
+        childCounter.count(MongoSplitOrder.class, "CC1", MongoSplitOrderItem.class);
+    assertThat(info.trueCount()).isEqualTo(2L);
+    assertThat(info.maxInlineItems()).isEqualTo(100);
+    assertThat(info.truncated()).isFalse();
+
+    // 150 items — exceeds cap. Truncated.
+    List<MongoSplitOrderItem> many = new ArrayList<>();
+    for (int i = 0; i < 150; i++) many.add(item("i-" + i, "P"));
+    writeExecutor.saveWithSplits(order("CC2", "OPEN", many));
+    Tmf630MongoSplitChildCounter.ChildCountInfo bigInfo =
+        childCounter.count(MongoSplitOrder.class, "CC2", MongoSplitOrderItem.class);
+    assertThat(bigInfo.trueCount()).isEqualTo(150L);
+    assertThat(bigInfo.truncated()).isTrue();
+  }
+
+  @Test
+  @DisplayName("childCounter.countAll: batch returns count per parent, zero for missing parents")
+  void childCounterBatch() {
+    writeExecutor.saveWithSplits(order("CB1", "OPEN", List.of(item("i", "P"))));
+    writeExecutor.saveWithSplits(
+        order("CB2", "OPEN", List.of(item("a", "P"), item("b", "P"), item("c", "S"))));
+
+    Map<String, Long> counts =
+        childCounter.countAll(
+            MongoSplitOrder.class,
+            List.of("CB1", "CB2", "CB-MISSING"),
+            MongoSplitOrderItem.class);
+    assertThat(counts).containsEntry("CB1", 1L).containsEntry("CB2", 3L).containsEntry("CB-MISSING", 0L);
   }
 
   @Test

@@ -3,6 +3,7 @@ package org.opentmf.query.tmf630.mongo.split;
 import java.util.ArrayList;
 import java.util.List;
 import org.bson.Document;
+import org.opentmf.query.tmf630.annotation.Tmf630Response;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
@@ -66,7 +67,14 @@ public abstract class Tmf630MongoSubResourceController<C, P> {
     this.parentType = parentType;
   }
 
+  /**
+   * {@code GET /} — paged list of children for one parent, ordered by
+   * {@code itemOrder}. Carries {@link Tmf630Response} directly on the base so
+   * concrete subclasses get TMF-conformant pagination headers and {@code fields=}
+   * field selection by default — no need to annotate the subclass.
+   */
   @GetMapping
+  @Tmf630Response
   public Page<C> listChildren(@PathVariable("parentId") String parentId, Pageable pageable) {
     MongoSplitCollectionMetadata split = resolveSplit();
     Query base = new Query(Criteria.where(split.parentIdField()).is(parentId));
@@ -87,7 +95,14 @@ public abstract class Tmf630MongoSubResourceController<C, P> {
     return new PageImpl<>(content, pageable, total);
   }
 
+  /**
+   * {@code GET /{itemId}} — returns the child with the given id under the given
+   * parent, or {@code 404 Not Found} if no such child exists. Carries
+   * {@link Tmf630Response} so {@code fields=} field selection applies to the
+   * single-child response too.
+   */
   @GetMapping("/{itemId}")
+  @Tmf630Response
   public ResponseEntity<C> getChild(
       @PathVariable("parentId") String parentId, @PathVariable("itemId") String itemId) {
     MongoSplitCollectionMetadata split = resolveSplit();

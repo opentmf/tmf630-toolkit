@@ -105,4 +105,11 @@ public class Tmf630MongoSplitCollectionAutoConfiguration {
     return new MongoSplitAwareFilterTranslator(
         registry, mongoOperations, innerPredicateTranslator, pipelineBuilder);
   }
+
+  @Bean
+  @ConditionalOnMissingBean
+  public Tmf630MongoSplitChildCounter tmf630MongoSplitChildCounter(
+      MongoOperations mongoOperations, MongoSplitEntityRegistry registry) {
+    return new Tmf630MongoSplitChildCounter(mongoOperations, registry);
+  }
 }

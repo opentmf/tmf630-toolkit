@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -46,6 +47,7 @@ class Tmf630JsonbSplitCollectionIT {
   @Autowired private Tmf630JsonbFilterExecutor executor;
   @Autowired private Tmf630JsonbWriteExecutor writeExecutor;
   @Autowired private JsonbSplitAwareFilterTranslator splitAwareTranslator;
+  @Autowired private Tmf630JsonbSplitChildCounter childCounter;
   @Autowired private SplitOrderRowRepository repository;
   @Autowired private JdbcClient jdbcClient;
   @Autowired private ObjectMapper objectMapper;
@@ -410,6 +412,56 @@ class Tmf630JsonbSplitCollectionIT {
             SplitOrderDomain.class, where, TmfSort.empty(),
             Pageable.unpaged(), field -> String.class);
     assertThat(page.getContent()).extracting(SplitOrderDomain::getId).containsExactly("K1");
+  }
+
+  @Test
+  @DisplayName(
+      "childCounter.count: single-parent true count + truncated flag reflects inline cap")
+  void childCounterSingleParentTruncationFlag() {
+    // Seed 2 items — well under the 100 cap. Not truncated.
+    SplitOrderDomain small = new SplitOrderDomain();
+    small.setId("CC1");
+    small.setStatus("OPEN");
+    small.setItems(List.of(item("a", "P"), item("b", "S")));
+    writeExecutor.saveWithSplits(small);
+    Tmf630JsonbSplitChildCounter.ChildCountInfo info =
+        childCounter.count(SplitOrderDomain.class, "CC1", SplitOrderItem.class);
+    assertThat(info.trueCount()).isEqualTo(2L);
+    assertThat(info.maxInlineItems()).isEqualTo(100);
+    assertThat(info.truncated()).isFalse();
+
+    // Seed 150 items — exceeds the 100 cap. Truncated.
+    SplitOrderDomain big = new SplitOrderDomain();
+    big.setId("CC2");
+    big.setStatus("OPEN");
+    List<SplitOrderItem> many = new java.util.ArrayList<>();
+    for (int i = 0; i < 150; i++) many.add(item("i-" + i, "P"));
+    big.setItems(many);
+    writeExecutor.saveWithSplits(big);
+    Tmf630JsonbSplitChildCounter.ChildCountInfo bigInfo =
+        childCounter.count(SplitOrderDomain.class, "CC2", SplitOrderItem.class);
+    assertThat(bigInfo.trueCount()).isEqualTo(150L);
+    assertThat(bigInfo.truncated()).isTrue();
+  }
+
+  @Test
+  @DisplayName("childCounter.countAll: batch returns count per parent, zero for missing parents")
+  void childCounterBatchReturnsPerParentAndZeroForMissing() {
+    SplitOrderDomain o1 = new SplitOrderDomain();
+    o1.setId("CB1");
+    o1.setStatus("OPEN");
+    o1.setItems(List.of(item("i", "P")));
+    writeExecutor.saveWithSplits(o1);
+    SplitOrderDomain o2 = new SplitOrderDomain();
+    o2.setId("CB2");
+    o2.setStatus("OPEN");
+    o2.setItems(List.of(item("a", "P"), item("b", "P"), item("c", "S")));
+    writeExecutor.saveWithSplits(o2);
+
+    Map<String, Long> counts =
+        childCounter.countAll(
+            SplitOrderDomain.class, List.of("CB1", "CB2", "CB-MISSING"), SplitOrderItem.class);
+    assertThat(counts).containsEntry("CB1", 1L).containsEntry("CB2", 3L).containsEntry("CB-MISSING", 0L);
   }
 
   @Test

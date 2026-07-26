@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.List;
 import java.util.Optional;
+import org.opentmf.query.tmf630.annotation.Tmf630Response;
 import org.opentmf.query.tmf630.filtering.TmfFilteringException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -63,12 +64,19 @@ public abstract class Tmf630JsonbSubResourceController<C, P> {
 
   /**
    * {@code GET /} — paged list of children for one parent, ordered by {@code item_order}.
-   * The client obtains the true total via the standard {@code X-Total-Count} header
-   * emitted by the toolkit's {@code @Tmf630Response} advice on the concrete controller,
-   * or by inspecting {@link Page#getTotalElements()} directly if consuming the Page
-   * return type.
+   *
+   * <p>The handler carries {@link Tmf630Response} directly on the base class, so
+   * concrete subclasses get TMF-conformant pagination headers
+   * ({@code Content-Range}, {@code X-Total-Count}, {@code X-Result-Count}), HTTP
+   * status resolution (200/206/416), and {@code fields=} query-parameter field
+   * selection <strong>by default</strong> — no need to annotate the subclass.
+   *
+   * <p>Subclasses can override the depth by placing their own
+   * {@code @Tmf630Response(depth = ...)} at the method or class level; method-level
+   * annotations win by Spring's usual meta-annotation rules.
    */
   @GetMapping
+  @Tmf630Response
   public Page<C> listChildren(@PathVariable("parentId") String parentId, Pageable pageable) {
     JsonbSplitCollectionMetadata split = requireSplitMetadata();
     long total = countChildren(split, parentId);
@@ -82,9 +90,11 @@ public abstract class Tmf630JsonbSubResourceController<C, P> {
 
   /**
    * {@code GET /{itemId}} — returns the child with the given id under the given parent,
-   * or {@code 404 Not Found} if no such child exists.
+   * or {@code 404 Not Found} if no such child exists. Carries {@link Tmf630Response}
+   * so {@code fields=} field selection applies to the single-child response too.
    */
   @GetMapping("/{itemId}")
+  @Tmf630Response
   public ResponseEntity<C> getChild(
       @PathVariable("parentId") String parentId, @PathVariable("itemId") String itemId) {
     JsonbSplitCollectionMetadata split = requireSplitMetadata();
