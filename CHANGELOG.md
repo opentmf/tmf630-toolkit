@@ -69,6 +69,18 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 
 ### Added (MongoDB split-and-merge — v3.0.0 Phase (d), MVP first cut)
 
+- **Phase (d.3) — third-shape (`$unionWith` fallback) intentionally deferred
+  post-3.0.0.** The roadmap listed a third `$unionWith`-based aggregation shape
+  alongside parent-first and item-first. Analysis while planning that cut
+  showed no consumer path in the current translator: `$unionWith`'s natural
+  fit is compound *OR* across multiple splits
+  (e.g. {@code $[?(@.items[?(...)] || @.characteristic[?(...)])]}), and
+  top-level `||` is currently rejected by `TmfSplitFilterDecomposer`
+  (explicitly deferred). Shipping the `$unionWith` builder without also
+  enabling OR in the decomposer would land as dead code with no
+  translator-to-Mongo end-to-end test. Deferred to a follow-up that pairs
+  decomposer-OR support with the `$unionWith` shape as a matched set.
+
 - **Phase (d.3) — item-first aggregation pipeline shape.** Second implementation
   of the three-shape router idea from the roadmap; complements
   `ParentFirstLookupPipelineBuilder`. Two new types:
