@@ -4,6 +4,74 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 
 ## [3.0.0] - 2026-07-26
 
+### Added (top-level OR across parent + split, plus `$unionWith` shape — v3.0.0)
+
+- **`TmfSplitFilterDecomposer` now accepts top-level `||`.** The returned
+  `Decomposition` carries a new `Combinator` field (AND or OR) so backend
+  translators know how to compose the parts. Mixed top-level `&&` and `||`
+  in the same expression are rejected (operator-precedence parsing is not
+  supported; parenthesise inside a single top-level conjunct instead). `||`
+  *inside* a split's inner predicate remains legal — only top-level shape
+  changes semantics.
+
+- **`JsonbSplitAwareFilterTranslator` composes AND or OR based on the new
+  combinator.** Uses `JsonbClause.and(...)` when the decomposition is AND-shaped
+  (previous behavior), `JsonbClause.or(...)` when OR-shaped. Emitted SQL for a
+  filter like `$[?(@.status == 'CANCELLED' || @.items[?(@.state == 'PENDING')])]`
+  becomes:
+
+      (jsonb_path_exists(payload, ?::jsonpath)
+       OR EXISTS (SELECT 1 FROM split_order_item
+                  WHERE parent_id = split_order_row.id
+                  AND jsonb_path_exists(payload, ?::jsonpath)))
+
+  Postgres's native `OR` does all the work; no new SQL construct needed on
+  the JSONB side.
+
+- **`UnionWithAggregationPipelineBuilder` — third Mongo aggregation shape.**
+  Emits a `$unionWith`-based pipeline for OR-shaped filters. When a
+  parent-only conjunct exists, starts on the parent collection with a
+  `$match` and `$unionWith`es each split's result set. When no parent-only
+  conjunct exists, starts on the first split's child collection with its
+  full item-first-style sub-pipeline inline, then `$unionWith`es any
+  remaining splits. Both shapes end with a dedup `$group + $replaceRoot`
+  pair so parents matching multiple disjuncts appear once.
+
+  **Transaction caveat:** Mongo forbids `$unionWith` inside a multi-document
+  transaction. Callers running under `@Transactional` with a
+  `MongoTransactionManager` must execute this pipeline outside the transaction.
+  Parent-first `$lookup` composition (transaction-legal) cannot express OR
+  across collections in a single pipeline, so callers needing both OR-of-splits
+  and full transactional atomicity would have to fall back to multiple queries.
+
+- **New entry point on `MongoSplitAwareFilterTranslator`:**
+  `translateAsUnionWithAggregation(parentType, filter)` returns a
+  `SplitAwareAggregation` (pipeline + target collection). Accepts only
+  OR-shaped decompositions; rejects AND-shaped with a pointer to
+  `translateAsPipeline(...)`.
+
+- **`translate(...)` and `translateAsPipeline(...)` reject OR-shaped inputs**
+  with an actionable message pointing to `translateAsUnionWithAggregation(...)`.
+  Neither shape can compose across collections in a single pipeline.
+
+  Coverage: 5 new decomposer unit tests (top-level OR accepted, two splits
+  OR'd, parent-only OR rewrapped, mixed AND/OR rejected, plain AND still
+  reports Combinator.AND). 5 new `UnionWithAggregationPipelineBuilder` unit
+  tests (no-split validation, parent+one-split shape, no-parent two-splits
+  shape, inner pipeline mirrors item-first, dedup stage). 3 real-Mongo IT
+  scenarios (parent||split via `$unionWith`, two splits OR'd with no parent,
+  dedup keeps a single row when both disjuncts match). 1 new JSONB IT
+  scenario for the OR-shaped compound path. 4 new/updated unit tests on
+  the two translators for the new rejection messaging and OR shape.
+
+  Module test counts:
+  - attribute-filtering-core: 171 → 175 (net +4; one rejection test swapped
+    to acceptance)
+  - jsonb: 166 → 168 (net +2; one rejection test swapped to acceptance)
+  - mongo-split-collection: 71 → 88 (net +17; one rejection test swapped
+    to 3 shape-specific rejections + new OR shape coverage + validation
+    tests to keep branch coverage above 80%)
+
 ### Changed (generic parent+split predicate splitter — v3.0.0)
 
 - **`TmfSplitFilterDecomposer` in `tmf630-toolkit-attribute-filtering-core`** —
@@ -68,18 +136,6 @@ All notable changes to `tmf630-toolkit` are documented in this file.
   variant pass their own prefix.
 
 ### Added (MongoDB split-and-merge — v3.0.0 Phase (d), MVP first cut)
-
-- **Phase (d.3) — third-shape (`$unionWith` fallback) intentionally deferred
-  post-3.0.0.** The roadmap listed a third `$unionWith`-based aggregation shape
-  alongside parent-first and item-first. Analysis while planning that cut
-  showed no consumer path in the current translator: `$unionWith`'s natural
-  fit is compound *OR* across multiple splits
-  (e.g. {@code $[?(@.items[?(...)] || @.characteristic[?(...)])]}), and
-  top-level `||` is currently rejected by `TmfSplitFilterDecomposer`
-  (explicitly deferred). Shipping the `$unionWith` builder without also
-  enabling OR in the decomposer would land as dead code with no
-  translator-to-Mongo end-to-end test. Deferred to a follow-up that pairs
-  decomposer-OR support with the `$unionWith` shape as a matched set.
 
 - **Phase (d.3) — item-first aggregation pipeline shape.** Second implementation
   of the three-shape router idea from the roadmap; complements

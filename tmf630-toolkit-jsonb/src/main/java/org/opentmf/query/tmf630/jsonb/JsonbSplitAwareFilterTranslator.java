@@ -4,6 +4,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import org.opentmf.query.tmf630.filtering.TmfFilteringException;
 import org.opentmf.query.tmf630.filtering.TmfSplitFilterDecomposer;
+import org.opentmf.query.tmf630.filtering.TmfSplitFilterDecomposer.Combinator;
 import org.opentmf.query.tmf630.filtering.TmfSplitFilterDecomposer.Decomposition;
 import org.opentmf.query.tmf630.filtering.TmfSplitFilterDecomposer.SplitClauseRef;
 
@@ -92,13 +93,17 @@ public class JsonbSplitAwareFilterTranslator {
       return delegate.translate(filterExpression);
     }
 
-    JsonbClause combined = JsonbClause.alwaysTrue();
+    boolean isOr = decomposition.combinator() == Combinator.OR;
+    // AND-identity is TRUE (any conjunct suppressed), OR-identity is FALSE.
+    JsonbClause combined = isOr ? JsonbClause.alwaysFalse() : JsonbClause.alwaysTrue();
     if (decomposition.parentOnlyFilter().isPresent()) {
-      combined = combined.and(delegate.translate(decomposition.parentOnlyFilter().get()));
+      JsonbClause parentClause = delegate.translate(decomposition.parentOnlyFilter().get());
+      combined = isOr ? combined.or(parentClause) : combined.and(parentClause);
     }
     for (SplitClauseRef ref : decomposition.splitClauses()) {
       JsonbSplitCollectionMetadata split = requireSplitByFieldName(metadata, ref.splitFieldName());
-      combined = combined.and(buildExistsSubquery(metadata, split, ref.innerPredicate()));
+      JsonbClause splitClause = buildExistsSubquery(metadata, split, ref.innerPredicate());
+      combined = isOr ? combined.or(splitClause) : combined.and(splitClause);
     }
     return combined;
   }

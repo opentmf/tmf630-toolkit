@@ -8,8 +8,10 @@ import java.util.stream.Collectors;
 import org.bson.Document;
 import org.opentmf.query.tmf630.filtering.TmfFilteringException;
 import org.opentmf.query.tmf630.filtering.TmfSplitFilterDecomposer;
+import org.opentmf.query.tmf630.filtering.TmfSplitFilterDecomposer.Combinator;
 import org.opentmf.query.tmf630.filtering.TmfSplitFilterDecomposer.Decomposition;
 import org.opentmf.query.tmf630.filtering.TmfSplitFilterDecomposer.SplitClauseRef;
+import org.opentmf.query.tmf630.mongo.split.UnionWithAggregationPipelineBuilder.SplitPiece;
 import org.springframework.data.mongodb.core.MongoOperations;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
 import org.springframework.data.mongodb.core.aggregation.AggregationOperation;
@@ -56,6 +58,7 @@ public class MongoSplitAwareFilterTranslator {
   private final MongoSplitPipelineBuilder pipelineBuilder;
   private final MongoInnerPredicateTranslator parentTranslator;
   private final ItemFirstAggregationPipelineBuilder itemFirstBuilder;
+  private final UnionWithAggregationPipelineBuilder unionWithBuilder;
 
   public MongoSplitAwareFilterTranslator(
       MongoSplitEntityRegistry registry,
@@ -84,6 +87,8 @@ public class MongoSplitAwareFilterTranslator {
         new SimpleMongoInnerPredicateTranslator(
             SimpleMongoInnerPredicateTranslator.PARENT_TOP_LEVEL_PREFIX);
     this.itemFirstBuilder = new ItemFirstAggregationPipelineBuilder(innerTranslator);
+    this.unionWithBuilder =
+        new UnionWithAggregationPipelineBuilder(innerTranslator, this.parentTranslator);
   }
 
   /**
@@ -105,6 +110,13 @@ public class MongoSplitAwareFilterTranslator {
     // strict superset of our SimpleMongoInnerPredicateTranslator, so let the caller
     // handle it. We only take over when there's split-side work to do.
     if (decomposition.splitClauses().isEmpty()) return null;
+    if (decomposition.combinator() == Combinator.OR) {
+      throw new TmfFilteringException(
+          "OR-shaped compound filters cannot be expressed as a single Criteria — the "
+              + "criteria form can't UNION across collections. Use "
+              + "translateAsUnionWithAggregation(...) to get a $unionWith pipeline "
+              + "instead.");
+    }
 
     List<Criteria> conjuncts = new ArrayList<>();
     decomposition
@@ -140,6 +152,12 @@ public class MongoSplitAwareFilterTranslator {
     // Symmetric to translate(): the caller's normal filter path is a superset of ours
     // for parent-only clauses, so short-circuit when there's no split-side work.
     if (decomposition.splitClauses().isEmpty()) return null;
+    if (decomposition.combinator() == Combinator.OR) {
+      throw new TmfFilteringException(
+          "OR-shaped compound filters cannot be composed as a parent-first $lookup "
+              + "chain — use translateAsUnionWithAggregation(...) to get the "
+              + "$unionWith shape instead.");
+    }
 
     List<AggregationOperation> stages = new ArrayList<>();
     if (decomposition.parentOnlyFilter().isPresent()) {
@@ -159,6 +177,59 @@ public class MongoSplitAwareFilterTranslator {
     }
     if (stages.isEmpty()) return null;
     return Aggregation.newAggregation(stages);
+  }
+
+  /**
+   * Phase (d.3) — {@code $unionWith} variant for OR-shaped compound filters.
+   * Returns a {@link SplitAwareAggregation} packaging the pipeline together with the
+   * target collection (parent when a parent-only clause exists; the first split's
+   * child collection otherwise).
+   *
+   * <p>Only accepts filters whose decomposition combinator is
+   * {@link Combinator#OR}. AND-shaped filters (including parent-only) are rejected
+   * here — use {@link #translateAsPipeline(Class, String)} or
+   * {@link #translate(Class, String)} for those.
+   *
+   * <p><strong>Transaction caveat:</strong> Mongo forbids {@code $unionWith} inside a
+   * multi-document transaction. If the caller runs under a
+   * {@code MongoTransactionManager}-managed transaction the pipeline execution must
+   * happen outside that transaction. Parent-first {@code $lookup} composition
+   * (transaction-legal) cannot express OR across collections in a single pipeline,
+   * so callers who need both OR-of-splits and full transactional atomicity would
+   * have to fall back to multiple queries.
+   */
+  public SplitAwareAggregation translateAsUnionWithAggregation(
+      Class<?> parentType, String filterExpression) {
+    if (filterExpression == null || filterExpression.isBlank()) return null;
+    MongoSplitEntityMetadata metadata = requireMetadata(parentType);
+    if (metadata.splits().isEmpty()) return null;
+
+    Decomposition decomposition =
+        TmfSplitFilterDecomposer.decompose(filterExpression, splitFieldNames(metadata));
+    if (decomposition.isEmpty()) return null;
+    if (decomposition.combinator() != Combinator.OR) {
+      throw new TmfFilteringException(
+          "$unionWith pipeline shape only accepts OR-shaped compound filters; the "
+              + "input decomposes to combinator "
+              + decomposition.combinator()
+              + ". Use translateAsPipeline(...) for parent-first $lookup or "
+              + "translateAsItemFirstAggregation(...) for item-first shapes.");
+    }
+    if (decomposition.splitClauses().isEmpty()) {
+      throw new TmfFilteringException(
+          "$unionWith pipeline shape requires at least one split correlation; the "
+              + "input has none. Use your normal filter path for parent-only "
+              + "expressions.");
+    }
+    List<SplitPiece> pieces = new ArrayList<>(decomposition.splitClauses().size());
+    for (SplitClauseRef ref : decomposition.splitClauses()) {
+      MongoSplitCollectionMetadata split = requireSplit(metadata, ref.splitFieldName());
+      pieces.add(new SplitPiece(split, ref.innerPredicate()));
+    }
+    return unionWithBuilder.build(
+        metadata.parentCollection(),
+        decomposition.parentOnlyFilter().map(MongoSplitAwareFilterTranslator::unwrapForParent),
+        pieces);
   }
 
   /**

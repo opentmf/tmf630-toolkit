@@ -326,6 +326,78 @@ class Tmf630MongoSplitCollectionIT {
 
   @Test
   @DisplayName(
+      "OR shape: parent || split via $unionWith returns union of matches (parent + one split)")
+  void unionWithParentPlusSplit() {
+    // U1: CANCELLED order (matches parent side). Item is SHIPPED (doesn't match split side).
+    writeExecutor.saveWithSplits(order("U1", "CANCELLED", List.of(item("i", "SHIPPED"))));
+    // U2: OPEN order with a PENDING item (matches split side only).
+    writeExecutor.saveWithSplits(order("U2", "OPEN", List.of(item("i", "PENDING"))));
+    // U3: OPEN order with a SHIPPED item (matches neither).
+    writeExecutor.saveWithSplits(order("U3", "OPEN", List.of(item("i", "SHIPPED"))));
+
+    SplitAwareAggregation packaged =
+        splitAwareFilter.translateAsUnionWithAggregation(
+            MongoSplitOrder.class,
+            "$[?(@.status == 'CANCELLED' || @.items[?(@.state == 'PENDING')])]");
+    assertThat(packaged).isNotNull();
+    assertThat(packaged.targetCollection()).isEqualTo("split_order");
+
+    List<MongoSplitOrder> matched =
+        mongoOperations
+            .aggregate(packaged.pipeline(), packaged.targetCollection(), MongoSplitOrder.class)
+            .getMappedResults();
+    assertThat(matched)
+        .extracting(MongoSplitOrder::getId)
+        .containsExactlyInAnyOrder("U1", "U2");
+  }
+
+  @Test
+  @DisplayName(
+      "OR shape: two split correlations OR'd — no parent-only clause → starts on first child collection")
+  void unionWithTwoSplitsNoParent() {
+    // The fixture only has one split (items). Fake a two-split filter by targeting
+    // items with two different-state disjuncts — the decomposer treats each as a
+    // separate split correlation (different-item semantics).
+    writeExecutor.saveWithSplits(order("V1", "OPEN", List.of(item("i", "PENDING"))));
+    writeExecutor.saveWithSplits(order("V2", "OPEN", List.of(item("i", "REJECTED"))));
+    writeExecutor.saveWithSplits(order("V3", "OPEN", List.of(item("i", "SHIPPED"))));
+
+    SplitAwareAggregation packaged =
+        splitAwareFilter.translateAsUnionWithAggregation(
+            MongoSplitOrder.class,
+            "$[?(@.items[?(@.state == 'PENDING')] || @.items[?(@.state == 'REJECTED')])]");
+    assertThat(packaged).isNotNull();
+    // No parent-only clause → target = first split's child collection.
+    assertThat(packaged.targetCollection()).isEqualTo("split_order_item");
+
+    List<MongoSplitOrder> matched =
+        mongoOperations
+            .aggregate(packaged.pipeline(), packaged.targetCollection(), MongoSplitOrder.class)
+            .getMappedResults();
+    assertThat(matched)
+        .extracting(MongoSplitOrder::getId)
+        .containsExactlyInAnyOrder("V1", "V2");
+  }
+
+  @Test
+  @DisplayName("OR shape: dedup keeps a single row per parent even when multiple disjuncts match")
+  void unionWithDedupsMultiMatch() {
+    // W1 matches BOTH sides (CANCELLED and has a PENDING item). Must appear once.
+    writeExecutor.saveWithSplits(order("W1", "CANCELLED", List.of(item("i", "PENDING"))));
+
+    SplitAwareAggregation packaged =
+        splitAwareFilter.translateAsUnionWithAggregation(
+            MongoSplitOrder.class,
+            "$[?(@.status == 'CANCELLED' || @.items[?(@.state == 'PENDING')])]");
+    List<MongoSplitOrder> matched =
+        mongoOperations
+            .aggregate(packaged.pipeline(), packaged.targetCollection(), MongoSplitOrder.class)
+            .getMappedResults();
+    assertThat(matched).extracting(MongoSplitOrder::getId).containsExactly("W1");
+  }
+
+  @Test
+  @DisplayName(
       "d.3 item-first: single-split filter routes to child collection and returns matching parents")
   void itemFirstPipelineReturnsMatchingParents() {
     writeExecutor.saveWithSplits(

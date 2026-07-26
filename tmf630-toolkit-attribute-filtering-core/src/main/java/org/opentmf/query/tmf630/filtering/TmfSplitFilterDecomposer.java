@@ -28,15 +28,20 @@ import java.util.Set;
  *       parent comparisons and top-level split correlations.
  * </ul>
  *
+ * <p>Top-level {@code ||} disjunctions are supported symmetrically with {@code &&}:
+ * the returned {@link Combinator} distinguishes the two so backend translators pick
+ * the right composition (SQL {@code AND}/{@code OR} for JSONB, parent-first
+ * {@code $lookup}-chain vs. {@code $unionWith} for Mongo).
+ *
  * <p><strong>Rejected (deferred to later cuts under the same 3.0.0-SNAPSHOT):</strong>
  *
  * <ul>
- *   <li>Top-level disjunctions ({@code || }). Combining a parent-side clause with a
- *       split-side clause via OR needs backend-specific composition logic (SQL
- *       trilean gotchas for JSONB, aggregation-shape choices for Mongo). Deferred.
+ *   <li>Mixed {@code &&} and {@code ||} at the top level, e.g.
+ *       {@code a && b || c}. Handling operator precedence needs a proper AST parser
+ *       rather than the top-level split this decomposer performs; group with
+ *       parentheses inside a single top-level conjunct if needed.
  *   <li>Nested boolean expressions where a split reference appears inside a
- *       parenthesised subgroup. Requires a proper AST parser rather than the
- *       top-level split this MVP performs.
+ *       parenthesised subgroup. Same reason.
  * </ul>
  *
  * <p>The decomposer never enforces "same split field only once" — two references to
@@ -67,23 +72,26 @@ public final class TmfSplitFilterDecomposer {
    */
   public static Decomposition decompose(String filterExpression, Set<String> splitFieldNames) {
     if (filterExpression == null || filterExpression.isBlank()) {
-      return new Decomposition(Optional.empty(), List.of());
+      return new Decomposition(Optional.empty(), List.of(), Combinator.AND);
     }
     String body = unwrap(filterExpression.trim());
-    if (containsTopLevelOr(body)) {
+    boolean hasTopLevelAnd = containsTopLevelOperator(body, '&');
+    boolean hasTopLevelOr = containsTopLevelOperator(body, '|');
+    if (hasTopLevelAnd && hasTopLevelOr) {
       throw new TmfFilteringException(
           "Filter '"
               + filterExpression
-              + "' uses a top-level '||' that mixes clauses; disjunctions of "
-              + "parent-side and split-side predicates are not yet supported. "
-              + "Split the request into two calls or restructure the URL.");
+              + "' mixes top-level '&&' and '||'. Operator-precedence parsing is not "
+              + "supported here — group the intended operand with parentheses inside a "
+              + "single top-level conjunct, or split the request into multiple calls.");
     }
-    List<String> topLevelConjuncts = splitTopLevelAnds(body);
+    Combinator combinator = hasTopLevelOr ? Combinator.OR : Combinator.AND;
+    List<String> topLevelClauses = splitTopLevel(body, combinator);
 
     List<String> parentClauses = new ArrayList<>();
     List<SplitClauseRef> splitClauses = new ArrayList<>();
-    for (String conjunct : topLevelConjuncts) {
-      String trimmed = conjunct.trim();
+    for (String clause : topLevelClauses) {
+      String trimmed = clause.trim();
       Optional<SplitClauseRef> asSplit = tryParseAsSplitCorrelation(trimmed, splitFieldNames);
       if (asSplit.isPresent()) {
         splitClauses.add(asSplit.get());
@@ -94,26 +102,36 @@ public final class TmfSplitFilterDecomposer {
             "Filter clause '"
                 + trimmed
                 + "' references a split field but is not a bare top-level array "
-                + "correlation. Move it outside the parent-only conjuncts, e.g. "
+                + "correlation. Move it outside the parent-only clauses, e.g. "
                 + "@.<splitField>[?(<inner>)].");
       }
       parentClauses.add(trimmed);
     }
 
     Optional<String> parentOnlyFilter =
-        parentClauses.isEmpty() ? Optional.empty() : Optional.of(rewrap(parentClauses));
-    return new Decomposition(parentOnlyFilter, List.copyOf(splitClauses));
+        parentClauses.isEmpty() ? Optional.empty() : Optional.of(rewrap(parentClauses, combinator));
+    return new Decomposition(parentOnlyFilter, List.copyOf(splitClauses), combinator);
   }
 
   /**
    * Structured result of {@link #decompose(String, Set)}. Either half may be empty;
-   * both being empty means the input filter was blank.
+   * both being empty means the input filter was blank. {@link #combinator()} tells
+   * the backend translator whether the parent-only piece and the split clauses
+   * should be composed with logical AND or logical OR.
    */
   public record Decomposition(
-      Optional<String> parentOnlyFilter, List<SplitClauseRef> splitClauses) {
+      Optional<String> parentOnlyFilter,
+      List<SplitClauseRef> splitClauses,
+      Combinator combinator) {
     public boolean isEmpty() {
       return parentOnlyFilter.isEmpty() && splitClauses.isEmpty();
     }
+  }
+
+  /** Top-level boolean combinator that binds the decomposition's pieces together. */
+  public enum Combinator {
+    AND,
+    OR
   }
 
   /** One split-collection reference resolved out of a compound filter. */
@@ -133,22 +151,24 @@ public final class TmfSplitFilterDecomposer {
         "Filter expression must be wrapped in '$[?(...)]' or '[?(...)]': " + expr);
   }
 
-  private static String rewrap(List<String> parentClauses) {
-    return "$[?(" + String.join(" && ", parentClauses) + ")]";
+  private static String rewrap(List<String> parentClauses, Combinator combinator) {
+    String joiner = combinator == Combinator.OR ? " || " : " && ";
+    return "$[?(" + String.join(joiner, parentClauses) + ")]";
   }
 
-  private static boolean containsTopLevelOr(String body) {
+  private static boolean containsTopLevelOperator(String body, char opChar) {
     int depth = 0;
     for (int i = 0; i < body.length() - 1; i++) {
       char c = body.charAt(i);
       if (c == '(' || c == '[') depth++;
       else if (c == ')' || c == ']') depth--;
-      else if (depth == 0 && c == '|' && body.charAt(i + 1) == '|') return true;
+      else if (depth == 0 && c == opChar && body.charAt(i + 1) == opChar) return true;
     }
     return false;
   }
 
-  private static List<String> splitTopLevelAnds(String body) {
+  private static List<String> splitTopLevel(String body, Combinator combinator) {
+    char opChar = combinator == Combinator.OR ? '|' : '&';
     List<String> parts = new ArrayList<>();
     int depth = 0;
     int start = 0;
@@ -156,10 +176,10 @@ public final class TmfSplitFilterDecomposer {
       char c = body.charAt(i);
       if (c == '(' || c == '[') depth++;
       else if (c == ')' || c == ']') depth--;
-      else if (depth == 0 && c == '&' && body.charAt(i + 1) == '&') {
+      else if (depth == 0 && c == opChar && body.charAt(i + 1) == opChar) {
         parts.add(body.substring(start, i));
         start = i + 2;
-        i++; // skip the second '&'
+        i++; // skip the paired operator char
       }
     }
     parts.add(body.substring(start));

@@ -68,15 +68,55 @@ class MongoSplitAwareFilterTranslatorTest {
   }
 
   @Test
-  @DisplayName("top-level || mixing parent + split is still rejected (deferred)")
-  void topLevelOrRejected() {
+  @DisplayName(
+      "top-level || in translate() (criteria form) is rejected with a pointer to the $unionWith entry")
+  void topLevelOrInCriteriaFormRejectedWithPointer() {
     assertThatThrownBy(
             () ->
                 translator.translate(
                     FixtureParent.class,
                     "$[?(@.status == 'X' || @.items[?(@.state == 'Y')])]"))
         .isInstanceOf(TmfFilteringException.class)
-        .hasMessageContaining("top-level '||'");
+        .hasMessageContaining("translateAsUnionWithAggregation");
+  }
+
+  @Test
+  @DisplayName(
+      "top-level || in translateAsPipeline() (parent-first form) is rejected with the same pointer")
+  void topLevelOrInParentFirstPipelineRejectedWithPointer() {
+    assertThatThrownBy(
+            () ->
+                translator.translateAsPipeline(
+                    FixtureParent.class,
+                    "$[?(@.status == 'X' || @.items[?(@.state == 'Y')])]"))
+        .isInstanceOf(TmfFilteringException.class)
+        .hasMessageContaining("translateAsUnionWithAggregation");
+  }
+
+  @Test
+  @DisplayName(
+      "translateAsUnionWithAggregation on OR-shaped input packages a pipeline + target collection")
+  void unionWithEntryProducesPackagedAggregation() {
+    SplitAwareAggregation packaged =
+        translator.translateAsUnionWithAggregation(
+            FixtureParent.class,
+            "$[?(@.status == 'X' || @.items[?(@.state == 'Y')])]");
+    assertThat(packaged).isNotNull();
+    // Parent-only clause present → target collection is the parent collection.
+    assertThat(packaged.targetCollection()).isEqualTo("fixtureParent");
+    assertThat(packaged.pipeline()).isNotNull();
+  }
+
+  @Test
+  @DisplayName("translateAsUnionWithAggregation on AND-shaped input rejects with pointer")
+  void unionWithEntryRejectsAndShaped() {
+    assertThatThrownBy(
+            () ->
+                translator.translateAsUnionWithAggregation(
+                    FixtureParent.class,
+                    "$[?(@.status == 'X' && @.items[?(@.state == 'Y')])]"))
+        .isInstanceOf(TmfFilteringException.class)
+        .hasMessageContaining("translateAsPipeline");
   }
 
   @Test

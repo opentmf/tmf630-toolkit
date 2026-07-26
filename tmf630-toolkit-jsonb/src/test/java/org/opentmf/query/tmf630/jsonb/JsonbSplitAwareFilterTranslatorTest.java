@@ -84,15 +84,30 @@ class JsonbSplitAwareFilterTranslatorTest {
   }
 
   @Test
-  @DisplayName("top-level || mixing parent + split is still rejected (deferred)")
-  void topLevelOrRejected() {
+  @DisplayName("top-level || mixing parent + split composes with SQL OR")
+  void topLevelOrComposesWithSqlOr() {
+    JsonbClause c =
+        translator.translate(
+            OrderDomain.class, "$[?(@.status == 'X' || @.items[?(@.state == 'Y')])]");
+    assertThat(c.sql())
+        .contains("jsonb_path_exists(payload, ?::jsonpath)")
+        .contains("EXISTS (SELECT 1 FROM order_item")
+        .contains(" OR ");
+    assertThat(c.params()).hasSize(2);
+    assertThat(c.params().get(0)).asString().contains("@.status == \"X\"");
+    assertThat(c.params().get(1)).asString().contains("@.state == \"Y\"");
+  }
+
+  @Test
+  @DisplayName("mixed top-level && and || is rejected (operator precedence not parsed)")
+  void mixedTopLevelAndOrRejected() {
     assertThatThrownBy(
             () ->
                 translator.translate(
                     OrderDomain.class,
-                    "$[?(@.status == 'X' || @.items[?(@.state == 'Y')])]"))
+                    "$[?(@.status == 'X' && @.priority > 5 || @.items[?(@.state == 'Y')])]"))
         .isInstanceOf(TmfFilteringException.class)
-        .hasMessageContaining("top-level '||'");
+        .hasMessageContaining("mixes top-level '&&' and '||'");
   }
 
   @Test

@@ -10,6 +10,7 @@ import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.opentmf.query.tmf630.filtering.TmfSplitFilterDecomposer.Combinator;
 import org.opentmf.query.tmf630.filtering.TmfSplitFilterDecomposer.Decomposition;
 import org.opentmf.query.tmf630.filtering.TmfSplitFilterDecomposer.SplitClauseRef;
 
@@ -114,15 +115,65 @@ class TmfSplitFilterDecomposerTest {
   }
 
   @Test
-  @DisplayName("top-level || is rejected with an actionable message")
-  void topLevelOrRejected() {
+  @DisplayName("top-level || is accepted; combinator is OR")
+  void topLevelOrAccepted() {
+    Decomposition d =
+        TmfSplitFilterDecomposer.decompose(
+            "$[?(@.status == 'X' || @.items[?(@.state == 'Y')])]", SPLITS);
+    assertEquals(Combinator.OR, d.combinator());
+    assertEquals(Optional.of("$[?(@.status == 'X')]"), d.parentOnlyFilter());
+    assertEquals(
+        List.of(new SplitClauseRef("items", "@.state == 'Y'")), d.splitClauses());
+  }
+
+  @Test
+  @DisplayName("OR-only clauses across two split fields → combinator OR, two splits, no parent")
+  void topLevelOrTwoSplits() {
+    Decomposition d =
+        TmfSplitFilterDecomposer.decompose(
+            "$[?(@.items[?(@.state == 'A')] || @.characteristic[?(@.name == 'B')])]", SPLITS);
+    assertEquals(Combinator.OR, d.combinator());
+    assertTrue(d.parentOnlyFilter().isEmpty());
+    assertEquals(
+        List.of(
+            new SplitClauseRef("items", "@.state == 'A'"),
+            new SplitClauseRef("characteristic", "@.name == 'B'")),
+        d.splitClauses());
+  }
+
+  @Test
+  @DisplayName("multiple parent-only OR clauses are rejoined with || in parentOnlyFilter")
+  void parentOnlyOrRewrapped() {
+    Decomposition d =
+        TmfSplitFilterDecomposer.decompose(
+            "$[?(@.status == 'A' || @.status == 'B' || @.items[?(@.state == 'X')])]", SPLITS);
+    assertEquals(Combinator.OR, d.combinator());
+    assertEquals(
+        Optional.of("$[?(@.status == 'A' || @.status == 'B')]"), d.parentOnlyFilter());
+    assertEquals(1, d.splitClauses().size());
+  }
+
+  @Test
+  @DisplayName("mixed top-level && and || rejected with actionable message")
+  void mixedTopLevelAndOrRejected() {
     TmfFilteringException ex =
         assertThrows(
             TmfFilteringException.class,
             () ->
                 TmfSplitFilterDecomposer.decompose(
-                    "$[?(@.status == 'X' || @.items[?(@.state == 'Y')])]", SPLITS));
-    assertTrue(ex.getMessage().contains("top-level '||'"), ex.getMessage());
+                    "$[?(@.status == 'X' && @.priority > 5 || @.items[?(@.state == 'Y')])]",
+                    SPLITS));
+    assertTrue(
+        ex.getMessage().contains("mixes top-level '&&' and '||'"), ex.getMessage());
+  }
+
+  @Test
+  @DisplayName("plain AND decomposition still reports Combinator.AND")
+  void combinatorAndForPlainAnd() {
+    Decomposition d =
+        TmfSplitFilterDecomposer.decompose(
+            "$[?(@.status == 'X' && @.items[?(@.state == 'Y')])]", SPLITS);
+    assertEquals(Combinator.AND, d.combinator());
   }
 
   @Test

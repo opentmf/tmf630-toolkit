@@ -414,6 +414,42 @@ class Tmf630JsonbSplitCollectionIT {
 
   @Test
   @DisplayName(
+      "OR support: compound filter parent-side OR split-side returns union of matches")
+  void splitAwareCompoundParentOrSplit() {
+    // OR1: status=CANCELLED. Matches on parent side.
+    SplitOrderDomain o1 = new SplitOrderDomain();
+    o1.setId("OR1");
+    o1.setStatus("CANCELLED");
+    o1.setItems(List.of(item("i1", "SHIPPED")));
+    writeExecutor.saveWithSplits(o1);
+    // OR2: status=OPEN with a PENDING item. Matches on split side.
+    SplitOrderDomain o2 = new SplitOrderDomain();
+    o2.setId("OR2");
+    o2.setStatus("OPEN");
+    o2.setItems(List.of(item("i1", "PENDING")));
+    writeExecutor.saveWithSplits(o2);
+    // OR3: neither cancelled nor any pending item. Should NOT match.
+    SplitOrderDomain o3 = new SplitOrderDomain();
+    o3.setId("OR3");
+    o3.setStatus("OPEN");
+    o3.setItems(List.of(item("i1", "SHIPPED")));
+    writeExecutor.saveWithSplits(o3);
+
+    JsonbClause where =
+        splitAwareTranslator.translate(
+            SplitOrderDomain.class,
+            "$[?(@.status == 'CANCELLED' || @.items[?(@.state == 'PENDING')])]");
+    Page<SplitOrderDomain> page =
+        executor.findAll(
+            SplitOrderDomain.class, where, TmfSort.empty(),
+            Pageable.unpaged(), field -> String.class);
+    assertThat(page.getContent())
+        .extracting(SplitOrderDomain::getId)
+        .containsExactlyInAnyOrder("OR1", "OR2");
+  }
+
+  @Test
+  @DisplayName(
       "c.2/c.3 full: two split correlations AND'd — different-item semantics per clause")
   void splitAwareCompoundTwoSplitClauses() {
     // K4 has one PENDING item and one SHIPPED item — different items each satisfying
