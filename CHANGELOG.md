@@ -6,6 +6,38 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 
 ### Added (PostgreSQL-with-JSONB backend — v3.0.0 Phase (b), incremental)
 
+- **`JsonbJsonPathTranslator` — Jayway JsonPath `filter=` → Postgres SQL/JSON
+  path translator** (Phase b.3 of V3 roadmap). Bridges the toolkit's
+  Jayway-flavour `filter=` grammar to Postgres SQL/JSON path expressions,
+  wrapped in `jsonb_path_exists(payload, ?::jsonpath)` calls. Recognises
+  three shapes per JSONB doc §5.2 / §5.4:
+  - **Simple top-level filters**: `$[?(@.status == 'X')]` →
+    `jsonb_path_exists(payload, '$ ? (@.status == "X")')`. Wrapper stripping
+    handles `$[?(...)]`, `[?(...)]`, and `$.[?(...)]`. Single-quoted
+    strings converted to double-quoted (Postgres SQL/JSON path requires
+    double quotes), with embedded quote escaping.
+  - **Array correlation**: `$[?(@.arr[?(@.name == 'X' && @.id == 'Y')])]`
+    rewrites `@.arr[?(<inner>)]` to `@.arr[*] ? (<inner>)` — Postgres
+    natively supports the nested-filter syntax. Composes recursively for
+    multi-level `[?(...)]` nesting.
+  - **`length()` equality** on collection fields: `$[?(@.arr.length() == N)]`
+    is special-cased to `jsonb_array_length(payload->'arr') = N` (this
+    doesn't fit the `jsonb_path_exists` shape). Rejects negative literals.
+
+  Character-level translation with per-position state tracking for string
+  literals and nested filters — no regex-based fragile matching for the
+  structural parts.
+
+  18 unit tests + 2 real-Postgres IT scenarios via
+  `Tmf630JsonbFilterExecutorIT`. Auto-wired via
+  `Tmf630JsonbAutoConfiguration` alongside the other JSONB beans.
+
+  Deferred: `=~` regex inside filter (Postgres has `like_regex` but not
+  first-class here yet), bare `[*]` wildcard as top-level projection,
+  positional `[N]` in field paths inside a filter predicate (partially
+  supported — depends on Postgres SQL/JSON path acceptance which varies by
+  version).
+
 - **`Tmf630JsonbFilterExecutor` — end-to-end query executor** (Phase b.5 of
   V3 roadmap). Composes the b.2 filter clause, b.4 sort fragment, and paging
   tail into a single `SELECT payload FROM <table> WHERE ... ORDER BY ...

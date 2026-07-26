@@ -47,6 +47,7 @@ class Tmf630JsonbFilterExecutorIT {
 
   @Autowired private Tmf630JsonbFilterExecutor executor;
   @Autowired private JsonbPredicateFactory predicateFactory;
+  @Autowired private JsonbJsonPathTranslator jsonPathTranslator;
   @Autowired private JsonbTestRowRepository repository;
   @Autowired private ObjectMapper objectMapper;
 
@@ -148,6 +149,35 @@ class Tmf630JsonbFilterExecutorIT {
     assertThat(firstPage.getTotalElements()).isEqualTo(4);
     assertThat(firstPage.getContent()).hasSize(2);
     assertThat(firstPage.getTotalPages()).isEqualTo(2);
+  }
+
+  @Test
+  @DisplayName(
+      "Phase (b.3): JsonPath filter=$[?(...)] compiles to jsonb_path_exists at runtime")
+  void jsonPathFilterEqualityWorksAgainstPostgres() {
+    JsonbClause where = jsonPathTranslator.translate("$[?(@.status == 'NEW')]");
+    Page<JsonbTestDomain> page =
+        executor.findAll(
+            JsonbTestDomain.class, where, TmfSort.empty(), Pageable.unpaged(), any());
+    assertThat(page.getTotalElements()).isEqualTo(2);
+    assertThat(page.getContent())
+        .extracting(JsonbTestDomain::getStatus)
+        .containsOnly("NEW");
+  }
+
+  @Test
+  @DisplayName(
+      "Phase (b.3): JsonPath filter with compound predicate lands on Postgres correctly")
+  void jsonPathFilterCompound() {
+    JsonbClause where =
+        jsonPathTranslator.translate("$[?(@.status == 'NEW' && @.priority > 5)]");
+    Page<JsonbTestDomain> page =
+        executor.findAll(
+            JsonbTestDomain.class, where, TmfSort.empty(), Pageable.unpaged(), any());
+    // Only ORD-D has status=NEW AND priority > 5 (priority = 9).
+    assertThat(page.getContent())
+        .extracting(JsonbTestDomain::getId)
+        .containsExactly("D");
   }
 
   @Test

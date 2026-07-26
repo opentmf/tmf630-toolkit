@@ -113,6 +113,12 @@ public class Tmf630JsonbAutoConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
+  public JsonbJsonPathTranslator tmf630JsonbJsonPathTranslator(JsonbPathExtractor extractor) {
+    return new JsonbJsonPathTranslator(extractor, "payload");
+  }
+
+  @Bean
+  @ConditionalOnMissingBean
   public JsonbSortBuilder tmf630JsonbSortBuilder(
       JsonbPathExtractor extractor, ObjectProvider<Tmf630PagingSettings> pagingSettings) {
     boolean nullsLast =
