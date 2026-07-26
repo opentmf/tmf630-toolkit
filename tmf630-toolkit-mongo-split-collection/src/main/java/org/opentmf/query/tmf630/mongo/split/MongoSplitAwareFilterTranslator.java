@@ -3,53 +3,49 @@ package org.opentmf.query.tmf630.mongo.split;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.Set;
+import java.util.stream.Collectors;
+import org.bson.Document;
 import org.opentmf.query.tmf630.filtering.TmfFilteringException;
+import org.opentmf.query.tmf630.filtering.TmfSplitFilterDecomposer;
+import org.opentmf.query.tmf630.filtering.TmfSplitFilterDecomposer.Decomposition;
+import org.opentmf.query.tmf630.filtering.TmfSplitFilterDecomposer.SplitClauseRef;
 import org.springframework.data.mongodb.core.MongoOperations;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
+import org.springframework.data.mongodb.core.aggregation.AggregationOperation;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 
 /**
  * Mongo mirror of {@code JsonbSplitAwareFilterTranslator}. Given a JsonPath
- * {@code filter=} expression that targets a {@link Tmf630MongoSplitCollection} field,
- * returns a Mongo {@link Criteria} to be applied at the <em>parent</em> endpoint that
- * matches the parents whose split children satisfy the inner predicate.
+ * {@code filter=} expression that references any {@link Tmf630MongoSplitCollection}
+ * field, returns a parent-side {@link Criteria} (or {@link Aggregation} pipeline) that
+ * enforces both the parent-only clauses and the split correlations against MongoDB.
  *
- * <p>The MVP implementation performs a two-step resolution:
+ * <p>Compound filter support is delegated to
+ * {@link org.opentmf.query.tmf630.filtering.TmfSplitFilterDecomposer} — the same
+ * decomposer the JSONB backend uses. Each translation path (criteria form and
+ * pipeline form) walks the decomposition and composes native building blocks:
+ * parent-side clauses become top-level {@link Criteria}, split-side clauses become
+ * either {@code _id IN (...)} sub-queries (criteria form) or {@code $lookup} stages
+ * (pipeline form).
  *
- * <ol>
- *   <li>Translate the inner predicate to a {@link Criteria} against the child
- *       collection using the configured {@link MongoInnerPredicateTranslator} (the
- *       default is {@link SimpleMongoInnerPredicateTranslator}).
- *   <li>Query the child collection distinct-on {@code parentIdField} to collect the
- *       set of parent ids that have at least one matching child, then return
- *       {@code Criteria.where("_id").in(<those ids>)}.
- * </ol>
- *
- * <p>This is intentionally simpler than the full {@code $lookup}-based aggregation
- * router planned for Phase (d.3) — it works today, with correct semantics, at the
- * cost of an extra distinct query per request. For workloads where that cost matters
- * the d.3 router will replace this codepath with a single-round-trip pipeline.
- *
- * <p>Supported shapes:
+ * <p>Supported input shapes:
  *
  * <ul>
- *   <li><strong>Parent-only</strong> filter ({@code $[?(@.status == 'X')]}) — this
- *       translator returns {@code null} to signal "not a split-aware case; use your
- *       normal filter path". Callers should combine that null-return with their
- *       usual {@code filter=} translator.
- *   <li><strong>Top-level array correlation into one split field</strong>
- *       ({@code $[?(@.items[?(@.state == 'X')])]}) — routed to the child collection.
+ *   <li>Parent-only ({@code $[?(@.status == 'X')]}) → single parent-side criterion.
+ *   <li>Single split correlation ({@code $[?(@.items[?(@.state == 'X')])]}) → single
+ *       split-side criterion or {@code $lookup} pipeline.
+ *   <li>Top-level {@code &&} conjunction of parent + one or more splits →
+ *       {@code parentCriteria AND _id IN (...) [AND _id IN (...)]}, or the pipeline
+ *       equivalent with a top-level {@code $match} plus one {@code $lookup} per split.
  * </ul>
  *
- * <p>Rejected with a clear message (deferred to later d.x cuts):
+ * <p>Rejected via the decomposer with an actionable message:
  *
  * <ul>
- *   <li><strong>Compound predicates mixing parent and split fields at the top level</strong>
- *       ({@code $[?(@.status == 'X' && @.items[?(...)])]}) — needs the generic
- *       predicate splitter that will land alongside c.2/c.3's full cut.
+ *   <li>Top-level {@code ||} mixing parent-side and split-side.
+ *   <li>Nested boolean subgroups containing a split reference.
  * </ul>
  */
 public class MongoSplitAwareFilterTranslator {
@@ -58,6 +54,7 @@ public class MongoSplitAwareFilterTranslator {
   private final MongoOperations mongoOperations;
   private final MongoInnerPredicateTranslator innerTranslator;
   private final MongoSplitPipelineBuilder pipelineBuilder;
+  private final MongoInnerPredicateTranslator parentTranslator;
 
   public MongoSplitAwareFilterTranslator(
       MongoSplitEntityRegistry registry,
@@ -79,95 +76,132 @@ public class MongoSplitAwareFilterTranslator {
     this.mongoOperations = mongoOperations;
     this.innerTranslator = innerTranslator;
     this.pipelineBuilder = pipelineBuilder;
+    // Parent-side criteria have their fields at the top level of the parent doc, not
+    // under a "payload" wrapper. Instantiate a parallel translator with an empty
+    // prefix for parent-only clauses coming out of the decomposer.
+    this.parentTranslator =
+        new SimpleMongoInnerPredicateTranslator(
+            SimpleMongoInnerPredicateTranslator.PARENT_TOP_LEVEL_PREFIX);
   }
 
   /**
    * Attempts to translate the given {@code filter=} JsonPath expression to a Mongo
-   * {@link Criteria} for use at the parent endpoint.
-   *
-   * @return the resolved parent-side criterion, or {@code null} if the filter does
-   *     not reference any split field — in that case the caller should fall back to
-   *     its normal filter translator
+   * {@link Criteria} for use at the parent endpoint. Returns {@code null} when the
+   * filter has no split reference and no parent clause (i.e. blank) — caller should
+   * fall back to its normal filter path when the return is {@code null}.
    */
   public Criteria translate(Class<?> parentType, String filterExpression) {
     if (filterExpression == null || filterExpression.isBlank()) return null;
-    MongoSplitEntityMetadata metadata =
-        registry
-            .forParentType(parentType)
-            .orElseThrow(
-                () ->
-                    new TmfFilteringException(
-                        "No @Tmf630MongoSplitBacked mapping registered for "
-                            + parentType.getName()));
+    MongoSplitEntityMetadata metadata = requireMetadata(parentType);
     if (metadata.splits().isEmpty()) return null;
 
-    for (MongoSplitCollectionMetadata split : metadata.splits()) {
-      Pattern pattern = topLevelCorrelationPattern(split.fieldName());
-      Matcher matcher = pattern.matcher(filterExpression);
-      if (matcher.matches()) {
-        return resolveViaChildLookup(split, matcher.group(1));
-      }
-    }
+    Decomposition decomposition =
+        TmfSplitFilterDecomposer.decompose(filterExpression, splitFieldNames(metadata));
+    if (decomposition.isEmpty()) return null;
+    // Preserve the old "caller falls back to its normal filter translator" contract:
+    // when the filter references no split field, the caller's full TMF grammar is a
+    // strict superset of our SimpleMongoInnerPredicateTranslator, so let the caller
+    // handle it. We only take over when there's split-side work to do.
+    if (decomposition.splitClauses().isEmpty()) return null;
 
-    // Reject compound predicates that reference any split field alongside parent
-    // fields — the caller is asking for something the MVP router can't produce.
-    for (MongoSplitCollectionMetadata split : metadata.splits()) {
-      String needle = "@." + split.fieldName() + "[";
-      if (filterExpression.contains(needle)) {
-        throw new TmfFilteringException(
-            "Filter '"
-                + filterExpression
-                + "' references split field '"
-                + split.fieldName()
-                + "' outside the supported top-level array-correlation shape "
-                + "'$[?(@." + split.fieldName() + "[?(...)])]'. "
-                + "Split the request into a parent filter plus a sub-endpoint call, "
-                + "or restructure the URL.");
-      }
+    List<Criteria> conjuncts = new ArrayList<>();
+    decomposition
+        .parentOnlyFilter()
+        .ifPresent(f -> conjuncts.add(parentTranslator.translate(unwrapForParent(f))));
+    for (SplitClauseRef ref : decomposition.splitClauses()) {
+      MongoSplitCollectionMetadata split = requireSplit(metadata, ref.splitFieldName());
+      conjuncts.add(resolveViaChildLookup(split, ref.innerPredicate()));
     }
-    return null;
+    return combineWithAnd(conjuncts);
   }
 
   /**
-   * Phase (d.3 + d.4) primary entry point — returns a single-round-trip
-   * {@link Aggregation} pipeline on the parent collection that yields exactly the
-   * parents matching the split-side predicate, or {@code null} if the filter has no
-   * split reference (caller falls back to its normal filter path).
+   * Phase (d.3 + d.4) — returns a single-round-trip {@link Aggregation} pipeline on
+   * the parent collection. Returns {@code null} if the expression is blank.
    *
-   * <p>Prefer this over {@link #translate(Class, String)} when your read path can
-   * accept an aggregation instead of a {@link Criteria} — one round-trip vs. two,
-   * and never risks a {@code $in} list overflowing at pathological cardinalities.
+   * <p>Emits at most:
+   *
+   * <pre>
+   * [ {$match: <parent-only criteria>},           // if parent-only clauses exist
+   *   {$lookup: {...}}, {$match: {__M__: {$ne: []}}}, {$project: {__M__: 0}},
+   *   ...one $lookup/$match/$project trio per split clause... ]
+   * </pre>
    */
   public Aggregation translateAsPipeline(Class<?> parentType, String filterExpression) {
     if (filterExpression == null || filterExpression.isBlank()) return null;
-    MongoSplitEntityMetadata metadata =
-        registry
-            .forParentType(parentType)
-            .orElseThrow(
-                () ->
-                    new TmfFilteringException(
-                        "No @Tmf630MongoSplitBacked mapping registered for "
-                            + parentType.getName()));
+    MongoSplitEntityMetadata metadata = requireMetadata(parentType);
     if (metadata.splits().isEmpty()) return null;
 
-    for (MongoSplitCollectionMetadata split : metadata.splits()) {
-      Matcher matcher = topLevelCorrelationPattern(split.fieldName()).matcher(filterExpression);
-      if (matcher.matches()) {
-        return pipelineBuilder.build(split, matcher.group(1));
+    Decomposition decomposition =
+        TmfSplitFilterDecomposer.decompose(filterExpression, splitFieldNames(metadata));
+    if (decomposition.isEmpty()) return null;
+    // Symmetric to translate(): the caller's normal filter path is a superset of ours
+    // for parent-only clauses, so short-circuit when there's no split-side work.
+    if (decomposition.splitClauses().isEmpty()) return null;
+
+    List<AggregationOperation> stages = new ArrayList<>();
+    if (decomposition.parentOnlyFilter().isPresent()) {
+      Document parentBson =
+          parentTranslator
+              .translate(unwrapForParent(decomposition.parentOnlyFilter().get()))
+              .getCriteriaObject();
+      stages.add(ctx -> new Document("$match", parentBson));
+    }
+    for (SplitClauseRef ref : decomposition.splitClauses()) {
+      MongoSplitCollectionMetadata split = requireSplit(metadata, ref.splitFieldName());
+      Aggregation piece = pipelineBuilder.build(split, ref.innerPredicate());
+      // Merge the piece's stages into the outer pipeline so we get one aggregation.
+      for (AggregationOperation op : piece.getPipeline().getOperations()) {
+        stages.add(op);
       }
     }
-    for (MongoSplitCollectionMetadata split : metadata.splits()) {
-      if (filterExpression.contains("@." + split.fieldName() + "[")) {
-        throw new TmfFilteringException(
-            "Filter '"
-                + filterExpression
-                + "' references split field '"
-                + split.fieldName()
-                + "' outside the supported top-level array-correlation shape "
-                + "'$[?(@." + split.fieldName() + "[?(...)])]'.");
-      }
+    if (stages.isEmpty()) return null;
+    return Aggregation.newAggregation(stages);
+  }
+
+  /**
+   * Unwraps the {@code $[?( ... )]} the decomposer emits, so the parent-side
+   * {@link MongoInnerPredicateTranslator} receives just the leaf-or-compound body
+   * (its input grammar is inner-predicate text, not a full JsonPath wrapper).
+   */
+  private static String unwrapForParent(String wrappedParentFilter) {
+    String s = wrappedParentFilter.trim();
+    if (s.startsWith("$[?(") && s.endsWith(")]")) {
+      return s.substring(4, s.length() - 2).trim();
     }
-    return null;
+    if (s.startsWith("[?(") && s.endsWith(")]")) {
+      return s.substring(3, s.length() - 2).trim();
+    }
+    return s;
+  }
+
+  private MongoSplitEntityMetadata requireMetadata(Class<?> parentType) {
+    return registry
+        .forParentType(parentType)
+        .orElseThrow(
+            () ->
+                new TmfFilteringException(
+                    "No @Tmf630MongoSplitBacked mapping registered for " + parentType.getName()));
+  }
+
+  private static MongoSplitCollectionMetadata requireSplit(
+      MongoSplitEntityMetadata metadata, String fieldName) {
+    return metadata.splits().stream()
+        .filter(s -> s.fieldName().equals(fieldName))
+        .findFirst()
+        .orElseThrow(
+            () ->
+                new TmfFilteringException(
+                    "No split metadata for field '"
+                        + fieldName
+                        + "' on "
+                        + metadata.parentType().getSimpleName()));
+  }
+
+  private static Set<String> splitFieldNames(MongoSplitEntityMetadata metadata) {
+    return metadata.splits().stream()
+        .map(MongoSplitCollectionMetadata::fieldName)
+        .collect(Collectors.toSet());
   }
 
   private Criteria resolveViaChildLookup(MongoSplitCollectionMetadata split, String innerRaw) {
@@ -189,15 +223,9 @@ public class MongoSplitAwareFilterTranslator {
     return Criteria.where("_id").in(parentIds);
   }
 
-  private static Pattern topLevelCorrelationPattern(String splitFieldName) {
-    // Matches both $[?(@.<splitField>[?(<inner>)])] and its bare wrapper form
-    // [?(@.<splitField>[?(<inner>)])] (to mirror JSONB routing) via one optional-$
-    // prefix. Single capture group holds <inner> — deterministic group numbering
-    // regardless of matcher-internal alternation ordering.
-    String pattern =
-        "^\\s*\\$?\\[\\?\\(\\s*@\\."
-            + Pattern.quote(splitFieldName)
-            + "\\[\\?\\((.+)\\)\\]\\s*\\)\\]\\s*$";
-    return Pattern.compile(pattern, Pattern.DOTALL);
+  private static Criteria combineWithAnd(List<Criteria> conjuncts) {
+    if (conjuncts.isEmpty()) return null;
+    if (conjuncts.size() == 1) return conjuncts.get(0);
+    return new Criteria().andOperator(conjuncts.toArray(Criteria[]::new));
   }
 }

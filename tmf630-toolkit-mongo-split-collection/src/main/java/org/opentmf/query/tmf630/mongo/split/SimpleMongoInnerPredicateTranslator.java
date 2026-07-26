@@ -31,9 +31,32 @@ import org.springframework.data.mongodb.core.query.Criteria;
  */
 public class SimpleMongoInnerPredicateTranslator implements MongoInnerPredicateTranslator {
 
+  /** Default prefix for child-side use — child docs wrap the payload in this field. */
+  public static final String CHILD_PAYLOAD_PREFIX = "payload.";
+  /** Empty prefix for parent-side use — parent docs have fields at the top level. */
+  public static final String PARENT_TOP_LEVEL_PREFIX = "";
+
   private static final Pattern LEAF_PATTERN =
       Pattern.compile(
           "\\s*@\\.([A-Za-z_][\\w.]*)\\s*(==|!=|<=|>=|<|>)\\s*(?:'([^']*)'|(-?\\d+(?:\\.\\d+)?))\\s*");
+
+  private final String fieldPrefix;
+
+  /** Constructs a translator for child-side use ({@code payload.} prefix). */
+  public SimpleMongoInnerPredicateTranslator() {
+    this(CHILD_PAYLOAD_PREFIX);
+  }
+
+  /**
+   * Constructs a translator with a caller-supplied field prefix. Pass
+   * {@link #CHILD_PAYLOAD_PREFIX} for child-side criteria (child wrapper docs store
+   * the child payload under a nested {@code payload} field) or
+   * {@link #PARENT_TOP_LEVEL_PREFIX} for parent-side criteria (parent docs have their
+   * fields at the top level).
+   */
+  public SimpleMongoInnerPredicateTranslator(String fieldPrefix) {
+    this.fieldPrefix = fieldPrefix == null ? "" : fieldPrefix;
+  }
 
   @Override
   public Criteria translate(String expression) {
@@ -108,8 +131,8 @@ public class SimpleMongoInnerPredicateTranslator implements MongoInnerPredicateT
     return buildCriteria(field, op, value);
   }
 
-  private static Criteria buildCriteria(String field, String op, Object value) {
-    Criteria base = Criteria.where("payload." + field);
+  private Criteria buildCriteria(String field, String op, Object value) {
+    Criteria base = Criteria.where(fieldPrefix + field);
     return switch (op) {
       case "==" -> base.is(value);
       case "!=" -> base.ne(value);

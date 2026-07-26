@@ -45,15 +45,38 @@ class MongoSplitAwareFilterTranslatorTest {
   }
 
   @Test
-  @DisplayName("compound filter mixing parent + split fields is rejected with actionable message")
-  void compoundRejected() {
+  @DisplayName(
+      "compound filter mixing parent + split at top level is decomposed via the shared decomposer "
+          + "(pipeline form asserted for unit-level coverage; criteria form covered by IT)")
+  void mixedParentAndSplitDecomposedInPipeline() {
+    // Pipeline form doesn't touch Mongo (aggregation is built purely from BSON), so
+    // it's safe to exercise here without a live MongoOperations. Criteria form
+    // executes a distinct query and is covered end-to-end by the IT.
+    org.springframework.data.mongodb.core.aggregation.Aggregation pipeline =
+        translator.translateAsPipeline(
+            FixtureParent.class,
+            "$[?(@.status == 'X' && @.items[?(@.state == 'Y')])]");
+    assertThat(pipeline).isNotNull();
+    List<org.bson.Document> stages =
+        pipeline.toPipeline(
+            org.springframework.data.mongodb.core.aggregation.TypedAggregation.DEFAULT_CONTEXT);
+    // Expect at least: parent-side $match + $lookup + retention $match + $project
+    assertThat(stages).hasSizeGreaterThanOrEqualTo(4);
+    assertThat(stages.get(0)).containsKey("$match");
+    // The very first $match holds the parent-only criterion — no $lookup helper yet.
+    assertThat((org.bson.Document) stages.get(0).get("$match")).containsEntry("status", "X");
+  }
+
+  @Test
+  @DisplayName("top-level || mixing parent + split is still rejected (deferred)")
+  void topLevelOrRejected() {
     assertThatThrownBy(
             () ->
                 translator.translate(
                     FixtureParent.class,
-                    "$[?(@.status == 'X' && @.items[?(@.state == 'Y')])]"))
+                    "$[?(@.status == 'X' || @.items[?(@.state == 'Y')])]"))
         .isInstanceOf(TmfFilteringException.class)
-        .hasMessageContaining("outside the supported top-level array-correlation shape");
+        .hasMessageContaining("top-level '||'");
   }
 
   @Test

@@ -66,15 +66,33 @@ class JsonbSplitAwareFilterTranslatorTest {
   }
 
   @Test
-  @DisplayName("compound filter mixing parent and split fields is rejected with actionable message")
-  void mixedParentAndSplitRejected() {
+  @DisplayName(
+      "compound filter mixing parent + split at top level is decomposed and AND'd via SQL")
+  void mixedParentAndSplitDecomposedToAnd() {
+    JsonbClause c =
+        translator.translate(
+            OrderDomain.class, "$[?(@.status == 'X' && @.items[?(@.state == 'Y')])]");
+    // Combined shape: (parentJsonpath AND EXISTS(...))
+    assertThat(c.sql())
+        .contains("jsonb_path_exists(payload, ?::jsonpath)")
+        .contains("EXISTS (SELECT 1 FROM order_item");
+    assertThat(c.sql()).contains(" AND ");
+    // Both params flow through: parent jsonpath first, then child jsonpath.
+    assertThat(c.params()).hasSize(2);
+    assertThat(c.params().get(0)).asString().contains("@.status == \"X\"");
+    assertThat(c.params().get(1)).asString().contains("@.state == \"Y\"");
+  }
+
+  @Test
+  @DisplayName("top-level || mixing parent + split is still rejected (deferred)")
+  void topLevelOrRejected() {
     assertThatThrownBy(
             () ->
                 translator.translate(
                     OrderDomain.class,
-                    "$[?(@.status == 'X' && @.items[?(@.state == 'Y')])]"))
+                    "$[?(@.status == 'X' || @.items[?(@.state == 'Y')])]"))
         .isInstanceOf(TmfFilteringException.class)
-        .hasMessageContaining("outside the supported top-level array-correlation shape");
+        .hasMessageContaining("top-level '||'");
   }
 
   @Test

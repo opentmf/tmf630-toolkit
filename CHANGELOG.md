@@ -4,6 +4,69 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 
 ## [3.0.0] - 2026-07-26
 
+### Changed (generic parent+split predicate splitter — v3.0.0)
+
+- **`TmfSplitFilterDecomposer` in `tmf630-toolkit-attribute-filtering-core`** —
+  shared JsonPath filter decomposer used by both split-collection backends.
+  Given a filter expression and the set of split-field names, returns a
+  structured `Decomposition` with an optional parent-only sub-filter and one
+  `SplitClauseRef` per top-level split correlation. Purely AST manipulation,
+  no backend concerns.
+
+  Supported input shapes:
+  - Parent-only: `$[?(@.status == 'X')]`
+  - Single split correlation: `$[?(@.items[?(@.state == 'Y')])]`
+  - Top-level `&&` conjunction of any number of parent clauses and any number
+    of split correlations, e.g.:
+    `$[?(@.status == 'X' && @.priority > 5 && @.items[?(@.state == 'Y')]
+    && @.characteristic[?(@.name == 'color')])]`
+  - Bare wrapper `[?(...)]` accepted alongside the `$`-prefixed form.
+
+  Rejected with an actionable message:
+  - Top-level `||` mixing parent-side and split-side (deferred).
+  - Nested boolean subgroups containing a split reference (deferred; requires
+    a full AST parser rather than the top-level split we do here).
+
+  Legal: `||` inside a split's inner predicate; multiple correlations on the
+  same field (different-item semantics).
+
+  Coverage: 14 unit tests on the decomposer alone, exhaustively covering the
+  legal and rejected shapes.
+
+- **`JsonbSplitAwareFilterTranslator` — closes out Phase (c.2/c.3) to full cut.**
+  Now consumes `TmfSplitFilterDecomposer` and composes the halves via
+  `JsonbClause.and(...)` — a top-level `&& `-conjunction of parent clauses and
+  split correlations translates to
+  `(parent_jsonpath) AND EXISTS(...) [AND EXISTS(...)]`. Multiple split
+  correlations on the same field become separate `EXISTS` subqueries
+  (different-item semantics). Previously such compound filters were rejected
+  with "outside the supported top-level array-correlation shape". That
+  restriction is lifted (top-level `||` is still rejected, deferred).
+
+- **`MongoSplitAwareFilterTranslator` — closes out Phase (d.2) to full cut.**
+  Now consumes the same `TmfSplitFilterDecomposer`. Both `translate()` and
+  `translateAsPipeline()` produce parent + split composition:
+  - Criteria form: `Criteria.andOperator(parentCriteria, splitInCriterion,
+    ...)` — one `_id IN (...)` per split correlation.
+  - Aggregation-pipeline form: top-level `$match` for parent-only criteria,
+    followed by one `$lookup` + retention `$match` + `$project` trio per
+    split correlation.
+
+  Parent-side criteria are produced by a second
+  `SimpleMongoInnerPredicateTranslator` instance configured with an empty
+  field prefix (parent docs have their fields at the top level, unlike the
+  child wrapper docs where `payload.` prefixes everything).
+
+  `translate()` and `translateAsPipeline()` still return `null` for
+  parent-only filters — the caller's normal filter translator is a strict
+  superset of ours for parent grammar, so we defer to it when there's no
+  split-side work.
+
+- **`SimpleMongoInnerPredicateTranslator` now accepts a field prefix at
+  construction.** The single-arg constructor keeps the child-side default
+  (`"payload."`). Consumers configuring a parent-side or otherwise-prefixed
+  variant pass their own prefix.
+
 ### Added (MongoDB split-and-merge — v3.0.0 Phase (d), MVP first cut)
 
 - **Phase (d.3 + d.4) — parent-first `$lookup` aggregation with inner pipeline

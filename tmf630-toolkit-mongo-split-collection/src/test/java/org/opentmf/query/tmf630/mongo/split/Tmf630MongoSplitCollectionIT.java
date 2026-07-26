@@ -326,6 +326,50 @@ class Tmf630MongoSplitCollectionIT {
 
   @Test
   @DisplayName(
+      "d.2 full: compound filter parent + split conjunction returns intersection (criteria form)")
+  void compoundParentAndSplitCriteria() {
+    writeExecutor.saveWithSplits(
+        order("Q1", "OPEN", List.of(item("i1", "PENDING"))));
+    writeExecutor.saveWithSplits(
+        order("Q2", "COMPLETED", List.of(item("i1", "PENDING"))));
+    writeExecutor.saveWithSplits(
+        order("Q3", "OPEN", List.of(item("i1", "SHIPPED"))));
+
+    org.springframework.data.mongodb.core.query.Criteria where =
+        splitAwareFilter.translate(
+            MongoSplitOrder.class,
+            "$[?(@.status == 'OPEN' && @.items[?(@.state == 'PENDING')])]");
+    List<MongoSplitOrder> matched =
+        mongoOperations.find(
+            new org.springframework.data.mongodb.core.query.Query(where),
+            MongoSplitOrder.class,
+            "split_order");
+    assertThat(matched).extracting(MongoSplitOrder::getId).containsExactly("Q1");
+  }
+
+  @Test
+  @DisplayName(
+      "d.3+d.4 full: compound filter parent + split via pipeline emits $match + $lookup, "
+          + "returns intersection")
+  void compoundParentAndSplitPipeline() {
+    writeExecutor.saveWithSplits(
+        order("QP1", "OPEN", List.of(item("i1", "PENDING"))));
+    writeExecutor.saveWithSplits(
+        order("QP2", "COMPLETED", List.of(item("i1", "PENDING"))));
+    writeExecutor.saveWithSplits(
+        order("QP3", "OPEN", List.of(item("i1", "SHIPPED"))));
+
+    org.springframework.data.mongodb.core.aggregation.Aggregation pipeline =
+        splitAwareFilter.translateAsPipeline(
+            MongoSplitOrder.class,
+            "$[?(@.status == 'OPEN' && @.items[?(@.state == 'PENDING')])]");
+    List<MongoSplitOrder> matched =
+        mongoOperations.aggregate(pipeline, "split_order", MongoSplitOrder.class).getMappedResults();
+    assertThat(matched).extracting(MongoSplitOrder::getId).containsExactly("QP1");
+  }
+
+  @Test
+  @DisplayName(
       "d.3+d.4 translateAsPipeline: single-round-trip $lookup pipeline returns matching parents")
   void pipelineRoutesToLookupAndReturnsMatchingParents() {
     writeExecutor.saveWithSplits(

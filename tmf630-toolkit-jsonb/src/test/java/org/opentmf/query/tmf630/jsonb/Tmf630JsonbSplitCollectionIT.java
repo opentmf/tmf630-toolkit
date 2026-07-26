@@ -378,6 +378,71 @@ class Tmf630JsonbSplitCollectionIT {
   }
 
   @Test
+  @DisplayName(
+      "c.2/c.3 full: compound filter mixing parent + split conjunction returns intersection")
+  void splitAwareCompoundParentAndSplit() {
+    SplitOrderDomain a = new SplitOrderDomain();
+    a.setId("K1");
+    a.setStatus("OPEN");
+    a.setItems(List.of(item("i1", "PENDING")));
+    writeExecutor.saveWithSplits(a);
+
+    SplitOrderDomain b = new SplitOrderDomain();
+    b.setId("K2");
+    b.setStatus("COMPLETED");
+    b.setItems(List.of(item("i1", "PENDING")));
+    writeExecutor.saveWithSplits(b);
+
+    SplitOrderDomain c = new SplitOrderDomain();
+    c.setId("K3");
+    c.setStatus("OPEN");
+    c.setItems(List.of(item("i1", "SHIPPED")));
+    writeExecutor.saveWithSplits(c);
+
+    // Want status=OPEN AND at least one item is PENDING. K1 matches; K2 wrong status,
+    // K3 wrong item state.
+    JsonbClause where =
+        splitAwareTranslator.translate(
+            SplitOrderDomain.class,
+            "$[?(@.status == 'OPEN' && @.items[?(@.state == 'PENDING')])]");
+    Page<SplitOrderDomain> page =
+        executor.findAll(
+            SplitOrderDomain.class, where, TmfSort.empty(),
+            Pageable.unpaged(), field -> String.class);
+    assertThat(page.getContent()).extracting(SplitOrderDomain::getId).containsExactly("K1");
+  }
+
+  @Test
+  @DisplayName(
+      "c.2/c.3 full: two split correlations AND'd — different-item semantics per clause")
+  void splitAwareCompoundTwoSplitClauses() {
+    // K4 has one PENDING item and one SHIPPED item — different items each satisfying
+    // one clause. Compound "some item PENDING AND some item SHIPPED" should match.
+    SplitOrderDomain k4 = new SplitOrderDomain();
+    k4.setId("K4");
+    k4.setStatus("OPEN");
+    k4.setItems(List.of(item("i1", "PENDING"), item("i2", "SHIPPED")));
+    writeExecutor.saveWithSplits(k4);
+
+    // K5 has only PENDING items — should NOT match the compound.
+    SplitOrderDomain k5 = new SplitOrderDomain();
+    k5.setId("K5");
+    k5.setStatus("OPEN");
+    k5.setItems(List.of(item("i1", "PENDING"), item("i2", "PENDING")));
+    writeExecutor.saveWithSplits(k5);
+
+    JsonbClause where =
+        splitAwareTranslator.translate(
+            SplitOrderDomain.class,
+            "$[?(@.items[?(@.state == 'PENDING')] && @.items[?(@.state == 'SHIPPED')])]");
+    Page<SplitOrderDomain> page =
+        executor.findAll(
+            SplitOrderDomain.class, where, TmfSort.empty(),
+            Pageable.unpaged(), field -> String.class);
+    assertThat(page.getContent()).extracting(SplitOrderDomain::getId).containsExactly("K4");
+  }
+
+  @Test
   @DisplayName("c.6 appendChild: inserts one child without touching parent or other children")
   void appendChildAtEndOfCollection() {
     SplitOrderDomain order = new SplitOrderDomain();
