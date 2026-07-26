@@ -6,6 +6,23 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 
 ### Added (PostgreSQL-with-JSONB split-and-merge — v3.0.0 Phase (c), incremental)
 
+- **`Tmf630JsonbSplitScaleIT` — SDWAN-scale parity IT** (Phase c.7, closing
+  out Phase (c)). Seeds 500 split children per parent (the PIA-observed
+  SDWAN scale reference point) and verifies correctness at scale — not
+  performance. Four scenarios: (1) read-merge at parent level caps inline
+  items at `maxInlineItems=100` regardless of the true child count in the
+  DB; (2) sub-endpoint (c.5) paginates through all 500 items without loss,
+  duplication, or ordering breakage; (3) split-aware filter (c.2 + c.3)
+  routes item-side predicates to the child table and returns the correct
+  parent set at scale (two 500-item parents, filter selects only one);
+  (4) `ON DELETE CASCADE` removes all 500 children in one round-trip.
+
+  Explicit non-goal: this is not a performance benchmark. `EXPLAIN ANALYZE`
+  and latency budgets belong in a separate perf suite gated behind a Maven
+  profile, not in every `mvn verify`. Total JSONB module test count: 158.
+
+  With c.7, all seven sub-milestones of Phase (c) are done.
+
 - **`JsonbSplitAwareFilterTranslator` — split-aware URL filter routing**
   (Phases c.2 + c.3, first cut). Routes filters that target a
   `@Tmf630JsonbSplitCollection` field to a correlated `EXISTS` subquery on
