@@ -4,6 +4,39 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 
 ## [3.0.0] - 2026-07-26
 
+### Added (PostgreSQL-with-JSONB backend — v3.0.0 Phase (b), incremental)
+
+- **New module `tmf630-toolkit-jsonb`** (Phase b.1 of V3 roadmap — first cut,
+  scaffold + entity detection). Ships the load-bearing infrastructure the
+  subsequent sub-milestones (b.2 – b.7) hang off:
+  - `@Tmf630JsonbBacked` annotation for opting individual row entities into
+    JSONB-backed routing (per JSONB doc §0.1). Attributes: `domainType()`
+    (the TMF resource POJO whose field names URL params resolve against) and
+    `payloadField()` (default `"payload"`).
+  - `JsonbEntityMetadata` value object capturing everything the toolkit needs
+    to know about a JSONB-backed row entity at query time — row type, domain
+    type, payload field name, and audit column descriptors.
+  - `JsonbAuditColumns` reflection-scans row entities for standard Spring
+    Data JPA auditing annotations (`@CreatedDate`, `@LastModifiedDate`,
+    `@CreatedBy`, `@LastModifiedBy`) and JPA `@Version` — the toolkit does
+    not prescribe column names, just the annotations (per JSONB doc §1.3).
+  - `JsonbEntityRegistry` thread-safe lookup keyed by both row and domain
+    types.
+  - `Tmf630JsonbAutoConfiguration` scans the JPA metamodel at startup,
+    registers every `@Tmf630JsonbBacked` entity, and logs a per-entity
+    summary of the audit fields it found. Inert if no entity opts in —
+    adding the module to the classpath doesn't affect any existing
+    pure-JPA service.
+  - `Tmf630JsonbConfigurationException` for validation failures at
+    registration time (never surfaces on a request).
+
+  What lands next (subsequent commits in this v3.0.0 cycle): `JsonbPredicateFactory`
+  with 24-operator translation and type-aware casts (b.2), JsonPath filter
+  integration via `jsonb_path_exists` (b.3), sort + paging (b.4), Fragment +
+  `JdbcClient` integration + parity ITs vs Mongo (b.5), correlated sort (b.6),
+  aggregators + coercions (b.7). See `docs/JSONB_BACKEND_DESIGN.md` and
+  `docs/V3_ROADMAP.md` §3.
+
 ### Added (JPA gap closure — v3.0.0 Phase (a))
 
 - **New module `tmf630-toolkit-jpa-correlated-sort`** (Phase a.4 of V3 roadmap,

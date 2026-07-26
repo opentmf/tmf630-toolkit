@@ -1,0 +1,83 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.opentmf.query</groupId>
+    <artifactId>tmf630-toolkit</artifactId>
+    <version>3.0.0-SNAPSHOT</version>
+    <relativePath>../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>tmf630-toolkit-jsonb</artifactId>
+  <name>tmf630-toolkit-jsonb</name>
+  <description>TMF630 attribute filtering and sort executor for PostgreSQL-with-JSONB entities (per-entity opt-in via @Tmf630JsonbBacked)</description>
+
+  <properties>
+    <!-- Phase (b) is landing incrementally. First cut (b.1) ships the annotation, entity
+         detection, and autoconfigure skeleton; the JsonbPredicateFactory and
+         JsonbFilterFragment land in subsequent sub-milestones. Coverage threshold rises
+         as the module fills out. -->
+    <jacoco.min.covered.ratio>0.60</jacoco.min.covered.ratio>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.opentmf.query</groupId>
+      <artifactId>tmf630-toolkit-attribute-filtering-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.opentmf.query</groupId>
+      <artifactId>tmf630-toolkit-paging-sorting-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-autoconfigure</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.data</groupId>
+      <artifactId>spring-data-jpa</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework</groupId>
+      <artifactId>spring-jdbc</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>jakarta.persistence</groupId>
+      <artifactId>jakarta.persistence-api</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-configuration-processor</artifactId>
+      <optional>true</optional>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-data-jpa</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>testcontainers-junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>testcontainers-postgresql</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.postgresql</groupId>
+      <artifactId>postgresql</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>
