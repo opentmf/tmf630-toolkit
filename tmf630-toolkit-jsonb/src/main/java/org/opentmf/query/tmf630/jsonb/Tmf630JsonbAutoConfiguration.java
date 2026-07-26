@@ -152,4 +152,11 @@ public class Tmf630JsonbAutoConfiguration {
       JdbcClient jdbcClient, JsonbEntityRegistry registry) {
     return new Tmf630JsonbSplitChildCounter(jdbcClient, registry);
   }
+
+  @Bean
+  @ConditionalOnMissingBean
+  public Tmf630JsonbVersionResolver tmf630JsonbVersionResolver(
+      JdbcClient jdbcClient, ObjectMapper objectMapper, JsonbEntityRegistry registry) {
+    return new Tmf630JsonbVersionResolver(jdbcClient, objectMapper, registry);
+  }
 }

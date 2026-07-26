@@ -4,6 +4,78 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 
 ## [3.0.0] - 2026-07-26
 
+### Added (entity versioning — TMF-630 Part 4 §2 — v3.0.0)
+
+- **`TmfVersionedId` record + argument resolver** —
+  {@code tmf630-toolkit-paging-sorting-core} now parses the TMF-630 Part 4 §2.5
+  version-directed path form. Two shapes:
+  - Bare logical id: {@code /VirtualStorage} → {@code
+    TmfVersionedId("VirtualStorage", Optional.empty())}
+  - Version-directed: {@code /VirtualStorage:(version=1.0)} → {@code
+    TmfVersionedId("VirtualStorage", Optional.of("1.0"))}
+
+  Only the colon-prefixed lowercase {@code :(version=X)} spelling — the canonical
+  form — is accepted. The typo spellings that appear in the Part 4 §2.5 example
+  ({@code /X(Version=1.0)}, {@code /X:(Version=1.0)}) are rejected with a
+  {@code TmfPagingException} (400) so consumers can't rely on lenient parsing.
+
+  Auto-wired by {@code Tmf630WebMvcConfigurer}: any
+  {@code @PathVariable(...) TmfVersionedId ref} controller parameter is bound
+  automatically.
+
+- **`@Tmf630Versioned(idField, versionField, versionOrder)` annotation** — marks a
+  domain/entity type as version-carrying per TMF-630 Part 4 §2 semantics. Three
+  ordering modes:
+  - {@code LEX} (default) — lexicographic string ordering. Fast; single-row DB
+    fetch. Trap: {@code "1.10" < "1.9"} lexically.
+  - {@code NUMERIC_STRING} — DNext-convention numeric versions ({@code "0", "1",
+    "13", "28"}). Parses each value as an integer. In-JVM sort — fetches all rows
+    for the logical id, picks max locally.
+  - {@code SEMVER} — dot-separated component-wise integer compare
+    ({@code "1.9" < "1.10" < "2.0"}). In-JVM sort. Handles arbitrary depth;
+    non-parseable components fall back to lex.
+
+- **`Tmf630VersionResolver` interface** with three-method API:
+  - {@code resolveLatest(Class type, String logicalId)} → max version for the id
+  - {@code resolveSpecific(Class type, String logicalId, String version)} → exact
+    (id, version) pair
+  - {@code resolveOrLatest(Class type, TmfVersionedId ref)} → default-method
+    dispatcher (specific when {@code ref.version()} is present, latest otherwise)
+
+  Consumer autowires one bean per backend (Shape B — one bean, type passed at
+  call). Matches every other cross-type helper in the toolkit.
+
+- **Three per-backend implementations:**
+  - {@code Tmf630JpaVersionResolver} in {@code tmf630-toolkit-jpa-correlated-sort}
+    — builds a JPQL query against the JPA-managed entity.
+  - {@code Tmf630MongoVersionResolver} in {@code tmf630-toolkit-mongo-aggregation}
+    — uses {@code MongoOperations.find(Query.where(idField).is(logicalId),
+    type)}.
+  - {@code Tmf630JsonbVersionResolver} in {@code tmf630-toolkit-jsonb} — issues
+    {@code SELECT payload FROM &lt;table&gt; WHERE payload->>'idField' = ?} via
+    {@code JdbcClient}, deserialises via the toolkit's {@code ObjectMapper}.
+
+  All three use the same uniform "fetch matching rows, sort in JVM via
+  {@code VersionComparators}, pick max" strategy. Cost is O(N) rows per lookup
+  where N is version count per logical id — acceptable for typical PLM
+  cardinalities (single digits per logical id); documented on
+  {@code VersionOrder} javadoc.
+
+- **Coverage:**
+  - Core (paging-sorting-core): 10 {@code TmfVersionedIdTest} + 9
+    {@code VersionComparatorsTest} + 3 default-method dispatch tests + 4
+    argument-resolver tests. Total core test count: 140 → 166.
+  - JPA IT: 6 real-Postgres scenarios (latest/specific/dispatch/scoping).
+  - Mongo IT: 6 real-Mongo scenarios exercising NUMERIC_STRING ordering.
+  - JSONB IT: 6 real-Postgres scenarios exercising SEMVER ordering.
+
+- **What was deliberately NOT built** (application concerns, kept out of scope):
+  - POST "create new version" write helper — application concern, DB unique
+    index on {@code (id, version)} handles conflicts.
+  - PATCH "target specific version" write helper — the resolver returns the
+    target row; the developer's existing write path applies the change.
+  - RBAC per §2.6 — access control is out of scope for a query-side toolkit.
+
 ### Added (shape-selection router — Mongo API ergonomics — v3.0.0)
 
 - **`MongoSplitAwareFilterTranslator.route(parentType, filterExpression)`** —

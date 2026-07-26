@@ -77,6 +77,7 @@ master-detail split extension.
 | 12 | *Toolkit extension* — `@Tmf630*SplitCollection` master-detail split | 🚫 | ✅ [(section 14)](#14-master-detail-split--mongo) | ✅ [(section 15)](#15-master-detail-split--postgresql-jsonb) |
 | 13 | *Toolkit extension* — split-collection sub-endpoint controller | 🚫 | ✅ | ✅ |
 | 14 | *Toolkit extension* — top-level `filter=` OR across parent + split | 🚫 | ✅ `$unionWith` | ✅ SQL `OR` |
+| 15 | Part 4 §2.5 — versioned resource path form `/{id}:(version=X)` + latest-version resolver | ✅ | ✅ | ✅ |
 
 Rows 12–14 (split-and-merge) are toolkit-specific extensions not covered by TMF-630 today.
 The URL contract exposed to clients stays TMF-630 conformant — the extension is entirely
@@ -106,6 +107,7 @@ server-side.
   - [13) PostgreSQL with JSONB as a document DB](#13-postgresql-with-jsonb-as-a-document-db)
   - [14) Master-detail split — Mongo](#14-master-detail-split--mongo)
   - [15) Master-detail split — PostgreSQL JSONB](#15-master-detail-split--postgresql-jsonb)
+  - [16) Entity versioning (TMF-630 Part 4 §2)](#16-entity-versioning-tmf-630-part-4-2)
 - [Reference](#reference)
   - [Module layout](#module-layout)
   - [Configuration prefixes](#configuration-prefixes)
@@ -2429,6 +2431,144 @@ executor.findAll(ProductOrder.class, combined, sort, pageable, fieldType);
 The full `filter=` grammar (compound `&&`/`||`, array correlation, `length()`,
 positional index, regex, top-level OR) is available; the split-aware translator handles
 the routing to `EXISTS` subqueries where needed.
+
+### 16) Entity versioning (TMF-630 Part 4 §2)
+
+> **Module homes**: cross-backend types in `tmf630-toolkit-paging-sorting-core` (no
+> extra dependency to add — you already have it). Per-backend resolver implementations
+> live in `tmf630-toolkit-jpa-correlated-sort` (JPA), `tmf630-toolkit-mongo-aggregation`
+> (Mongo), and `tmf630-toolkit-jsonb` (JSONB). Enabling versioning on a backend means
+> adding the relevant module and annotating your entity.
+
+TMF-630 Part 4 §2 defines a resource-versioning pattern where the same logical entity
+can exist in multiple concurrent versions (canonically ProductOffering, where the same
+`VirtualStorage` id may exist at versions 1.0, 2.0, and 3.0 simultaneously). The URL
+form `/{id}:(version=X)` addresses a specific version; `/{id}` (no version) resolves
+to the current (latest) version by default.
+
+The toolkit provides two pieces:
+
+- A `TmfVersionedId` record + argument resolver that parses the path form.
+- A `Tmf630VersionResolver` bean that fetches "latest per logical id" or "specific
+  (id, version)" per your entity's declared `VersionOrder`.
+
+#### Level 1 (easiest) — GET handler with automatic latest/specific dispatch
+
+Annotate the domain type with `@Tmf630Versioned`, declare `TmfVersionedId` on your
+path variable, and let the resolver handle both URL shapes:
+
+```java
+@Document("productOffering")
+@Tmf630Versioned(versionOrder = VersionOrder.SEMVER)   // or NUMERIC_STRING, or LEX
+public class ProductOffering {
+  @Id String id;
+  String version;
+  // ...
+}
+
+@RestController
+@RequestMapping("/productOffering")
+class ProductOfferingController {
+  private final Tmf630VersionResolver versionResolver;   // autowired — one bean
+
+  @GetMapping("/{ref}")
+  @Tmf630Response
+  ProductOffering getOne(@PathVariable("ref") TmfVersionedId ref) {
+    return versionResolver
+        .resolveOrLatest(ProductOffering.class, ref)
+        .orElseThrow(() -> new NotFoundException(ref.id()));
+  }
+}
+```
+
+Same handler serves both `/productOffering/VirtualStorage` (returns latest) and
+`/productOffering/VirtualStorage:(version=1.0)` (returns exactly that version).
+
+#### Level 2 — reuse the resolver in PATCH / DELETE handlers
+
+Because the resolver is a plain bean method, the same lookup logic works in your
+write handlers with zero extra glue:
+
+```java
+@PatchMapping("/{ref}")
+ProductOffering patch(@PathVariable("ref") TmfVersionedId ref, @RequestBody Patch body) {
+  ProductOffering target = versionResolver
+      .resolveOrLatest(ProductOffering.class, ref)
+      .orElseThrow(() -> new NotFoundException(ref.id()));
+  return writer.applyPatch(target, body);
+}
+
+@DeleteMapping("/{ref}")
+ResponseEntity<Void> delete(@PathVariable("ref") TmfVersionedId ref) {
+  ProductOffering target = versionResolver
+      .resolveOrLatest(ProductOffering.class, ref)
+      .orElseThrow(() -> new NotFoundException(ref.id()));
+  writer.delete(target);
+  return ResponseEntity.noContent().build();
+}
+```
+
+Per Part 4 §2.5, PATCH `/id` (no version) targets the latest; PATCH `/id:(version=X)`
+targets a specific version. Same URL shape as GET, same resolver dispatch.
+
+#### Choosing `VersionOrder`
+
+Pick per the shape your writer stores. Three modes:
+
+| Mode | Values it handles | How it's ordered | Perf profile |
+|---|---|---|---|
+| `LEX` (default) | Any string, but only lex-safe ones give intuitive results | SQL/BSON native `ORDER BY` (lexicographic) | Single-row DB fetch |
+| `NUMERIC_STRING` | `"0", "1", "13", "28"` (DNext convention) | Parses each to `long`, compares numerically | Fetch-all + JVM sort |
+| `SEMVER` | `"1.0", "1.9", "1.10", "2.3.1"` | Dot-split, component-wise integer compare | Fetch-all + JVM sort |
+
+**Perf note.** `NUMERIC_STRING` and `SEMVER` fetch every row for the logical id and
+sort in-JVM (no portable SQL/BSON comparator gives the right answer without dialect-
+specific `CAST` or aggregation trickery). Cost is O(N) rows per lookup where N is the
+number of versions per logical id. Typical PLM domains have N in the single digits —
+fine. If you model something like time-series versioning (thousands of versions per
+id), consider a different pattern.
+
+#### The URL grammar exactly
+
+Only these two shapes are accepted. Everything else returns 400:
+
+- `<id>` — bare logical id, no version.
+- `<id>:(version=<value>)` — colon-prefixed, lowercase `version` keyword, value inside
+  parentheses.
+
+The typo spellings that appear in the Part 4 §2.5 example — `/X(Version=1.0)`
+(missing colon) and `/X:(Version=1.0)` (uppercase `Version`) — are rejected on
+purpose. The parser is strict so consumers can't accidentally rely on lenient
+behaviour we'd then have to preserve forever.
+
+#### Level 3 (advanced) — non-default field names
+
+If your entity's logical-id field or version field isn't named `id` / `version`,
+declare them on the annotation:
+
+```java
+@Entity
+@Tmf630Versioned(idField = "logicalKey", versionField = "revision",
+                 versionOrder = VersionOrder.SEMVER)
+public class SpecEntity { ... }
+```
+
+The resolver reads the metadata at bootstrap and builds its lookup query
+accordingly.
+
+#### What's deliberately NOT built
+
+Kept explicit — the toolkit is a query-side helper, not a full lifecycle framework:
+
+- **POST "create new version" write helper** — application concern. A DB unique
+  index or composite PK on `(id, version)` enforces uniqueness at the storage layer;
+  the developer's existing write path handles conflicts.
+- **PATCH "target specific version" write helper** — the resolver returns the target
+  row; the developer's existing write path applies the change. No new write
+  executor.
+- **RBAC per §2.6** (admin sees all versions, others see latest) — access control is
+  out of scope for a query-side toolkit. Wire it in your own security layer; the
+  resolver can be called after your access-check passes.
 
 ## Reference
 

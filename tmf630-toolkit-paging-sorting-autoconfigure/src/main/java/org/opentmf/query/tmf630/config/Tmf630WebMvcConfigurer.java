@@ -6,6 +6,7 @@ import org.opentmf.query.tmf630.paging.TmfRichPageableHandlerMethodArgumentResol
 import org.opentmf.query.tmf630.paging.TmfRichSortHandlerMethodArgumentResolver;
 import org.opentmf.query.tmf630.paging.TmfSortHandlerMethodArgumentResolver;
 import org.opentmf.query.tmf630.paging.TmfSortParser;
+import org.opentmf.query.tmf630.versioning.TmfVersionedIdArgumentResolver;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -45,5 +46,9 @@ public class Tmf630WebMvcConfigurer implements WebMvcConfigurer {
     // fall through to TmfPageableHandlerMethodArgumentResolver.
     resolvers.add(2, new TmfRichPageableHandlerMethodArgumentResolver(properties.toSettings()));
     resolvers.add(3, new TmfPageableHandlerMethodArgumentResolver(properties.toSettings()));
+    // TMF-630 Part 4 §2.5 — binds @PathVariable(...) TmfVersionedId parameters.
+    // Only claims parameters typed exactly TmfVersionedId, so Spring's own
+    // @PathVariable resolver keeps handling all other path variables.
+    resolvers.add(4, new TmfVersionedIdArgumentResolver());
   }
 }

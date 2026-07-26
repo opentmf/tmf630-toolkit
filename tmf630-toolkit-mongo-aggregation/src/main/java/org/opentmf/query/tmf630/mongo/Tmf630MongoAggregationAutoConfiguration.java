@@ -22,4 +22,10 @@ public class Tmf630MongoAggregationAutoConfiguration {
     return new Tmf630MongoCorrelatedSortExecutor(
         mongoTemplate, properties.getSimpleRich().getDefaultKey());
   }
+
+  @Bean
+  @ConditionalOnMissingBean
+  public Tmf630MongoVersionResolver tmf630MongoVersionResolver(MongoTemplate mongoTemplate) {
+    return new Tmf630MongoVersionResolver(mongoTemplate);
+  }
 }

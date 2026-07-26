@@ -27,4 +27,10 @@ public class Tmf630JpaCorrelatedSortAutoConfiguration {
         pagingSettings.getIfAvailable() != null && pagingSettings.getIfAvailable().nullsLast();
     return new Tmf630JpaCorrelatedSortExecutor(entityManager, nullsLast);
   }
+
+  @Bean
+  @ConditionalOnMissingBean
+  public Tmf630JpaVersionResolver tmf630JpaVersionResolver(EntityManager entityManager) {
+    return new Tmf630JpaVersionResolver(entityManager);
+  }
 }
