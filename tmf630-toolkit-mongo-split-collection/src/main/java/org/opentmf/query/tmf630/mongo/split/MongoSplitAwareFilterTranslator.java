@@ -55,6 +55,7 @@ public class MongoSplitAwareFilterTranslator {
   private final MongoInnerPredicateTranslator innerTranslator;
   private final MongoSplitPipelineBuilder pipelineBuilder;
   private final MongoInnerPredicateTranslator parentTranslator;
+  private final ItemFirstAggregationPipelineBuilder itemFirstBuilder;
 
   public MongoSplitAwareFilterTranslator(
       MongoSplitEntityRegistry registry,
@@ -82,6 +83,7 @@ public class MongoSplitAwareFilterTranslator {
     this.parentTranslator =
         new SimpleMongoInnerPredicateTranslator(
             SimpleMongoInnerPredicateTranslator.PARENT_TOP_LEVEL_PREFIX);
+    this.itemFirstBuilder = new ItemFirstAggregationPipelineBuilder(innerTranslator);
   }
 
   /**
@@ -157,6 +159,52 @@ public class MongoSplitAwareFilterTranslator {
     }
     if (stages.isEmpty()) return null;
     return Aggregation.newAggregation(stages);
+  }
+
+  /**
+   * Phase (d.3) — item-first pipeline variant. Returns a
+   * {@link SplitAwareAggregation} that packages the pipeline together with its
+   * target collection (the split's child collection, not the parent). Prefer this
+   * over {@link #translateAsPipeline(Class, String)} when the parent set is large
+   * and the child filter is very selective — item-first scans matching children
+   * only, groups by parent id, then joins back, whereas parent-first with
+   * {@code $lookup} must visit every parent doc.
+   *
+   * <p><strong>Supported shape:</strong> exactly one top-level split correlation
+   * with no parent-only conjunct — {@code $[?(@.<splitField>[?(<inner>)])]}. Any
+   * other decomposition (compound parent+split, multi-split, or parent-only) is
+   * rejected here; use {@link #translateAsPipeline(Class, String)} for those.
+   *
+   * @return the packaged aggregation, or {@code null} if the filter is blank or
+   *     the parent has no splits declared.
+   */
+  public SplitAwareAggregation translateAsItemFirstAggregation(
+      Class<?> parentType, String filterExpression) {
+    if (filterExpression == null || filterExpression.isBlank()) return null;
+    MongoSplitEntityMetadata metadata = requireMetadata(parentType);
+    if (metadata.splits().isEmpty()) return null;
+
+    Decomposition decomposition =
+        TmfSplitFilterDecomposer.decompose(filterExpression, splitFieldNames(metadata));
+    if (decomposition.isEmpty()) return null;
+
+    if (decomposition.parentOnlyFilter().isPresent()) {
+      throw new TmfFilteringException(
+          "Item-first pipeline shape does not support parent-only conjuncts; "
+              + "the input filter has one. Use translateAsPipeline(...) for "
+              + "compound parent + split filters.");
+    }
+    if (decomposition.splitClauses().size() != 1) {
+      throw new TmfFilteringException(
+          "Item-first pipeline shape supports exactly one split correlation; got "
+              + decomposition.splitClauses().size()
+              + ". Use translateAsPipeline(...) for multi-split filters.");
+    }
+    SplitClauseRef ref = decomposition.splitClauses().get(0);
+    MongoSplitCollectionMetadata split = requireSplit(metadata, ref.splitFieldName());
+    Aggregation pipeline =
+        itemFirstBuilder.build(metadata.parentCollection(), split, ref.innerPredicate());
+    return new SplitAwareAggregation(pipeline, split.childCollection());
   }
 
   /**

@@ -69,6 +69,44 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 
 ### Added (MongoDB split-and-merge — v3.0.0 Phase (d), MVP first cut)
 
+- **Phase (d.3) — item-first aggregation pipeline shape.** Second implementation
+  of the three-shape router idea from the roadmap; complements
+  `ParentFirstLookupPipelineBuilder`. Two new types:
+  - `ItemFirstAggregationPipelineBuilder` — emits the pipeline
+    `[ {$match: <child-criteria>}, {$group: {_id: "$parentId"}}, {$lookup:
+    {from: "<parent>", localField: "_id", foreignField: "_id", as: "__P__"}},
+    {$unwind: "$__P__"}, {$replaceRoot: {newRoot: "$__P__"}} ]`. Executes
+    against the **child** collection, joins up to parents.
+  - `SplitAwareAggregation` — small record packaging the built pipeline with
+    its target collection name, so callers don't have to know that item-first
+    runs on the child collection.
+
+  New entry point on `MongoSplitAwareFilterTranslator`:
+  - `translateAsItemFirstAggregation(parentType, filterExpression)` — returns
+    `SplitAwareAggregation`. Supports exactly one top-level split correlation
+    with no parent-only conjunct (single-selective-filter case). Rejects
+    compound parent+split, multi-split, or parent-only inputs with a clear
+    message pointing to `translateAsPipeline(...)` (the parent-first variant
+    that handles those shapes).
+
+  When to prefer item-first over parent-first: the parent set is large and
+  the child filter is very selective. Item-first scans matching children
+  only (typically a small fraction), groups them by parent id, then joins
+  back — avoids visiting every parent doc, which parent-first with
+  `$lookup` must do. When in doubt: keep the default parent-first; move to
+  item-first only after measurement shows the pipeline as a bottleneck.
+
+  Deliberately left for a follow-up router: heuristic selection between
+  parent-first and item-first based on cardinality estimates. For now
+  callers pick explicitly per request.
+
+  Coverage: 7 unit tests on `ItemFirstAggregationPipelineBuilder` (stage
+  order, `$match` payload prefix, `$group` key, `$lookup` join, `$unwind`,
+  `$replaceRoot`, compound inner predicate) + 3 real-Mongo IT scenarios
+  (routes to child collection and returns matching parents; parent-only
+  input rejected; multi-split input rejected). Module test count:
+  61 → 71.
+
 - **Phase (d.3 + d.4) — parent-first `$lookup` aggregation with inner pipeline
   emission** (single-round-trip alternative to d.2's two-query approach). Two new
   types:

@@ -326,6 +326,56 @@ class Tmf630MongoSplitCollectionIT {
 
   @Test
   @DisplayName(
+      "d.3 item-first: single-split filter routes to child collection and returns matching parents")
+  void itemFirstPipelineReturnsMatchingParents() {
+    writeExecutor.saveWithSplits(
+        order("IF-A", "OPEN", List.of(item("a1", "SHIPPED"), item("a2", "SHIPPED"))));
+    writeExecutor.saveWithSplits(
+        order("IF-B", "OPEN", List.of(item("b1", "PENDING"), item("b2", "SHIPPED"))));
+    writeExecutor.saveWithSplits(
+        order("IF-C", "OPEN", List.of(item("c1", "PENDING"))));
+
+    SplitAwareAggregation packaged =
+        splitAwareFilter.translateAsItemFirstAggregation(
+            MongoSplitOrder.class, "$[?(@.items[?(@.state == 'PENDING')])]");
+    assertThat(packaged).isNotNull();
+    // Item-first pipelines target the CHILD collection.
+    assertThat(packaged.targetCollection()).isEqualTo("split_order_item");
+
+    List<MongoSplitOrder> matched =
+        mongoOperations
+            .aggregate(packaged.pipeline(), packaged.targetCollection(), MongoSplitOrder.class)
+            .getMappedResults();
+    assertThat(matched)
+        .extracting(MongoSplitOrder::getId)
+        .containsExactlyInAnyOrder("IF-B", "IF-C");
+  }
+
+  @Test
+  @DisplayName(
+      "d.3 item-first: parent-only filter throws with actionable message pointing to parent-first")
+  void itemFirstRejectsParentOnly() {
+    org.junit.jupiter.api.Assertions.assertThrows(
+        org.opentmf.query.tmf630.filtering.TmfFilteringException.class,
+        () ->
+            splitAwareFilter.translateAsItemFirstAggregation(
+                MongoSplitOrder.class, "$[?(@.status == 'OPEN' && @.items[?(@.state == 'X')])]"));
+  }
+
+  @Test
+  @DisplayName(
+      "d.3 item-first: multi-split filter throws with actionable message pointing to parent-first")
+  void itemFirstRejectsMultiSplit() {
+    org.junit.jupiter.api.Assertions.assertThrows(
+        org.opentmf.query.tmf630.filtering.TmfFilteringException.class,
+        () ->
+            splitAwareFilter.translateAsItemFirstAggregation(
+                MongoSplitOrder.class,
+                "$[?(@.items[?(@.state == 'A')] && @.items[?(@.state == 'B')])]"));
+  }
+
+  @Test
+  @DisplayName(
       "d.2 full: compound filter parent + split conjunction returns intersection (criteria form)")
   void compoundParentAndSplitCriteria() {
     writeExecutor.saveWithSplits(
