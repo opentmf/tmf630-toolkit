@@ -21,7 +21,8 @@ operators) in a single expression. When the backend is a document database (Mong
 filter grammar also allows array correlation via `$elemMatch`.
 
 Release notes and version history are in [`CHANGELOG.md`](./CHANGELOG.md). A section-by-
-section TMF-630 v4.x compliance audit is in [`docs/TMF630_COMPLIANCE_AUDIT.md`](./docs/TMF630_COMPLIANCE_AUDIT.md).
+section TMF-630 v4.x compliance summary is in
+[TMF-630 compliance summary](#tmf-630-compliance-summary) below.
 
 ## Table of contents
 
