@@ -37,9 +37,9 @@ class JsonbPathExtractorTest {
   }
 
   @Test
-  @DisplayName("hasTopLevelKey uses ? key-existence operator")
+  @DisplayName("hasTopLevelKey uses ?? escape for Postgres's ? key-existence operator")
   void hasTopLevelKey() {
-    assertThat(extractor.hasTopLevelKey("email")).isEqualTo("payload ? 'email'");
+    assertThat(extractor.hasTopLevelKey("email")).isEqualTo("payload ?? 'email'");
   }
 
   @Test

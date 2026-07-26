@@ -6,6 +6,48 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 
 ### Added (PostgreSQL-with-JSONB backend — v3.0.0 Phase (b), incremental)
 
+- **`Tmf630JsonbFilterExecutor` — end-to-end query executor** (Phase b.5 of
+  V3 roadmap). Composes the b.2 filter clause, b.4 sort fragment, and paging
+  tail into a single `SELECT payload FROM <table> WHERE ... ORDER BY ...
+  LIMIT ? OFFSET ?` query; runs it via Spring's `JdbcClient`; deserializes
+  each result row's `payload` column into the domain model via `ObjectMapper`;
+  runs a companion `COUNT(*)` for the total; returns a `PageImpl`. This is
+  the runtime target the URL-parameter-to-`JsonbClause` bridge (later
+  sub-milestone) will invoke.
+
+  Auto-configured by `Tmf630JsonbAutoConfiguration` alongside all the b.1 /
+  b.2 / b.4 beans (`JsonbEntityRegistry`, `JsonbPathExtractor`,
+  `JsonbPredicateFactory`, `JsonbSortBuilder`, `JdbcClient`).
+
+  **Deliberately framework-neutral — depends only on the JPA specification
+  (`jakarta.persistence.*`), never on any specific implementation.** The
+  auto-config's `afterName` ordering hint lists both Hibernate and
+  EclipseLink JPA autoconfig class names; Spring Boot silently ignores names
+  that aren't on the classpath, so services running on any JPA provider load
+  the module cleanly. Zero `org.hibernate.*` imports in the main sources
+  (confirmed via grep at commit time). Services declare the JSONB column
+  mapping via whatever JPA provider they use — Hibernate's
+  `@JdbcTypeCode(SqlTypes.JSON)`, EclipseLink's converter approach, etc.
+
+  End-to-end IT (`Tmf630JsonbFilterExecutorIT`) against Testcontainers
+  Postgres 18: 8 scenarios covering unfiltered listing, EQ filter, numeric
+  GT with cast, IN, IS_NULL under MISSING_ONLY, ORDER BY DESC, paging, and
+  the combined filter+sort+paging composition.
+
+- **Two bug fixes in b.2's `JsonbPredicateFactory` and `JsonbPathExtractor`**
+  discovered during b.5 end-to-end testing against real Postgres:
+  - Cast operator precedence: Postgres's `::` binds tighter than `->>` /
+    `#>>`, so `payload->>'x'::bigint` was trying to cast the literal string
+    `'x'` to bigint. Fixed by parenthesising the extraction:
+    `(payload->>'x')::bigint`. Affects EQ/NE/GT/GTE/LT/LTE/BETWEEN/IN/NIN
+    on non-text types.
+  - JDBC `?` conflict: Postgres's key-existence operator `?` clashed with
+    JDBC's `?` parameter-placeholder syntax, causing `IS_NULL` (which uses
+    the operator) to fail with `No value specified for parameter 1`. Fixed
+    by using the `??` escape (Postgres JDBC driver unescapes to a single
+    `?` on the wire). Affects IS_NULL / IS_NOT_NULL on top-level keys.
+  Unit tests updated to match the corrected SQL shapes.
+
 - **`JsonbSortBuilder` — sort and paging SQL fragments** (Phase b.4 of V3
   roadmap). Translates a `TmfSort` into a Postgres `ORDER BY` fragment
   against a JSONB payload column plus a `LIMIT ? OFFSET ?` pagination

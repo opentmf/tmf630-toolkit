@@ -3,7 +3,6 @@ package org.opentmf.query.tmf630.jsonb;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -37,7 +36,6 @@ class JsonbEntityRegistryTest {
 
   static class TestDomain {}
 
-  @Entity
   @Tmf630JsonbBacked(domainType = TestDomain.class)
   static class TestRow {
     @Id private String id;

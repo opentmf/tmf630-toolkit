@@ -57,10 +57,14 @@ public final class JsonbPathExtractor {
   }
 
   /**
-   * Returns a fragment testing whether the payload has the given key at the top level
-   * ({@code payload ? 'x'}). Only meaningful for single-segment paths; multi-hop
-   * existence checks should go through {@link #extractAsJsonb(String)} +
-   * {@code IS NOT NULL}.
+   * Returns a fragment testing whether the payload has the given key at the top level.
+   * Only meaningful for single-segment paths; multi-hop existence checks should go
+   * through {@link #extractAsJsonb(String)} + {@code IS NOT NULL}.
+   *
+   * <p>Uses the {@code ??} escape for Postgres's {@code ?} key-existence operator —
+   * the double question mark is unescaped by the Postgres JDBC driver into a single
+   * {@code ?} character on the wire, avoiding conflict with JDBC's own {@code ?}
+   * parameter placeholder syntax.
    */
   public String hasTopLevelKey(String key) {
     String[] segments = validateAndSplit(key);
@@ -68,7 +72,7 @@ public final class JsonbPathExtractor {
       throw new IllegalArgumentException(
           "hasTopLevelKey requires a single-segment path; got: " + key);
     }
-    return payloadColumn + " ? '" + segments[0] + "'";
+    return payloadColumn + " ?? '" + segments[0] + "'";
   }
 
   private static String[] validateAndSplit(String dottedPath) {

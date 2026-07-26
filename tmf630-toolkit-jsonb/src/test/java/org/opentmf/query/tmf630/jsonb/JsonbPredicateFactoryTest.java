@@ -38,35 +38,35 @@ class JsonbPredicateFactoryTest {
   }
 
   @Test
-  @DisplayName("GT / GTE / LT / LTE on numeric — casts LHS and RHS to ::bigint")
+  @DisplayName("GT / GTE / LT / LTE on numeric — parenthesised extraction, then ::bigint cast")
   void rangeOperatorsNumeric() {
     JsonbClause gt = factory.build(TmfOperator.GT, "priority", Integer.class, 5);
-    assertThat(gt.sql()).isEqualTo("payload->>'priority'::bigint > ?::bigint");
+    assertThat(gt.sql()).isEqualTo("(payload->>'priority')::bigint > ?::bigint");
     assertThat(factory.build(TmfOperator.GTE, "priority", Integer.class, 5).sql())
-        .isEqualTo("payload->>'priority'::bigint >= ?::bigint");
+        .isEqualTo("(payload->>'priority')::bigint >= ?::bigint");
     assertThat(factory.build(TmfOperator.LT, "priority", Integer.class, 5).sql())
-        .isEqualTo("payload->>'priority'::bigint < ?::bigint");
+        .isEqualTo("(payload->>'priority')::bigint < ?::bigint");
     assertThat(factory.build(TmfOperator.LTE, "priority", Integer.class, 5).sql())
-        .isEqualTo("payload->>'priority'::bigint <= ?::bigint");
+        .isEqualTo("(payload->>'priority')::bigint <= ?::bigint");
   }
 
   @Test
-  @DisplayName("GT on OffsetDateTime — casts to ::timestamptz")
+  @DisplayName("GT on OffsetDateTime — casts to ::timestamptz with parenthesised extraction")
   void rangeOperatorsDatetime() {
     OffsetDateTime when = OffsetDateTime.parse("2026-01-01T00:00:00Z");
     JsonbClause gt = factory.build(TmfOperator.GT, "createdAt", OffsetDateTime.class, when);
     assertThat(gt.sql())
-        .isEqualTo("payload->>'createdAt'::timestamptz > ?::timestamptz");
+        .isEqualTo("(payload->>'createdAt')::timestamptz > ?::timestamptz");
     assertThat(gt.params()).containsExactly(when);
   }
 
   @Test
-  @DisplayName("BETWEEN casts both bounds")
+  @DisplayName("BETWEEN casts both bounds with parenthesised extraction")
   void between() {
     JsonbClause c =
         factory.buildMulti(TmfOperator.BETWEEN, "priority", Integer.class, List.of(1, 9));
     assertThat(c.sql())
-        .isEqualTo("payload->>'priority'::bigint BETWEEN ?::bigint AND ?::bigint");
+        .isEqualTo("(payload->>'priority')::bigint BETWEEN ?::bigint AND ?::bigint");
     assertThat(c.params()).containsExactly(1, 9);
   }
 
@@ -87,7 +87,7 @@ class JsonbPredicateFactoryTest {
 
     JsonbClause nin =
         factory.buildMulti(TmfOperator.NIN, "priority", Integer.class, List.of(1, 2, 3));
-    assertThat(nin.sql()).isEqualTo("payload->>'priority'::bigint NOT IN (?::bigint, ?::bigint, ?::bigint)");
+    assertThat(nin.sql()).isEqualTo("(payload->>'priority')::bigint NOT IN (?::bigint, ?::bigint, ?::bigint)");
   }
 
   @Test
@@ -139,17 +139,20 @@ class JsonbPredicateFactoryTest {
   }
 
   @Test
-  @DisplayName("IS_NULL under MISSING_ONLY on top-level key uses NOT (payload ? 'x')")
+  @DisplayName("IS_NULL under MISSING_ONLY on top-level key uses NOT (payload ?? 'x')")
   void isNullMissingOnlyTopLevel() {
+    // ?? is the JDBC escape for Postgres's single ? key-existence operator — the
+    // driver unescapes it to a single ? on the wire. Prevents JDBC from treating
+    // the ? as a parameter placeholder.
     JsonbClause c = factory.buildNoValue(TmfOperator.IS_NULL, "status");
-    assertThat(c.sql()).isEqualTo("NOT (payload ? 'status')");
+    assertThat(c.sql()).isEqualTo("NOT (payload ?? 'status')");
   }
 
   @Test
-  @DisplayName("IS_NOT_NULL under MISSING_ONLY on top-level key uses payload ? 'x'")
+  @DisplayName("IS_NOT_NULL under MISSING_ONLY on top-level key uses payload ?? 'x'")
   void isNotNullMissingOnlyTopLevel() {
     JsonbClause c = factory.buildNoValue(TmfOperator.IS_NOT_NULL, "status");
-    assertThat(c.sql()).isEqualTo("payload ? 'status'");
+    assertThat(c.sql()).isEqualTo("payload ?? 'status'");
   }
 
   @Test
@@ -167,7 +170,7 @@ class JsonbPredicateFactoryTest {
     JsonbClause c = f.buildNoValue(TmfOperator.IS_NULL, "status");
     assertThat(c.sql())
         .isEqualTo(
-            "(NOT (payload ? 'status') OR payload->'status' = 'null'::jsonb)");
+            "(NOT (payload ?? 'status') OR payload->'status' = 'null'::jsonb)");
   }
 
   @Test
@@ -177,7 +180,7 @@ class JsonbPredicateFactoryTest {
         new JsonbPredicateFactory(extractor, IsnullSemantics.NULLISH, true);
     JsonbClause c = f.buildNoValue(TmfOperator.IS_NOT_NULL, "status");
     assertThat(c.sql())
-        .isEqualTo("(payload ? 'status' AND payload->'status' <> 'null'::jsonb)");
+        .isEqualTo("(payload ?? 'status' AND payload->'status' <> 'null'::jsonb)");
   }
 
   @Test
@@ -215,6 +218,6 @@ class JsonbPredicateFactoryTest {
   void nullIsnullSemanticsDefaults() {
     JsonbPredicateFactory f = new JsonbPredicateFactory(extractor, null, true);
     assertThat(f.buildNoValue(TmfOperator.IS_NULL, "status").sql())
-        .isEqualTo("NOT (payload ? 'status')");
+        .isEqualTo("NOT (payload ?? 'status')");
   }
 }

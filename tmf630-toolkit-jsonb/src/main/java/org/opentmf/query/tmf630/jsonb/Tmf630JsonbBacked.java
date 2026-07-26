@@ -25,10 +25,13 @@ import java.lang.annotation.Target;
  *       others as JSONB-backed. Per-entity routing is decided by the presence of this
  *       annotation on the row entity class.
  *   <li><strong>Payload column convention.</strong> The row entity must declare a field
- *       named by {@link #payloadField()} (default {@code "payload"}) of type {@code JsonNode}
- *       (or another type Jackson can read/write to a JSONB column via
- *       {@code @JdbcTypeCode(SqlTypes.JSON)}). The toolkit does not enforce the column
- *       name or type here — those are Hibernate's concern via the field's own annotations.
+ *       named by {@link #payloadField()} (default {@code "payload"}). The toolkit itself
+ *       is JPA-provider-agnostic — it never reads or writes the payload field via JPA;
+ *       reads go through {@code JdbcClient} on the JSONB column directly, and writes are
+ *       the service's own concern. The field's Java type and any provider-specific
+ *       JSONB mapping annotations (Hibernate's {@code @JdbcTypeCode(SqlTypes.JSON)},
+ *       EclipseLink's converter approach, etc.) are the service's choice — pick
+ *       whatever your JPA provider supports for JSONB column mapping.
  *   <li><strong>Domain type.</strong> The {@link #domainType()} attribute identifies the
  *       TMF resource POJO whose fields the toolkit resolves against for URL-parameter
  *       parsing and allowlist checks. The row entity is a persistence-layer detail; the

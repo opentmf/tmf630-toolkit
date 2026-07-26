@@ -1,5 +1,6 @@
 package org.opentmf.query.tmf630.jsonb;
 
+import jakarta.persistence.Table;
 import java.lang.reflect.Field;
 import java.util.Optional;
 import org.springframework.util.Assert;
@@ -17,12 +18,14 @@ public record JsonbEntityMetadata(
     Class<?> rowType,
     Class<?> domainType,
     String payloadField,
+    String tableName,
     JsonbAuditColumns auditColumns) {
 
   public JsonbEntityMetadata {
     Assert.notNull(rowType, "rowType must not be null");
     Assert.notNull(domainType, "domainType must not be null");
     Assert.hasText(payloadField, "payloadField must not be blank");
+    Assert.hasText(tableName, "tableName must not be blank");
     Assert.notNull(auditColumns, "auditColumns must not be null");
   }
 
@@ -62,7 +65,30 @@ public record JsonbEntityMetadata(
               + "' declared by @Tmf630JsonbBacked.payloadField().");
     }
     return new JsonbEntityMetadata(
-        rowType, domainType, payloadField, JsonbAuditColumns.discover(rowType));
+        rowType, domainType, payloadField, resolveTableName(rowType),
+        JsonbAuditColumns.discover(rowType));
+  }
+
+  private static String resolveTableName(Class<?> rowType) {
+    Table table = rowType.getAnnotation(Table.class);
+    if (table != null && !table.name().isBlank()) {
+      return table.name();
+    }
+    // JPA default: entity class name with camelCase → snake_case per Hibernate's
+    // ImplicitNamingStrategy; downstream services that rely on the default may prefer
+    // to declare @Table(name=...) explicitly to avoid surprises. Toolkit's fallback
+    // here mirrors Hibernate 6+ PhysicalNamingStrategyStandardImpl behavior for the
+    // common camelCase-to-snake_case path.
+    String simple = rowType.getSimpleName();
+    StringBuilder snake = new StringBuilder(simple.length() + 8);
+    for (int i = 0; i < simple.length(); i++) {
+      char c = simple.charAt(i);
+      if (i > 0 && Character.isUpperCase(c)) {
+        snake.append('_');
+      }
+      snake.append(Character.toLowerCase(c));
+    }
+    return snake.toString();
   }
 
   static Optional<Field> findField(Class<?> type, String name) {

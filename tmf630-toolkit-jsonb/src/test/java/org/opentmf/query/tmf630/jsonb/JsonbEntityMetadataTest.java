@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Version;
 import java.time.OffsetDateTime;
@@ -78,7 +77,6 @@ class JsonbEntityMetadataTest {
 
   static class MinimalDomain {}
 
-  @Entity
   @Tmf630JsonbBacked(domainType = FullDomain.class)
   static class FullRow {
     @Id private String id;
@@ -91,26 +89,22 @@ class JsonbEntityMetadataTest {
     @Version private Integer optLock;
   }
 
-  @Entity
   @Tmf630JsonbBacked(domainType = MinimalDomain.class)
   static class MinimalRow {
     @Id private String id;
     private JsonNode payload;
   }
 
-  @Entity
   @Tmf630JsonbBacked(domainType = MinimalDomain.class, payloadField = "body")
   static class CustomPayloadRow {
     @Id private String id;
     private JsonNode body;
   }
 
-  @Entity
   static class UnannotatedRow {
     @Id private String id;
   }
 
-  @Entity
   @Tmf630JsonbBacked(domainType = MinimalDomain.class)
   static class MissingPayloadRow {
     @Id private String id;

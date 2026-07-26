@@ -5,7 +5,6 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import jakarta.persistence.Entity;
 import jakarta.persistence.EntityManagerFactory;
 import jakarta.persistence.Id;
 import jakarta.persistence.metamodel.EntityType;
@@ -30,7 +29,10 @@ class Tmf630JsonbAutoConfigurationTest {
     when(emf.getMetamodel()).thenReturn(metamodel);
 
     Tmf630JsonbAutoConfiguration autoconfig = new Tmf630JsonbAutoConfiguration();
-    JsonbEntityRegistry registry = autoconfig.tmf630JsonbEntityRegistry(emf);
+    org.springframework.beans.factory.ObjectProvider<EntityManagerFactory> provider =
+        mock(org.springframework.beans.factory.ObjectProvider.class);
+    when(provider.getIfAvailable()).thenReturn(emf);
+    JsonbEntityRegistry registry = autoconfig.tmf630JsonbEntityRegistry(provider);
 
     assertThat(registry.all()).hasSize(1);
     assertThat(registry.forRowType(AutoConfigTestRow.class)).isPresent();
@@ -46,7 +48,21 @@ class Tmf630JsonbAutoConfigurationTest {
     when(emf.getMetamodel()).thenReturn(metamodel);
 
     Tmf630JsonbAutoConfiguration autoconfig = new Tmf630JsonbAutoConfiguration();
-    JsonbEntityRegistry registry = autoconfig.tmf630JsonbEntityRegistry(emf);
+    org.springframework.beans.factory.ObjectProvider<EntityManagerFactory> provider =
+        mock(org.springframework.beans.factory.ObjectProvider.class);
+    when(provider.getIfAvailable()).thenReturn(emf);
+    JsonbEntityRegistry registry = autoconfig.tmf630JsonbEntityRegistry(provider);
+    assertThat(registry.all()).isEmpty();
+  }
+
+  @Test
+  @DisplayName("registry stays empty when no EntityManagerFactory is available")
+  void emptyRegistryWhenNoEntityManagerFactory() {
+    org.springframework.beans.factory.ObjectProvider<EntityManagerFactory> provider =
+        mock(org.springframework.beans.factory.ObjectProvider.class);
+    when(provider.getIfAvailable()).thenReturn(null);
+    Tmf630JsonbAutoConfiguration autoconfig = new Tmf630JsonbAutoConfiguration();
+    JsonbEntityRegistry registry = autoconfig.tmf630JsonbEntityRegistry(provider);
     assertThat(registry.all()).isEmpty();
   }
 
@@ -62,14 +78,12 @@ class Tmf630JsonbAutoConfigurationTest {
 
   static class AutoConfigTestDomain {}
 
-  @Entity
   @Tmf630JsonbBacked(domainType = AutoConfigTestDomain.class)
   static class AutoConfigTestRow {
     @Id private String id;
     private JsonNode payload;
   }
 
-  @Entity
   static class AutoConfigTestPlainRow {
     @Id private String id;
   }
