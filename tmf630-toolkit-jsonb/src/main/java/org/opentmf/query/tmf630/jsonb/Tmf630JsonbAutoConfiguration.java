@@ -27,28 +27,17 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * Auto-config for the JSONB backend. Deliberately framework-neutral — depends only on
  * the JPA specification ({@code jakarta.persistence.EntityManager} /
  * {@code EntityManagerFactory} / metamodel) and never on any specific JPA
- * implementation. The {@code afterName} entries below are ordering hints ONLY (they
- * do not create compile-time or runtime dependencies on those classes); Spring Boot
- * silently ignores names that are absent from the classpath, so services running on
- * EclipseLink or any other JPA provider load this auto-config in a valid order too.
+ * implementation. Zero {@code org.hibernate.*} or provider-specific imports.
  *
  * <p>The {@link EntityManagerFactory} lookup uses {@link ObjectProvider} rather than a
- * direct injection with {@link ConditionalOnBean} — this avoids the auto-config
- * ordering trap where {@code @ConditionalOnBean(EntityManagerFactory.class)} at the
- * method level can be evaluated before the JPA provider's own auto-config has run.
+ * direct injection with {@link ConditionalOnBean}. {@code ObjectProvider.getIfAvailable()}
+ * resolves the bean at instantiation time, by which point all auto-configs (including
+ * the JPA provider's own) have already registered their bean definitions. That means
+ * no {@code afterName} ordering hint is required — Spring's own dependency resolution
+ * picks up the EMF whenever the JPA provider defines it, without us naming any
+ * specific implementation class.
  */
-@AutoConfiguration(
-    afterName = {
-      // Spring Boot 4.1 (Hibernate).
-      "org.springframework.boot.hibernate.autoconfigure.HibernateJpaAutoConfiguration",
-      // Spring Boot 3.x (Hibernate) — older tenants of the toolkit.
-      "org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration",
-      // Hypothetical EclipseLink autoconfig — kept as an ordering hint so that a
-      // downstream service running on EclipseLink with a community autoconfig class
-      // also gets us ordered correctly. Non-fatal if absent.
-      "org.springframework.boot.autoconfigure.orm.jpa.EclipseLinkJpaAutoConfiguration",
-      "org.springframework.boot.autoconfigure.jackson.JacksonAutoConfiguration"
-    })
+@AutoConfiguration
 @ConditionalOnClass({EntityManager.class, Tmf630JsonbBacked.class})
 public class Tmf630JsonbAutoConfiguration {
 
