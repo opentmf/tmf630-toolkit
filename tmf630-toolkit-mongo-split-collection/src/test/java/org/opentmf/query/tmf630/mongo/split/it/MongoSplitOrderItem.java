@@ -9,6 +9,7 @@ public class MongoSplitOrderItem {
 
   private String id;
   private String state;
+  private Integer priority;
 
   public String getId() {
     return id;
@@ -24,5 +25,13 @@ public class MongoSplitOrderItem {
 
   public void setState(String state) {
     this.state = state;
+  }
+
+  public Integer getPriority() {
+    return priority;
+  }
+
+  public void setPriority(Integer priority) {
+    this.priority = priority;
   }
 }

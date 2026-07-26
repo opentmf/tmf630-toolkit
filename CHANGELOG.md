@@ -6,6 +6,54 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 
 ### Added (MongoDB split-and-merge — v3.0.0 Phase (d), MVP first cut)
 
+- **`MongoSplitAwareFilterTranslator` — split-aware URL filter routing for Mongo**
+  (Phase d.2, first cut). Given a JsonPath `filter=` expression that references a
+  `@Tmf630MongoSplitCollection` field, resolves the parent set via a two-step
+  child-lookup and returns a parent-side `Criteria.where("_id").in(<parentIds>)`
+  that the consumer combines with their normal parent-endpoint query.
+
+  Supported filter shapes (mirror JSONB c.2/c.3):
+  - **Parent-only** filter (`$[?(@.status == 'X')]`) → returns `null`, signalling
+    the caller to fall back to its normal filter path.
+  - **Top-level array correlation into one split field**
+    (`$[?(@.items[?(@.state == 'PENDING')])]`) → resolves to a parent-side
+    criterion. **Same-element correlation guaranteed** by construction: the inner
+    predicate translates to a Mongo `Criteria` on the child collection, so all
+    conjuncts (`&&`) must hold on a single child document.
+
+  Rejected with clear message (deferred to later d.x cuts):
+  - **Compound predicates mixing parent + split fields** at the top level
+    (`$[?(@.status == 'X' && @.items[?(...)])]`) — needs the generic
+    predicate-splitter that will land alongside c.2/c.3's full cut.
+
+  Inner-predicate translation is pluggable via a `MongoInnerPredicateTranslator`
+  bean. The default `SimpleMongoInnerPredicateTranslator` covers the common
+  grammar subset: dotted field paths, string and numeric literals, comparison
+  operators `== != < <= > >=`, boolean `&&` / `||` composition, parenthesised
+  grouping. Consumers needing richer grammar (regex, existence checks, functions,
+  nested `[?(...)]`) plug in their own implementation.
+
+  This is intentionally simpler than the full `$lookup`-based aggregation router
+  planned for Phase (d.3) — it works today with correct semantics at the cost of
+  an extra distinct query per request. When d.3 lands, the aggregation router
+  will replace this codepath with a single-round-trip pipeline.
+
+  Coverage: 11 unit tests on `SimpleMongoInnerPredicateTranslator` (all 6
+  comparison operators, `&&`/`||` composition, parenthesised grouping, empty and
+  unparseable inputs, unclosed parens) + 5 unit tests on
+  `MongoSplitAwareFilterTranslator` (routing decisions, unknown parent type,
+  compound rejection) + 3 real-Mongo IT scenarios via
+  `Tmf630MongoSplitCollectionIT` (item-side match returns the right parent set,
+  same-element correlation semantics with two-condition predicate that no single
+  child satisfies, empty child match returns empty parent set). Total Mongo
+  split-module test count: 42.
+
+  **Bugfix in the routing regex** landed under the same commit: initial cut used
+  `Set.of(...)` for the alternation forms, whose iteration order is
+  non-deterministic. That shifted capture-group numbering across JVM runs, so
+  `matcher.group(1)` was sometimes null. Replaced with a single unified pattern
+  using an optional `$?` prefix — one capture group, deterministic numbering.
+
 - **New module `tmf630-toolkit-mongo-split-collection`** — the Mongo mirror of
   `tmf630-toolkit-jsonb`'s split-and-merge feature set. Enables an
   annotation-driven "parent doc with a large child collection lifted into a

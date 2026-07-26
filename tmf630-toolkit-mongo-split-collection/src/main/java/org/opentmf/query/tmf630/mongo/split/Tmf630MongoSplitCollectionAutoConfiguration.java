@@ -81,4 +81,20 @@ public class Tmf630MongoSplitCollectionAutoConfiguration {
       MongoOperations mongoOperations, MongoSplitEntityRegistry registry) {
     return new Tmf630MongoSplitReadMerger(mongoOperations, registry);
   }
+
+  @Bean
+  @ConditionalOnMissingBean
+  public MongoInnerPredicateTranslator tmf630MongoInnerPredicateTranslator() {
+    return new SimpleMongoInnerPredicateTranslator();
+  }
+
+  @Bean
+  @ConditionalOnMissingBean
+  public MongoSplitAwareFilterTranslator tmf630MongoSplitAwareFilterTranslator(
+      MongoSplitEntityRegistry registry,
+      MongoOperations mongoOperations,
+      MongoInnerPredicateTranslator innerPredicateTranslator) {
+    return new MongoSplitAwareFilterTranslator(
+        registry, mongoOperations, innerPredicateTranslator);
+  }
 }

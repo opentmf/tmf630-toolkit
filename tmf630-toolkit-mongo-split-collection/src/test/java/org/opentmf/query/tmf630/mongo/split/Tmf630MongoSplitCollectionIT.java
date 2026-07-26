@@ -67,6 +67,7 @@ class Tmf630MongoSplitCollectionIT {
   @Autowired private MongoOperations mongoOperations;
   @Autowired private Tmf630MongoSplitWriteExecutor writeExecutor;
   @Autowired private Tmf630MongoSplitReadMerger readMerger;
+  @Autowired private MongoSplitAwareFilterTranslator splitAwareFilter;
   @Autowired private MockMvc mockMvc;
   @Autowired private MongoSplitEntityRegistry registry;
 
@@ -225,6 +226,81 @@ class Tmf630MongoSplitCollectionIT {
   }
 
   @Test
+  @DisplayName(
+      "split-aware filter routes item-side predicate to child collection, returns parent-side criteria")
+  void splitAwareFilterRoutesToChildCollection() {
+    // Two parents. Only R-B has an item in state 'PENDING' — filter should pick R-B.
+    writeExecutor.saveWithSplits(
+        order("R-A", "OPEN", List.of(item("a1", "SHIPPED"), item("a2", "SHIPPED"))));
+    writeExecutor.saveWithSplits(
+        order("R-B", "OPEN", List.of(item("b1", "PENDING"), item("b2", "SHIPPED"))));
+
+    org.springframework.data.mongodb.core.query.Criteria criteria =
+        splitAwareFilter.translate(
+            MongoSplitOrder.class, "$[?(@.items[?(@.state == 'PENDING')])]");
+    assertThat(criteria).isNotNull();
+
+    List<MongoSplitOrder> matched =
+        mongoOperations.find(
+            new org.springframework.data.mongodb.core.query.Query(criteria),
+            MongoSplitOrder.class,
+            "split_order");
+    assertThat(matched).extracting(MongoSplitOrder::getId).containsExactly("R-B");
+  }
+
+  @Test
+  @DisplayName(
+      "split-aware filter with same-element correlation semantics — item must satisfy full predicate")
+  void splitAwareFilterSameElementSemantics() {
+    // A single item in R-C is PENDING, but its priority is 3 (not > 5). No item in
+    // R-C satisfies BOTH conditions on a single item, so the parent should NOT match.
+    writeExecutor.saveWithSplits(
+        order("R-C", "OPEN", List.of(itemP("p1", "PENDING", 3), itemP("p2", "SHIPPED", 8))));
+
+    org.springframework.data.mongodb.core.query.Criteria criteria =
+        splitAwareFilter.translate(
+            MongoSplitOrder.class,
+            "$[?(@.items[?(@.state == 'PENDING' && @.priority > 5)])]");
+    List<MongoSplitOrder> matched =
+        mongoOperations.find(
+            new org.springframework.data.mongodb.core.query.Query(criteria),
+            MongoSplitOrder.class,
+            "split_order");
+    assertThat(matched).isEmpty();
+
+    // Now add R-D with a single item that DOES satisfy both — it should match.
+    writeExecutor.saveWithSplits(
+        order("R-D", "OPEN", List.of(itemP("d1", "PENDING", 9))));
+    matched =
+        mongoOperations.find(
+            new org.springframework.data.mongodb.core.query.Query(
+                splitAwareFilter.translate(
+                    MongoSplitOrder.class,
+                    "$[?(@.items[?(@.state == 'PENDING' && @.priority > 5)])]")),
+            MongoSplitOrder.class,
+            "split_order");
+    assertThat(matched).extracting(MongoSplitOrder::getId).containsExactly("R-D");
+  }
+
+  @Test
+  @DisplayName(
+      "split-aware filter with no matching children returns a criteria that matches zero parents")
+  void splitAwareFilterEmptyChildMatch() {
+    writeExecutor.saveWithSplits(
+        order("R-E", "OPEN", List.of(item("e1", "SHIPPED"))));
+
+    org.springframework.data.mongodb.core.query.Criteria criteria =
+        splitAwareFilter.translate(
+            MongoSplitOrder.class, "$[?(@.items[?(@.state == 'NEVER')])]");
+    List<MongoSplitOrder> matched =
+        mongoOperations.find(
+            new org.springframework.data.mongodb.core.query.Query(criteria),
+            MongoSplitOrder.class,
+            "split_order");
+    assertThat(matched).isEmpty();
+  }
+
+  @Test
   @DisplayName("read-merge on an untracked type is a no-op (safe to call in generic paths)")
   void readMergeOnUntrackedType() {
     // A plain POJO that isn't @Tmf630MongoSplitBacked. Merger returns it unchanged.
@@ -262,6 +338,14 @@ class Tmf630MongoSplitCollectionIT {
     MongoSplitOrderItem item = new MongoSplitOrderItem();
     item.setId(id);
     item.setState(state);
+    return item;
+  }
+
+  private static MongoSplitOrderItem itemP(String id, String state, int priority) {
+    MongoSplitOrderItem item = new MongoSplitOrderItem();
+    item.setId(id);
+    item.setState(state);
+    item.setPriority(priority);
     return item;
   }
 
