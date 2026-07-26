@@ -6,6 +6,25 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 
 ### Added (PostgreSQL-with-JSONB backend — v3.0.0 Phase (b), incremental)
 
+- **`JsonbSortBuilder` — sort and paging SQL fragments** (Phase b.4 of V3
+  roadmap). Translates a `TmfSort` into a Postgres `ORDER BY` fragment
+  against a JSONB payload column plus a `LIMIT ? OFFSET ?` pagination
+  tail. Per §8.1 of `docs/JSONB_BACKEND_DESIGN.md`:
+  - Plain dotted terms render as `(payload->>'field')::cast DIR [NULLS LAST]`
+    where the cast is picked by `JsonbCast.forJavaType(...)` for the domain
+    field's Java type.
+  - `NULLS LAST` decoration is driven by the toolkit-wide
+    `opentmf.tmf630.paging.nulls-last` property (Phase a.1). On Postgres the
+    modifier is native SQL, so the semantic outcome and emitted text always
+    agree — no dialect-based elision like Hibernate does for
+    `Sort.Order.nullsLast()` on the JPA path.
+  - Multi-term sorts join with commas.
+  - SIMPLE_RICH and JSONPATH sort terms are rejected with a clear message
+    pointing at the JsonPath-sort executor (b.6, deferred).
+  - Paging via `LIMIT ? OFFSET ?` — Postgres-native, no cursor gymnastics.
+
+  8 unit tests. Total JSONB module test count now 60. `mvn verify` clean.
+
 - **`JsonbPredicateFactory` — 24-operator translation table** (Phase b.2 of
   V3 roadmap). Translates each `TmfOperator` value + field path + typed value
   into a `JsonbClause` (SQL fragment + JDBC params) targeting a Postgres
