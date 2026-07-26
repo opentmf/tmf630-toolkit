@@ -57,28 +57,34 @@ they would against a non-split backend.
 
 ## Capability matrix by backend
 
-Legend: ✅ full • 🟡 partial (see linked note) • 🚫 not applicable / out of scope.
-Rows 1–10 describe direct TMF-630 features; rows 11–14 describe the toolkit's
-master-detail split extension.
+All spec references below are to the seven-part **TMF-630 REST API Design Guidelines**:
+Part 1 at **v4.2.0**, Parts 2–7 at **v4.0.0** (the current TM Forum public release set).
+The "TMF-630 artefact" column names the exact document and, where the source doc
+numbers its subsections, the section number; Part 6 doesn't number its subsections in
+its TOC, so those rows name the subsection heading verbatim.
 
-| # | TMF-630 reference — description | JPA | Mongo | PostgreSQL JSONB |
+Legend: ✅ full • 🟡 partial (see linked note) • 🚫 not applicable / out of scope.
+Rows 1–11 describe direct TMF-630 features; rows 12–14 are toolkit-specific
+extensions; rows 15–16 cover TMF-630 Part 4 §2.
+
+| # | TMF-630 artefact — description | JPA | Mongo | PostgreSQL JSONB |
 |---|---|---|---|---|
-| 1 | Part 1 §4.3 — `fields=` partial representation | ✅ | ✅ | ✅ |
-| 2 | Part 1 §4.4 — attribute filtering (26 operators) | ✅ | ✅ | ✅ |
-| 3 | Part 1 §4.5 — pagination (`offset`/`limit`, `X-Total-Count`, `206`) | ✅ | ✅ | ✅ |
-| 4 | Part 1 §4.5 — `Link` header pagination navigation | ✅ | ✅ | ✅ |
-| 5 | Part 1 §4.7 — sorting (`+`/`-` direction, multi-field, dotted) | ✅ | ✅ | ✅ |
-| 6 | Part 6 — JSONPath `filter=` basic (`==`, `!=`, `>`, `>=`, `<`, `<=`, `&&`, `||`, `!`) | ✅ | ✅ | ✅ |
-| 7 | Part 6 — JSONPath `filter=` array correlation `arr[?(@.x==...)]` | 🟡 JOIN-mapped only ([note](#jpa-filter-support-scope)) | ✅ `$elemMatch` | ✅ native SQL/JSON path |
-| 8 | Part 6 — JSONPath `filter=` positional index `[N]` | 🚫 | ✅ | ✅ |
-| 9 | Part 6 — JSONPath `filter=` `length() == N` | ✅ | ✅ | ✅ |
-| 10 | Part 6 — `sort=` correlated (`arr[key=X].value`) | 🟡 simple-rich only ([note](#12-correlated-sort-mongodb)) | ✅ ([aggregation module](#spring-boot--mongodb-backed-services-adding-correlated-sort)) | ✅ native SQL/JSON path |
-| 11 | Part 1 §3.3 status codes + §3.4 uniform error body | ✅ | ✅ | ✅ |
+| 1 | **Part 1 v4.2.0 §4.3** — `fields=` partial representation | ✅ | ✅ | ✅ |
+| 2 | **Part 1 v4.2.0 §4.4** — attribute filtering (26 operators) | ✅ | ✅ | ✅ |
+| 3 | **Part 1 v4.2.0 §4.5** — pagination (`offset`/`limit`, `X-Total-Count`, `206`) | ✅ | ✅ | ✅ |
+| 4 | **Part 1 v4.2.0 §4.5** — `Link` header pagination navigation | ✅ | ✅ | ✅ |
+| 5 | **Part 1 v4.2.0 §4.7** — sorting (`+`/`-` direction, multi-field, dotted) | ✅ | ✅ | ✅ |
+| 6 | **Part 6 v4.0.0 "Collection filtering using JSONPath"** — basic `filter=` grammar (`==`, `!=`, `>`, `>=`, `<`, `<=`, `&&`, `||`, `!`) | ✅ | ✅ | ✅ |
+| 7 | **Part 6 v4.0.0 "Collection filtering using JSONPath"** — array correlation `arr[?(@.x==...)]` | 🟡 JOIN-mapped only ([note](#jpa-filter-support-scope)) | ✅ `$elemMatch` | ✅ native SQL/JSON path |
+| 8 | **Part 6 v4.0.0 "JSON Path"** — positional index `[N]` in `filter=` | 🚫 | ✅ | ✅ |
+| 9 | **Part 6 v4.0.0 "JSON Path"** — `length() == N` on `filter=` | ✅ | ✅ | ✅ |
+| 10 | **Part 6 v4.0.0 "Sorting selector"** — correlated `sort=arr[key=X].value` | 🟡 simple-rich only ([note](#12-correlated-sort-mongodb)) | ✅ ([aggregation module](#spring-boot--mongodb-backed-services-adding-correlated-sort)) | ✅ native SQL/JSON path |
+| 11 | **Part 1 v4.2.0 §3.3 + §3.4** — status codes + uniform error body | ✅ | ✅ | ✅ |
 | 12 | *Toolkit extension* — `@Tmf630*SplitCollection` master-detail split | 🚫 | ✅ [(section 14)](#14-master-detail-split--mongo) | ✅ [(section 15)](#15-master-detail-split--postgresql-jsonb) |
 | 13 | *Toolkit extension* — split-collection sub-endpoint controller | 🚫 | ✅ | ✅ |
 | 14 | *Toolkit extension* — top-level `filter=` OR across parent + split | 🚫 | ✅ `$unionWith` | ✅ SQL `OR` |
-| 15 | Part 4 §2.5 — versioned resource path form `/{id}:(version=X)` + latest-version resolver | ✅ | ✅ | ✅ |
-| 16 | Part 4 §2.6 — RBAC (role-based access control on versioned resources) | 🚫 out of scope — see [`opentmf/openid-rbac-security`](https://github.com/opentmf/openid-rbac-security), the sibling library from the same opentmf project family | 🚫 same | 🚫 same |
+| 15 | **Part 4 v4.0.0 §2.5** — versioned resource path form `/{id}:(version=X)` + latest-version resolver | ✅ | ✅ | ✅ |
+| 16 | **Part 4 v4.0.0 §2.6** — RBAC (role-based access control on versioned resources) | 🚫 out of scope — see [`opentmf/openid-rbac-security`](https://github.com/opentmf/openid-rbac-security), the sibling library from the same opentmf project family | 🚫 same | 🚫 same |
 
 Rows 12–14 (split-and-merge) are toolkit-specific extensions not covered by TMF-630 today.
 The URL contract exposed to clients stays TMF-630 conformant — the extension is entirely
