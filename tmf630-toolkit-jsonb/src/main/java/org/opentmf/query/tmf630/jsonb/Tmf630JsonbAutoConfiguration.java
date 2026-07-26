@@ -108,6 +108,13 @@ public class Tmf630JsonbAutoConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
+  public JsonbSplitAwareFilterTranslator tmf630JsonbSplitAwareFilterTranslator(
+      JsonbJsonPathTranslator delegate, JsonbEntityRegistry registry) {
+    return new JsonbSplitAwareFilterTranslator(delegate, registry);
+  }
+
+  @Bean
+  @ConditionalOnMissingBean
   public JsonbSortBuilder tmf630JsonbSortBuilder(
       JsonbPathExtractor extractor, ObjectProvider<Tmf630PagingSettings> pagingSettings) {
     boolean nullsLast =

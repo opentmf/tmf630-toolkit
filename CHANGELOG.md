@@ -6,6 +6,46 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 
 ### Added (PostgreSQL-with-JSONB split-and-merge — v3.0.0 Phase (c), incremental)
 
+- **`JsonbSplitAwareFilterTranslator` — split-aware URL filter routing**
+  (Phases c.2 + c.3, first cut). Routes filters that target a
+  `@Tmf630JsonbSplitCollection` field to a correlated `EXISTS` subquery on
+  the child table, since after the split the field no longer lives in the
+  parent's payload. Parent-only filters delegate unchanged to the base
+  `JsonbJsonPathTranslator`.
+
+  Supported filter shapes:
+  - **Parent-only** (unchanged): `$[?(@.status == 'X')]` → base translator.
+  - **Top-level array correlation into one split field**:
+    `$[?(@.items[?(@.state == 'X')])]` → `EXISTS (SELECT 1 FROM order_item
+    WHERE parent_id = order_row.id AND jsonb_path_exists(payload, ?))`.
+    Inner predicate flows through the base translator so its full grammar
+    (compound `&&`/`||`, quotes, nested handling) is available inside the
+    child predicate. **Same-element correlation guaranteed** — one EXISTS
+    subquery, one WHERE clause, one implicit alias for the child row.
+
+  Rejected with clear message (deferred to later c.x cuts):
+  - **Compound predicates mixing parent + split fields** at the top level,
+    e.g. `$[?(@.status == 'X' && @.items[?(...)])]`. Handling these
+    requires a real predicate splitter (walk the parsed AST, group by
+    target-table, recombine with correct SQL logic). For now: use the
+    sub-endpoint (c.5) with its own filter=, or restructure the URL.
+  - **Non-default child payload column names** — the base translator emits
+    `jsonb_path_exists(payload, ...)` literally; supporting a differently
+    named column needs per-split translator wiring.
+
+  Assumes parent row PK is named `id` (TMF convention). The `parent_id`
+  column on the child table is configurable per annotation; the parent-side
+  reference is hard-coded to `<tableName>.id` for the first cut.
+
+  Auto-wired via `Tmf630JsonbAutoConfiguration` alongside the other JSONB
+  beans.
+
+  10 unit tests on `JsonbSplitAwareFilterTranslator` + 2 real-Postgres IT
+  scenarios via `Tmf630JsonbSplitCollectionIT` — item-side filter matching
+  the expected parent set, same-element correlation (multi-condition item
+  predicate that no single item satisfies correctly returns empty).
+  Total JSONB module test count now 154.
+
 - **`Tmf630JsonbSubResourceController<C, P>` — split-collection sub-endpoint
   base class** (Phase c.5 of V3 roadmap). Developer declares a thin subclass
   and gets the {@code GET /{parent}/{parentId}/{childRoute}} and

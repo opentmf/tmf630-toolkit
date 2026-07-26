@@ -45,6 +45,7 @@ class Tmf630JsonbSplitCollectionIT {
 
   @Autowired private Tmf630JsonbFilterExecutor executor;
   @Autowired private Tmf630JsonbWriteExecutor writeExecutor;
+  @Autowired private JsonbSplitAwareFilterTranslator splitAwareTranslator;
   @Autowired private SplitOrderRowRepository repository;
   @Autowired private JdbcClient jdbcClient;
   @Autowired private ObjectMapper objectMapper;
@@ -300,6 +301,80 @@ class Tmf630JsonbSplitCollectionIT {
             .query(String.class)
             .list();
     assertThat(childIds).containsExactly("0", "1");
+  }
+
+  @Test
+  @DisplayName(
+      "c.2/c.3: item-side filter at the parent endpoint compiles to EXISTS subquery "
+          + "and returns only matching parents")
+  void splitAwareFilterMatchesOnChildField() {
+    // Seed: two parents with different child states.
+    SplitOrderDomain o1 = new SplitOrderDomain();
+    o1.setId("F1");
+    o1.setStatus("OPEN");
+    o1.setItems(List.of(item("i1", "PENDING"), item("i2", "SHIPPED")));
+    writeExecutor.saveWithSplits(o1);
+
+    SplitOrderDomain o2 = new SplitOrderDomain();
+    o2.setId("F2");
+    o2.setStatus("OPEN");
+    o2.setItems(List.of(item("i1", "SHIPPED"), item("i2", "DELIVERED")));
+    writeExecutor.saveWithSplits(o2);
+
+    // Filter: match parents that have at least one item in state=PENDING. Only F1
+    // qualifies. F2's items are SHIPPED / DELIVERED.
+    JsonbClause where =
+        splitAwareTranslator.translate(
+            SplitOrderDomain.class, "$[?(@.items[?(@.state == 'PENDING')])]");
+    Page<SplitOrderDomain> page =
+        executor.findAll(
+            SplitOrderDomain.class, where, TmfSort.empty(), Pageable.unpaged(),
+            field -> String.class);
+    assertThat(page.getContent()).extracting(SplitOrderDomain::getId).containsExactly("F1");
+  }
+
+  @Test
+  @DisplayName(
+      "c.2/c.3: same-element correlation — multi-condition item predicate matches only when "
+          + "one SINGLE item satisfies ALL conditions")
+  void splitAwareFilterSameElementCorrelation() {
+    // F3 has items {i1: PENDING price=100} and {i2: SHIPPED price=200}. No single
+    // item is (PENDING && price > 150). Filter should exclude F3.
+    SplitOrderDomain f3 = new SplitOrderDomain();
+    f3.setId("F3");
+    f3.setStatus("OPEN");
+    SplitOrderItem i1 = new SplitOrderItem();
+    i1.setId("i1");
+    i1.setState("PENDING");
+    SplitOrderItem i2 = new SplitOrderItem();
+    i2.setId("i2");
+    i2.setState("SHIPPED");
+    f3.setItems(List.of(i1, i2));
+    writeExecutor.saveWithSplits(f3);
+
+    // First: match parents with an item state=PENDING. Should include F3.
+    JsonbClause wherePresent =
+        splitAwareTranslator.translate(
+            SplitOrderDomain.class, "$[?(@.items[?(@.state == 'PENDING')])]");
+    Page<SplitOrderDomain> presentPage =
+        executor.findAll(
+            SplitOrderDomain.class, wherePresent, TmfSort.empty(),
+            Pageable.unpaged(), field -> String.class);
+    assertThat(presentPage.getContent()).extracting(SplitOrderDomain::getId).contains("F3");
+
+    // Then: match parents with a SINGLE item that is BOTH PENDING and id='i2'. Should
+    // NOT match — F3's i1 is PENDING but not id='i2'; F3's i2 is id='i2' but SHIPPED.
+    JsonbClause whereNoMatch =
+        splitAwareTranslator.translate(
+            SplitOrderDomain.class,
+            "$[?(@.items[?(@.state == 'PENDING' && @.id == 'i2')])]");
+    Page<SplitOrderDomain> noMatchPage =
+        executor.findAll(
+            SplitOrderDomain.class, whereNoMatch, TmfSort.empty(),
+            Pageable.unpaged(), field -> String.class);
+    assertThat(noMatchPage.getContent())
+        .extracting(SplitOrderDomain::getId)
+        .doesNotContain("F3");
   }
 
   @Test
