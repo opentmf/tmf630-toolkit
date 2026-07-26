@@ -24,8 +24,68 @@ Release notes and version history are in [`CHANGELOG.md`](./CHANGELOG.md). A sec
 section TMF-630 v4.x compliance summary is in
 [TMF-630 compliance summary](#tmf-630-compliance-summary) below.
 
+## Backend modes supported
+
+The toolkit's TMF-630 query contract runs on top of five distinct persistence modes.
+**Modes 1, 2, and 4 are direct implementations of the TMF-630 spec.** Modes 3 and 5
+add a **master-detail split** on top of modes 2 and 4 respectively — a toolkit-specific
+extension for parents with large child collections (canonical
+`ProductOrder.productOrderItem`, 500+ items per parent in production). The split is
+opaque to the TMF-630 URL contract: clients see the same request/response shape as
+they would against a non-split backend.
+
+1. **JPA** — any Hibernate-compatible dialect. TMF-630 filter/sort/paging/fields against
+   a relational-mapped `@Entity` via QueryDSL. See
+   [handbook section 6](#6-controller-usage--three-levels).
+2. **Mongo** — MongoDB 4.0+. Same TMF-630 shape against a `@Document`-mapped domain.
+   See [handbook section 6](#6-controller-usage--three-levels) plus
+   [section 12](#12-correlated-sort-mongodb) for correlated sort.
+3. **Mongo with master-detail split** *(toolkit extension)* — as (2), but a large child
+   collection lives in a companion Mongo collection with `parentId` back-reference and
+   `itemOrder` index. Server-side merge on read (capped at
+   `maxInlineItems`), atomic multi-collection writes. See
+   [handbook section 14](#14-master-detail-split--mongo).
+4. **PostgreSQL with JSONB columns as a document DB** — Postgres tables where a
+   `payload jsonb` column holds the full domain. Same TMF-630 query contract via native
+   Postgres SQL/JSON path (`jsonb_path_exists`, `jsonb_path_query`) — no ORM object
+   graph, no lazy-load surface. See [handbook section 13](#13-postgresql-with-jsonb-as-a-document-db).
+5. **PostgreSQL with JSONB columns as a document DB and master-detail split**
+   *(toolkit extension)* — as (4), but the child collection lives in a companion table
+   with `parent_id` FK, composite PK `(parent_id, item_id)`, and per-parent
+   `item_order` index. Server-side merge on read, transactional multi-table writes.
+   See [handbook section 15](#15-master-detail-split--postgresql-jsonb).
+
+## Capability matrix by backend
+
+Legend: ✅ full • 🟡 partial (see linked note) • 🚫 not applicable / out of scope.
+Rows 1–10 describe direct TMF-630 features; rows 11–14 describe the toolkit's
+master-detail split extension.
+
+| # | TMF-630 reference — description | JPA | Mongo | PostgreSQL JSONB |
+|---|---|---|---|---|
+| 1 | Part 1 §4.3 — `fields=` partial representation | ✅ | ✅ | ✅ |
+| 2 | Part 1 §4.4 — attribute filtering (26 operators) | ✅ | ✅ | ✅ |
+| 3 | Part 1 §4.5 — pagination (`offset`/`limit`, `X-Total-Count`, `206`) | ✅ | ✅ | ✅ |
+| 4 | Part 1 §4.5 — `Link` header pagination navigation | ✅ | ✅ | ✅ |
+| 5 | Part 1 §4.7 — sorting (`+`/`-` direction, multi-field, dotted) | ✅ | ✅ | ✅ |
+| 6 | Part 6 — JSONPath `filter=` basic (`==`, `!=`, `>`, `>=`, `<`, `<=`, `&&`, `||`, `!`) | ✅ | ✅ | ✅ |
+| 7 | Part 6 — JSONPath `filter=` array correlation `arr[?(@.x==...)]` | 🟡 JOIN-mapped only ([note](#jpa-filter-support-scope)) | ✅ `$elemMatch` | ✅ native SQL/JSON path |
+| 8 | Part 6 — JSONPath `filter=` positional index `[N]` | 🚫 | ✅ | ✅ |
+| 9 | Part 6 — JSONPath `filter=` `length() == N` | ✅ | ✅ | ✅ |
+| 10 | Part 6 — `sort=` correlated (`arr[key=X].value`) | 🟡 simple-rich only ([note](#12-correlated-sort-mongodb)) | ✅ ([aggregation module](#spring-boot--mongodb-backed-services-adding-correlated-sort)) | ✅ native SQL/JSON path |
+| 11 | Part 1 §3.3 status codes + §3.4 uniform error body | ✅ | ✅ | ✅ |
+| 12 | *Toolkit extension* — `@Tmf630*SplitCollection` master-detail split | 🚫 | ✅ [(section 14)](#14-master-detail-split--mongo) | ✅ [(section 15)](#15-master-detail-split--postgresql-jsonb) |
+| 13 | *Toolkit extension* — split-collection sub-endpoint controller | 🚫 | ✅ | ✅ |
+| 14 | *Toolkit extension* — top-level `filter=` OR across parent + split | 🚫 | ✅ `$unionWith` | ✅ SQL `OR` |
+
+Rows 12–14 (split-and-merge) are toolkit-specific extensions not covered by TMF-630 today.
+The URL contract exposed to clients stays TMF-630 conformant — the extension is entirely
+server-side.
+
 ## Table of contents
 
+- [Backend modes supported](#backend-modes-supported)
+- [Capability matrix by backend](#capability-matrix-by-backend)
 - [What you get](#what-you-get)
 - [Requirements](#requirements)
 - [Prerequisites for attribute filtering](#prerequisites-for-attribute-filtering)
@@ -43,6 +103,9 @@ section TMF-630 v4.x compliance summary is in
   - [10) Avoiding JPA lazy-load cascades](#10-avoiding-jpa-lazy-load-cascades)
   - [11) Full combined scenario](#11-full-combined-scenario)
   - [12) Correlated sort (MongoDB)](#12-correlated-sort-mongodb)
+  - [13) PostgreSQL with JSONB as a document DB](#13-postgresql-with-jsonb-as-a-document-db)
+  - [14) Master-detail split — Mongo](#14-master-detail-split--mongo)
+  - [15) Master-detail split — PostgreSQL JSONB](#15-master-detail-split--postgresql-jsonb)
 - [Reference](#reference)
   - [Module layout](#module-layout)
   - [Configuration prefixes](#configuration-prefixes)
@@ -78,6 +141,20 @@ section TMF-630 v4.x compliance summary is in
 - Correlated sort (MongoDB) — JSONPath (`$.arr[?(@.name=='k')].value`) and simple-rich
   (`arr[name=k].value`) grammars, both compiled to a single `Aggregation` pipeline. Ships
   in the optional `tmf630-toolkit-mongo-aggregation` module.
+- Correlated sort (JPA, since 3.0.0) — simple-rich `sort=field[key=value].leaf` against a
+  JOIN-mapped `@OneToMany`/`@ManyToMany`/`@ElementCollection`. Ships in the optional
+  `tmf630-toolkit-jpa-correlated-sort` module.
+- **PostgreSQL-with-JSONB backend (3.0.0)** — full TMF-630 query contract against a
+  Postgres `payload jsonb` column via native SQL/JSON path. Ships in the optional
+  `tmf630-toolkit-jsonb` module. See [handbook §13](#13-postgresql-with-jsonb-as-a-document-db).
+- **Master-detail split (3.0.0)** — annotation-driven "parent doc + large child
+  collection stored in a companion table/collection" pattern with server-side merge on
+  read and atomic multi-store writes. Available for MongoDB via
+  `tmf630-toolkit-mongo-split-collection` ([handbook §14](#14-master-detail-split--mongo))
+  and for PostgreSQL JSONB via `tmf630-toolkit-jsonb`
+  ([handbook §15](#15-master-detail-split--postgresql-jsonb)). Includes split-aware `filter=`
+  routing across three Mongo pipeline shapes (parent-first `$lookup`, item-first
+  `$group+$lookup`, `$unionWith` for OR).
 - Works in both Spring Boot and plain Spring projects.
 
 ## Requirements
@@ -1943,6 +2020,416 @@ compatibility with numeric-id consumers.
   created and no behaviour changes for non-Mongo services that happen to pull the
   dependency transitively.
 
+### 13) PostgreSQL with JSONB as a document DB
+
+> **Module required**: `tmf630-toolkit-jsonb`. Enables mode 4 from the
+> [Backend modes](#backend-modes-supported) list. This section covers the base backend
+> (no master-detail split); §15 covers the split variant.
+
+Postgres is a compelling document DB when your service also needs SQL-native features
+(triggers, materialised views, native regex, transactional multi-row writes) that a
+plain Mongo backend can't offer. The `tmf630-toolkit-jsonb` module lets you store the
+whole domain payload in a `jsonb` column and still serve TMF-630 filter/sort/paging
+against it via Postgres SQL/JSON path — no ORM object graph, no lazy-load surface, no
+`@OneToMany` joins.
+
+#### Setup
+
+1. Add the module to your service's `pom.xml`:
+   ```xml
+   <dependency>
+     <groupId>org.opentmf.query</groupId>
+     <artifactId>tmf630-toolkit-jsonb</artifactId>
+   </dependency>
+   ```
+2. Model your storage as a JPA row entity annotated `@Tmf630JsonbBacked`, holding the
+   domain payload in a `jsonb` column:
+   ```java
+   @Entity
+   @Table(name = "product_order_row")
+   @Tmf630JsonbBacked(domainType = ProductOrder.class)
+   public class ProductOrderRow {
+     @Id String id;
+     @JdbcTypeCode(SqlTypes.JSON) String payload;   // stores the full ProductOrder JSON
+     // ...
+   }
+   ```
+3. Bootstrap discovers `@Tmf630JsonbBacked` via the JPA metamodel. Reads and writes go
+   through auto-configured beans; you don't wire anything else.
+
+#### Level 1 (easiest) — list endpoint via the read executor
+
+```java
+@RestController
+@RequestMapping("/productOrder")
+class ProductOrderController {
+
+  private final Tmf630JsonbFilterExecutor executor;
+  private final JsonbSplitAwareFilterTranslator splitAwareTranslator;
+
+  ProductOrderController(
+      Tmf630JsonbFilterExecutor executor,
+      JsonbSplitAwareFilterTranslator splitAwareTranslator) {
+    this.executor = executor;
+    this.splitAwareTranslator = splitAwareTranslator;
+  }
+
+  @GetMapping
+  @Tmf630Response
+  Page<ProductOrder> list(
+      @RequestParam(required = false) String filter,
+      TmfSort sort,
+      Pageable pageable) {
+    JsonbClause where = splitAwareTranslator.translate(ProductOrder.class, filter);
+    return executor.findAll(ProductOrder.class, where, sort, pageable, this::fieldType);
+  }
+
+  private Class<?> fieldType(String fieldName) {
+    // Optional type hints for typed casts; defaults to String if this returns null.
+    return switch (fieldName) {
+      case "totalPrice.value" -> Double.class;
+      case "orderDate" -> Instant.class;
+      default -> null;
+    };
+  }
+}
+```
+
+That's the full read path. `filter=`, `sort=`, `fields=`, paging, headers, status codes,
+and the TMF error body all apply automatically. The executor internally runs one
+Postgres query that assembles the paged result and total count.
+
+#### Level 2 — writes via a Spring Data JPA repository
+
+Writes are ordinary JPA against the row entity. Serialise your domain POJO to JSON and
+persist through `JpaRepository.save(...)`. The toolkit does not own the write path for
+the base (non-split) case — Postgres is your database and Spring Data JPA is the write
+API.
+
+#### Level 3 (advanced) — regex, correlated sort, native SQL/JSON path
+
+The JSONB backend supports the full JsonPath grammar for `filter=` and `sort=` — array
+correlation (`@.characteristic[?(@.name == 'price')]`), positional index (`@.items[3].state`),
+`length()`, regex (`=~ /pattern/i` when `regex.enabled=true`), and correlated sort
+(`sort=$.characteristic[?(@.name == 'price')].value`) — all lowered to native
+`jsonb_path_exists` / `jsonb_path_query` calls. No aggregation stage, no cross-table
+joins.
+
+For SQL fragments the toolkit doesn't cover (custom scoring, materialised-view lookups),
+compose your own `JsonbClause` and AND / OR it with the translator's output:
+
+```java
+JsonbClause where = splitAwareTranslator.translate(ProductOrder.class, filter);
+JsonbClause tenant = JsonbClause.of("tenant_id = ?", currentTenantId());
+JsonbClause combined = where.and(tenant);
+executor.findAll(ProductOrder.class, combined, sort, pageable, fieldType);
+```
+
+### 14) Master-detail split — Mongo
+
+> **Module required**: `tmf630-toolkit-mongo-split-collection`. Enables mode 3 from the
+> [Backend modes](#backend-modes-supported) list. Requires MongoDB 4.0+; for atomic
+> multi-collection writes across a parent + its children under
+> `@Transactional`, a replica set with a `MongoTransactionManager` is required
+> (standalone Mongo runs the writes non-atomically — documented caveat).
+
+Some TMF resources have a child collection that can grow to a size that makes storing
+it inline impractical — canonically `ProductOrder.productOrderItem`, 500+ items per
+parent. This module lets you lift the child collection into a companion Mongo
+collection with a `parentId` back-reference and per-parent `itemOrder` index, while
+keeping the TMF-630 URL contract intact.
+
+#### Setup
+
+1. Add the module:
+   ```xml
+   <dependency>
+     <groupId>org.opentmf.query</groupId>
+     <artifactId>tmf630-toolkit-mongo-split-collection</artifactId>
+   </dependency>
+   ```
+2. Mark the parent domain document `@Tmf630MongoSplitBacked` and declare each split
+   field with `@Tmf630MongoSplitCollection`:
+   ```java
+   @Document("productOrder")
+   @Tmf630MongoSplitBacked
+   public class ProductOrder {
+     @Id String id;
+     String status;
+
+     @Tmf630MongoSplitCollection(
+         childCollection = "productOrderItem",
+         childType = ProductOrderItem.class,
+         maxInlineItems = 100)
+     List<ProductOrderItem> productOrderItem;
+   }
+   ```
+3. Bootstrap discovers `@Tmf630MongoSplitBacked` via `MongoMappingContext`. All
+   runtime components (write executor, read merger, split-aware filter translator with
+   its three pipeline shapes, split-child counter) auto-configure.
+
+#### Level 1 (easiest) — list endpoint via the router
+
+```java
+@RestController
+@RequestMapping("/productOrder")
+class ProductOrderController {
+
+  private final MongoOperations mongoOperations;
+  private final MongoSplitAwareFilterTranslator router;
+  private final Tmf630MongoSplitReadMerger merger;
+
+  ProductOrderController(
+      MongoOperations mongoOperations,
+      MongoSplitAwareFilterTranslator router,
+      Tmf630MongoSplitReadMerger merger) {
+    this.mongoOperations = mongoOperations;
+    this.router = router;
+    this.merger = merger;
+  }
+
+  @GetMapping
+  @Tmf630Response
+  Page<ProductOrder> list(
+      @RequestParam(required = false) String filter,
+      Pageable pageable) {
+    SplitAwareAggregation packaged = router.route(ProductOrder.class, filter);
+    List<ProductOrder> parents;
+    if (packaged == null) {
+      // parent-only filter (or blank) — use your normal repository / filter path
+      parents = mongoOperations.findAll(ProductOrder.class, "productOrder");
+    } else {
+      parents = mongoOperations
+          .aggregate(packaged.pipeline(), packaged.targetCollection(), ProductOrder.class)
+          .getMappedResults();
+    }
+    merger.mergeAll(parents);   // populate split fields inline (capped at maxInlineItems)
+    return new PageImpl<>(parents, pageable, parents.size());
+  }
+}
+```
+
+The router picks between the three pipeline shapes (parent-first `$lookup`, item-first,
+`$unionWith`) based on the filter's decomposition — no shape choice for the caller.
+
+#### Level 2 — sub-endpoint controller for the tail
+
+When `maxInlineItems` is reached, clients access the rest via the sub-endpoint. Extend
+the base:
+
+```java
+@RestController
+@RequestMapping("/productOrder/{parentId}/productOrderItem")
+public class ProductOrderItemSubController
+    extends Tmf630MongoSubResourceController<ProductOrderItem, ProductOrder> {
+  public ProductOrderItemSubController(
+      MongoOperations mongoOperations, MongoSplitEntityRegistry registry) {
+    super(mongoOperations, registry, ProductOrderItem.class, ProductOrder.class);
+  }
+}
+```
+
+`GET /` (paged children ordered by `itemOrder`) and `GET /{itemId}` (single child, 404
+otherwise) are inherited. `@Tmf630Response` is on the base handlers, so pagination
+headers, `fields=`, and TMF status codes apply by default.
+
+#### Level 2 — writes via the write executor
+
+```java
+Tmf630MongoSplitWriteExecutor writeExecutor;   // auto-configured
+
+// POST / full-doc PATCH: atomic parent-upsert + child replace.
+writeExecutor.saveWithSplits(productOrder);
+
+// JSON-Patch add /productOrderItem/-: single-child append.
+writeExecutor.appendChild(ProductOrder.class, "PO-1", newItem);
+
+// JSON-Patch replace /productOrderItem/i-42 (one child): payload update only.
+writeExecutor.updateChild(ProductOrder.class, "PO-1", "i-42", modifiedItem);
+
+// JSON-Patch remove /productOrderItem/i-42: one-child delete.
+writeExecutor.removeChild(ProductOrder.class, "PO-1", "i-42", ProductOrderItem.class);
+
+// Diff-based full-doc PATCH: only touches children that changed.
+writeExecutor.saveWithSplitsReconciled(productOrder);
+```
+
+#### Level 2 — truncation-signal header
+
+If a client asked for the full child list via `fields=id,productOrderItem`, they get up
+to `maxInlineItems` items back. Use `Tmf630MongoSplitChildCounter` to add an
+`X-Total-Count-<ChildName>` header so clients can detect and page through the tail:
+
+```java
+Tmf630MongoSplitChildCounter counter;   // auto-configured
+
+ChildCountInfo info = counter.count(ProductOrder.class, id, ProductOrderItem.class);
+if (info.truncated()) {
+  response.setHeader("X-Total-Count-ProductOrderItem", String.valueOf(info.trueCount()));
+}
+```
+
+#### Level 3 (advanced) — pick a specific pipeline shape
+
+The router is the default. Callers with measured perf reasons can force a specific
+shape:
+
+- **Parent-first `$lookup`** — good default; single round trip, works for all AND-shaped
+  filters. `router.route(...)` picks this automatically for AND with split refs.
+  ```java
+  Aggregation pipeline = router.translateAsPipeline(ProductOrder.class, filter);
+  mongoOperations.aggregate(pipeline, "productOrder", ProductOrder.class);
+  ```
+- **Item-first `$group + $lookup`** — better when the parent set is large and the child
+  filter is very selective. Single split, no parent-only conjunct.
+  ```java
+  SplitAwareAggregation packaged =
+      router.translateAsItemFirstAggregation(ProductOrder.class, filter);
+  mongoOperations.aggregate(packaged.pipeline(), packaged.targetCollection(), ProductOrder.class);
+  ```
+- **`$unionWith`** — OR across parent + split (transaction-forbidden in Mongo; must
+  execute outside `@Transactional`).
+  ```java
+  SplitAwareAggregation packaged =
+      router.translateAsUnionWithAggregation(ProductOrder.class, filter);
+  mongoOperations.aggregate(packaged.pipeline(), packaged.targetCollection(), ProductOrder.class);
+  ```
+- **Custom inner-predicate grammar** — swap in your own
+  `MongoInnerPredicateTranslator` bean to support constructs beyond the default
+  `SimpleMongoInnerPredicateTranslator` (regex, existence, functions).
+- **Custom pipeline builder** — implement `MongoSplitPipelineBuilder` and register it
+  as a `@Bean` overriding `MongoSplitPipelineBuilder` — the router will use yours for
+  the parent-first shape.
+
+### 15) Master-detail split — PostgreSQL JSONB
+
+> **Module required**: `tmf630-toolkit-jsonb` (same module as base JSONB — split is
+> opt-in per entity). Enables mode 5 from the
+> [Backend modes](#backend-modes-supported) list.
+
+Structurally parallel to §14 (Mongo split). Where §14 uses a companion Mongo collection
+with `parentId` back-reference, §15 uses a companion Postgres table with `parent_id` FK,
+composite PK `(parent_id, item_id)`, and per-parent `item_order` index. Writes are
+transactional multi-table; reads assemble the merged view server-side.
+
+#### Setup
+
+1. The `tmf630-toolkit-jsonb` dependency (from §13) is enough — no separate module.
+2. Declare each split field on the domain POJO with `@Tmf630JsonbSplitCollection`:
+   ```java
+   public class ProductOrder {
+     private String id;
+     private String status;
+
+     @Tmf630JsonbSplitCollection(
+         childTable = "product_order_item",
+         childType = ProductOrderItem.class,
+         maxInlineItems = 100)
+     private List<ProductOrderItem> productOrderItem;
+     // ... other fields
+   }
+   ```
+3. The row entity (§13 step 2) is unchanged. The split field is stripped from the row's
+   `payload` at write time and lives in the companion table instead.
+
+#### Level 1 (easiest) — list endpoint via the split-aware translator
+
+```java
+@RestController
+@RequestMapping("/productOrder")
+class ProductOrderController {
+
+  private final Tmf630JsonbFilterExecutor executor;
+  private final JsonbSplitAwareFilterTranslator translator;
+
+  // ...constructor
+  @GetMapping
+  @Tmf630Response
+  Page<ProductOrder> list(
+      @RequestParam(required = false) String filter,
+      TmfSort sort,
+      Pageable pageable) {
+    JsonbClause where = translator.translate(ProductOrder.class, filter);
+    return executor.findAll(ProductOrder.class, where, sort, pageable, fieldType);
+  }
+}
+```
+
+Identical shape to §13. The difference is invisible at the call site — the translator
+handles both parent-only and split-touching filters uniformly. On the wire it emits
+`jsonb_path_exists(payload, ?)` for parent-only clauses, `EXISTS(SELECT 1 FROM
+product_order_item WHERE parent_id = product_order_row.id AND jsonb_path_exists(payload, ?))`
+for split correlations, and composes them with SQL `AND`/`OR` when the filter mixes both.
+
+#### Level 2 — sub-endpoint controller
+
+```java
+@RestController
+@RequestMapping("/productOrder/{parentId}/productOrderItem")
+public class ProductOrderItemSubController
+    extends Tmf630JsonbSubResourceController<ProductOrderItem, ProductOrder> {
+  public ProductOrderItemSubController(
+      JdbcClient jdbcClient, ObjectMapper objectMapper, JsonbEntityRegistry registry) {
+    super(jdbcClient, objectMapper, registry, ProductOrderItem.class, ProductOrder.class);
+  }
+}
+```
+
+Same shape as the Mongo sub-endpoint. `@Tmf630Response` is on the base handlers.
+
+#### Level 2 — writes via the write executor
+
+```java
+Tmf630JsonbWriteExecutor writeExecutor;   // auto-configured
+
+// POST / full-doc PATCH — atomic parent-UPSERT + child DELETE+INSERT under @Transactional.
+writeExecutor.saveWithSplits(productOrder);
+
+// JSON-Patch add /productOrderItem/-.
+writeExecutor.appendChild(ProductOrder.class, "PO-1", newItem);
+
+// JSON-Patch replace / remove / reindex — all present, same signatures as §14.
+writeExecutor.updateChild(ProductOrder.class, "PO-1", "i-42", modifiedItem);
+writeExecutor.removeChild(ProductOrder.class, "PO-1", "i-42", ProductOrderItem.class);
+writeExecutor.reindexChildren(ProductOrder.class, "PO-1", ProductOrderItem.class);
+
+// Diff-based full-doc PATCH — INSERT/UPDATE/DELETE only what changed.
+writeExecutor.saveWithSplitsReconciled(productOrder);
+```
+
+Atomicity: `@Transactional` wraps parent + all children in one Postgres transaction —
+FK integrity enforced by Postgres, cascade delete on parent removes the children too.
+
+#### Level 2 — truncation-signal header
+
+Same pattern as §14, JSONB variant:
+
+```java
+Tmf630JsonbSplitChildCounter counter;   // auto-configured
+
+ChildCountInfo info = counter.count(ProductOrder.class, id, ProductOrderItem.class);
+if (info.truncated()) {
+  response.setHeader("X-Total-Count-ProductOrderItem", String.valueOf(info.trueCount()));
+}
+```
+
+#### Level 3 (advanced) — hand-composed SQL fragments
+
+The JSONB translator returns `JsonbClause` values (SQL fragment + JDBC params). Compose
+directly for constructs the translator doesn't emit — tenant scoping, materialised-view
+lookups, custom scoring:
+
+```java
+JsonbClause where = translator.translate(ProductOrder.class, filter);
+JsonbClause tenant = JsonbClause.of("tenant_id = ?", currentTenantId());
+JsonbClause combined = where.and(tenant);
+executor.findAll(ProductOrder.class, combined, sort, pageable, fieldType);
+```
+
+The full `filter=` grammar (compound `&&`/`||`, array correlation, `length()`,
+positional index, regex, top-level OR) is available; the split-aware translator handles
+the routing to `EXISTS` subqueries where needed.
+
 ## Reference
 
 ### Module layout
@@ -1951,9 +2438,12 @@ compatibility with numeric-id consumers.
 | -------------------------------------------------- | ------------------------------------------------------------------------------------ |
 | `tmf630-toolkit-paging-sorting-core`               | Paging, sorting, field selection (no Boot dependency)                                |
 | `tmf630-toolkit-paging-sorting-autoconfigure`      | Spring Boot auto-configuration for paging/sorting                                    |
-| `tmf630-toolkit-attribute-filtering-core`          | Attribute filtering to QueryDSL `Predicate` (no Boot dependency)                     |
+| `tmf630-toolkit-attribute-filtering-core`          | Attribute filtering to QueryDSL `Predicate` (no Boot dependency). Also hosts the shared `TmfSplitFilterDecomposer` used by both split-collection modules. |
 | `tmf630-toolkit-attribute-filtering-autoconfigure` | Spring Boot auto-configuration for filtering                                         |
 | `tmf630-toolkit-mongo-aggregation`                 | **Optional.** Correlated-sort `Aggregation` executor for MongoDB-backed services     |
+| `tmf630-toolkit-jpa-correlated-sort`               | **Optional (3.0.0).** Simple-rich correlated-sort executor for JPA-backed services against JOIN-mapped collections (§12 / §10 in the capability matrix). |
+| `tmf630-toolkit-jsonb`                             | **Optional (3.0.0).** PostgreSQL-with-JSONB backend: full TMF-630 query contract against a Postgres `payload jsonb` column via native SQL/JSON path. Ships the `@Tmf630JsonbBacked` / `@Tmf630JsonbSplitCollection` annotations, the read executor + write executor + split-aware filter translator + sub-endpoint base class + split-child counter. See handbook §13 (base) and §15 (master-detail split). |
+| `tmf630-toolkit-mongo-split-collection`            | **Optional (3.0.0).** MongoDB master-detail split: `@Tmf630MongoSplitBacked` / `@Tmf630MongoSplitCollection` annotations, write executor, read merger, sub-endpoint base class, split-aware filter translator with three aggregation shapes (parent-first `$lookup`, item-first `$group+$lookup`, `$unionWith` for OR), and a router that picks the right shape per request. See handbook §14. |
 | `tmf630-toolkit-all`                               | Convenience artifact depending on both filtering autoconfigure modules               |
 
 The four core+autoconfigure modules are intentionally **DB-agnostic in production
