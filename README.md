@@ -78,6 +78,7 @@ master-detail split extension.
 | 13 | *Toolkit extension* — split-collection sub-endpoint controller | 🚫 | ✅ | ✅ |
 | 14 | *Toolkit extension* — top-level `filter=` OR across parent + split | 🚫 | ✅ `$unionWith` | ✅ SQL `OR` |
 | 15 | Part 4 §2.5 — versioned resource path form `/{id}:(version=X)` + latest-version resolver | ✅ | ✅ | ✅ |
+| 16 | Part 4 §2.6 — RBAC (role-based access control on versioned resources) | 🚫 out of scope — see [`opentmf/openid-rbac-security`](https://github.com/opentmf/openid-rbac-security), the sibling library from the same opentmf project family | 🚫 same | 🚫 same |
 
 Rows 12–14 (split-and-merge) are toolkit-specific extensions not covered by TMF-630 today.
 The URL contract exposed to clients stays TMF-630 conformant — the extension is entirely
@@ -2568,7 +2569,12 @@ Kept explicit — the toolkit is a query-side helper, not a full lifecycle frame
   executor.
 - **RBAC per §2.6** (admin sees all versions, others see latest) — access control is
   out of scope for a query-side toolkit. Wire it in your own security layer; the
-  resolver can be called after your access-check passes.
+  resolver can be called after your access-check passes. If you're looking for a
+  Spring Boot Bearer-token / OpenID Connect solution that matches the same
+  declarative-configuration style as this toolkit, the sibling library
+  [`opentmf/openid-rbac-security`](https://github.com/opentmf/openid-rbac-security)
+  ships route-level role gates via `application.yml` — pairs cleanly with §2.6
+  where different roles see different version subsets.
 
 ## Reference
 
