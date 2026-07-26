@@ -44,6 +44,7 @@ import org.springframework.transaction.annotation.Transactional;
 class Tmf630JsonbSplitCollectionIT {
 
   @Autowired private Tmf630JsonbFilterExecutor executor;
+  @Autowired private Tmf630JsonbWriteExecutor writeExecutor;
   @Autowired private SplitOrderRowRepository repository;
   @Autowired private JdbcClient jdbcClient;
   @Autowired private ObjectMapper objectMapper;
@@ -193,6 +194,150 @@ class Tmf630JsonbSplitCollectionIT {
             .query(Integer.class)
             .single();
     assertThat(childCountAfter).isZero();
+  }
+
+  @Test
+  @DisplayName(
+      "c.6 saveWithSplits: persists parent + children atomically, extracting split field")
+  void saveWithSplitsRoundTrip() {
+    SplitOrderDomain order = new SplitOrderDomain();
+    order.setId("W1");
+    order.setStatus("OPEN");
+    SplitOrderItem item1 = new SplitOrderItem();
+    item1.setId("i-1");
+    item1.setState("PENDING");
+    SplitOrderItem item2 = new SplitOrderItem();
+    item2.setId("i-2");
+    item2.setState("SHIPPED");
+    order.setItems(List.of(item1, item2));
+
+    writeExecutor.saveWithSplits(order);
+
+    // Parent payload should NOT contain items — extracted before persist.
+    String parentPayload =
+        jdbcClient
+            .sql("SELECT payload::text FROM split_order_row WHERE id = ?")
+            .param(1, "W1")
+            .query(String.class)
+            .single();
+    // Postgres formats JSONB textually with a space after the colon; assert on the
+    // key/value pair independently rather than the exact character sequence.
+    assertThat(parentPayload).contains("\"status\"").contains("\"OPEN\"").doesNotContain("\"items\"");
+
+    // Children should be in the child table with item_order set.
+    Integer childCount =
+        jdbcClient
+            .sql("SELECT COUNT(*) FROM split_order_item WHERE parent_id = ?")
+            .param(1, "W1")
+            .query(Integer.class)
+            .single();
+    assertThat(childCount).isEqualTo(2);
+
+    // Round-trip via the filter executor: should see the merged domain.
+    Page<SplitOrderDomain> page =
+        executor.findAll(
+            SplitOrderDomain.class,
+            JsonbClause.alwaysTrue(),
+            TmfSort.empty(),
+            Pageable.unpaged(),
+            field -> String.class);
+    assertThat(page.getContent()).hasSize(1);
+    SplitOrderDomain loaded = page.getContent().get(0);
+    assertThat(loaded.getStatus()).isEqualTo("OPEN");
+    assertThat(loaded.getItems()).extracting(SplitOrderItem::getId).containsExactly("i-1", "i-2");
+    assertThat(loaded.getItems())
+        .extracting(SplitOrderItem::getState)
+        .containsExactly("PENDING", "SHIPPED");
+  }
+
+  @Test
+  @DisplayName("c.6 saveWithSplits: re-save with fewer children full-replaces the child table")
+  void saveWithSplitsFullReplacesChildren() {
+    SplitOrderDomain first = new SplitOrderDomain();
+    first.setId("W2");
+    first.setStatus("OPEN");
+    first.setItems(List.of(item("a", "S1"), item("b", "S2"), item("c", "S3")));
+    writeExecutor.saveWithSplits(first);
+    assertThat(childCount("W2")).isEqualTo(3);
+
+    // Re-save with only 1 item.
+    SplitOrderDomain second = new SplitOrderDomain();
+    second.setId("W2");
+    second.setStatus("CLOSED");
+    second.setItems(List.of(item("z", "SZ")));
+    writeExecutor.saveWithSplits(second);
+
+    assertThat(childCount("W2")).isEqualTo(1);
+    String statusAfter =
+        jdbcClient
+            .sql("SELECT payload->>'status' FROM split_order_row WHERE id = ?")
+            .param(1, "W2")
+            .query(String.class)
+            .single();
+    assertThat(statusAfter).isEqualTo("CLOSED");
+  }
+
+  @Test
+  @DisplayName(
+      "c.6 saveWithSplits: children without an 'id' field get the positional index as id")
+  void saveWithSplitsAutoAssignsChildIds() {
+    SplitOrderDomain order = new SplitOrderDomain();
+    order.setId("W3");
+    order.setStatus("OPEN");
+    SplitOrderItem noId1 = new SplitOrderItem();
+    noId1.setState("A");
+    SplitOrderItem noId2 = new SplitOrderItem();
+    noId2.setState("B");
+    order.setItems(List.of(noId1, noId2));
+
+    writeExecutor.saveWithSplits(order);
+
+    List<String> childIds =
+        jdbcClient
+            .sql(
+                "SELECT item_id FROM split_order_item WHERE parent_id = ? ORDER BY item_order")
+            .param(1, "W3")
+            .query(String.class)
+            .list();
+    assertThat(childIds).containsExactly("0", "1");
+  }
+
+  @Test
+  @DisplayName("c.6 appendChild: inserts one child without touching parent or other children")
+  void appendChildAtEndOfCollection() {
+    SplitOrderDomain order = new SplitOrderDomain();
+    order.setId("W4");
+    order.setStatus("OPEN");
+    order.setItems(List.of(item("x", "X1"), item("y", "Y1")));
+    writeExecutor.saveWithSplits(order);
+    assertThat(childCount("W4")).isEqualTo(2);
+
+    SplitOrderItem newItem = item("z", "Z1");
+    writeExecutor.appendChild(SplitOrderDomain.class, "W4", newItem);
+
+    List<String> childIds =
+        jdbcClient
+            .sql(
+                "SELECT item_id FROM split_order_item WHERE parent_id = ? ORDER BY item_order")
+            .param(1, "W4")
+            .query(String.class)
+            .list();
+    assertThat(childIds).containsExactly("x", "y", "z");
+  }
+
+  private static SplitOrderItem item(String id, String state) {
+    SplitOrderItem item = new SplitOrderItem();
+    item.setId(id);
+    item.setState(state);
+    return item;
+  }
+
+  private Integer childCount(String parentId) {
+    return jdbcClient
+        .sql("SELECT COUNT(*) FROM split_order_item WHERE parent_id = ?")
+        .param(1, parentId)
+        .query(Integer.class)
+        .single();
   }
 
   private void seedParent(String id, String status) throws Exception {

@@ -6,6 +6,39 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 
 ### Added (PostgreSQL-with-JSONB split-and-merge — v3.0.0 Phase (c), incremental)
 
+- **`Tmf630JsonbWriteExecutor` — auto-splitting write hook** (Phase c.6, partial —
+  full-replace + append; per-item PATCH modify/remove in a follow-up cut).
+  Developer's POST/PATCH controllers now call `writeExecutor.saveWithSplits(domain)`
+  with a full domain instance; the toolkit extracts every
+  {@code @Tmf630JsonbSplitCollection}-annotated field, upserts the parent's
+  payload (without those fields) via Postgres `INSERT ... ON CONFLICT (id) DO
+  UPDATE`, and stores each split child as its own row — one atomic transaction
+  via {@code @Transactional}.
+
+  Write semantics for this first cut:
+  - **Parent**: Postgres UPSERT on `id` — works for both POST-new and
+    PATCH-full-doc (the TMF pattern where the client sends the merged document).
+  - **Children**: full replace — {@code DELETE ... WHERE parent_id = ?} then
+    {@code INSERT} each child with a positional `item_order`.
+  - **Child id fallback**: if a child object has no `id` property, the executor
+    fills in the item's positional index and injects it into the persisted JSON
+    so subsequent reads round-trip.
+  - **Ordering**: children processed AFTER the parent UPSERT so the FK on
+    `parent_id` sees the parent row when child INSERTs fire.
+
+  Also ships `appendChild(parentDomainType, parentId, childInstance)` — a
+  JSON-Patch `add /items/-` optimization that INSERTs one child with
+  {@code item_order = MAX + 1} without touching the parent row or existing
+  children. Requires the child to carry an explicit `id`.
+
+  Auto-wired via `Tmf630JsonbAutoConfiguration` alongside the other JSONB beans.
+
+  4 new IT scenarios via `Tmf630JsonbSplitCollectionIT`: canonical round-trip
+  (save then read back), re-save with fewer children (full-replace verified),
+  auto-assigned child ids from positional index, `appendChild` at end of an
+  existing collection. Total split-collection IT count now 9 (5 read + 4 write).
+  Full JSONB module test count: 137.
+
 - **`@Tmf630JsonbSplitCollection` annotation + read-merge** (Phases c.1 and c.4
   of V3 roadmap). First-class support for the productOrderItem-style pattern
   from `docs/JSONB_BACKEND_DESIGN.md` §3.4 — a domain-model collection field

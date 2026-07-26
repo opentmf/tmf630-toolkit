@@ -131,4 +131,11 @@ public class Tmf630JsonbAutoConfiguration {
       JsonbSortBuilder sortBuilder) {
     return new Tmf630JsonbFilterExecutor(jdbcClient, objectMapper, registry, sortBuilder);
   }
+
+  @Bean
+  @ConditionalOnMissingBean
+  public Tmf630JsonbWriteExecutor tmf630JsonbWriteExecutor(
+      JdbcClient jdbcClient, ObjectMapper objectMapper, JsonbEntityRegistry registry) {
+    return new Tmf630JsonbWriteExecutor(jdbcClient, objectMapper, registry);
+  }
 }
