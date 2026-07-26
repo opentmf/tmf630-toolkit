@@ -6,6 +6,41 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 
 ### Added (PostgreSQL-with-JSONB backend — v3.0.0 Phase (b), incremental)
 
+- **`JsonbPredicateFactory` — 24-operator translation table** (Phase b.2 of
+  V3 roadmap). Translates each `TmfOperator` value + field path + typed value
+  into a `JsonbClause` (SQL fragment + JDBC params) targeting a Postgres
+  JSONB payload column. Complete operator coverage per
+  `docs/JSONB_BACKEND_DESIGN.md` §5:
+  - `EQ` / `NE` — direct scalar comparison via `payload->>'field' = ?`
+  - `EQI` / `NEI` — `LOWER()` wrap on both sides
+  - `GT` / `GTE` / `LT` / `LTE` — type-aware cast per Java type
+    (`::bigint` for integers, `::numeric` for decimals, `::timestamptz` for
+    date-time, etc.)
+  - `BETWEEN` — casts both bounds
+  - `IN` / `NIN` — parameterised list with per-value cast
+  - `LIKE` / `LIKEI` / `CONTAINS` / `CONTAINSI` / `STARTS_WITH*` /
+    `ENDS_WITH*` — Postgres native `LIKE` / `ILIKE` (no `LOWER()` wrapping
+    needed thanks to `ILIKE`)
+  - `REGEX` / `REGEXI` — **Postgres native `~` / `~*` operators**, closing
+    the JPA regex-as-`LIKE` gap #11 for JSONB-backed services
+  - `IS_NULL` / `IS_NOT_NULL` — supports both `MISSING_ONLY` (default) and
+    `NULLISH` semantics (§5.1); NULLISH widens to include explicit JSON
+    `null` values on top-level keys; complement built as safe AND (Postgres's
+    `?` operator is definite so no trilean-UNKNOWN issue)
+
+  Supporting types:
+  - `JsonbClause` — composable SQL fragment + params with `and()` / `or()` /
+    `not()` combinators and `alwaysTrue()` / `alwaysFalse()` identities for
+    short-circuit folding
+  - `JsonbCast` — enum mapping Java types to Postgres cast expressions per §6
+  - `JsonbPathExtractor` — produces `payload->>'x'` (single-level) or
+    `payload#>>'{a,b,c}'` (nested) fragments; strict path-segment allowlist
+    prevents SQL injection through the JSONB path regardless of upstream
+    validation
+
+  40 unit tests across all four new classes. Query execution (wiring into
+  a Spring Data JPA fragment via `JdbcClient`) lands in b.5.
+
 - **New module `tmf630-toolkit-jsonb`** (Phase b.1 of V3 roadmap — first cut,
   scaffold + entity detection). Ships the load-bearing infrastructure the
   subsequent sub-milestones (b.2 – b.7) hang off:
