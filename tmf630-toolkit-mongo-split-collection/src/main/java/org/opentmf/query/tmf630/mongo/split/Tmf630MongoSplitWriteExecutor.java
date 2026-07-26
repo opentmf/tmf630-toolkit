@@ -228,7 +228,7 @@ public class Tmf630MongoSplitWriteExecutor {
    * the (parent, item) tuple does not exist.
    */
   @Transactional
-  public long updateChild(
+  public int updateChild(
       Class<?> parentType, String parentId, String itemId, Object updatedChild) {
     if (parentId == null) throw new IllegalArgumentException("parentId must not be null");
     if (itemId == null) throw new IllegalArgumentException("itemId must not be null");
@@ -243,7 +243,8 @@ public class Tmf630MongoSplitWriteExecutor {
                 .and(split.itemIdField())
                 .is(itemId));
     Update update = new Update().set(split.payloadField(), payload);
-    return mongoOperations.updateFirst(q, update, split.childCollection()).getModifiedCount();
+    // updateFirst modifies at most one document, so the long return safely narrows.
+    return (int) mongoOperations.updateFirst(q, update, split.childCollection()).getModifiedCount();
   }
 
   /**
@@ -256,7 +257,7 @@ public class Tmf630MongoSplitWriteExecutor {
    * <p>Returns {@code 1} on success, {@code 0} if the child does not exist.
    */
   @Transactional
-  public long removeChild(
+  public int removeChild(
       Class<?> parentType, String parentId, String itemId, Class<?> childType) {
     if (parentId == null) throw new IllegalArgumentException("parentId must not be null");
     if (itemId == null) throw new IllegalArgumentException("itemId must not be null");
@@ -267,7 +268,9 @@ public class Tmf630MongoSplitWriteExecutor {
                 .is(parentId)
                 .and(split.itemIdField())
                 .is(itemId));
-    return mongoOperations.remove(q, split.childCollection()).getDeletedCount();
+    // The (parentId, itemId) predicate matches at most one wrapper, so the long
+    // return safely narrows to int at this API boundary.
+    return (int) mongoOperations.remove(q, split.childCollection()).getDeletedCount();
   }
 
   /**

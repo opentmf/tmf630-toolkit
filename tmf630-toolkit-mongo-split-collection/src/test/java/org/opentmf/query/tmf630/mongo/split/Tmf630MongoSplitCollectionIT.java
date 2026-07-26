@@ -396,9 +396,9 @@ class Tmf630MongoSplitCollectionIT {
     writeExecutor.saveWithSplits(
         order("U1", "OPEN", List.of(item("a", "X"), item("b", "Y"), item("c", "Z"))));
 
-    long modified =
+    int modified =
         writeExecutor.updateChild(MongoSplitOrder.class, "U1", "b", item("b", "MODIFIED"));
-    assertThat(modified).isEqualTo(1L);
+    assertThat(modified).isEqualTo(1);
 
     List<org.bson.Document> after =
         mongoOperations
@@ -417,7 +417,7 @@ class Tmf630MongoSplitCollectionIT {
   @DisplayName("d.6 updateChild: returns 0 for non-existent (parent, item)")
   void updateChildMissingReturnsZero() {
     writeExecutor.saveWithSplits(order("U2", "OPEN", List.of(item("a", "X"))));
-    long modified =
+    int modified =
         writeExecutor.updateChild(MongoSplitOrder.class, "U2", "nope", item("nope", "V"));
     assertThat(modified).isZero();
   }
@@ -427,9 +427,9 @@ class Tmf630MongoSplitCollectionIT {
   void removeChildDeletesOne() {
     writeExecutor.saveWithSplits(
         order("D1", "OPEN", List.of(item("a", "X"), item("b", "Y"), item("c", "Z"))));
-    long removed =
+    int removed =
         writeExecutor.removeChild(MongoSplitOrder.class, "D1", "b", MongoSplitOrderItem.class);
-    assertThat(removed).isEqualTo(1L);
+    assertThat(removed).isEqualTo(1);
 
     List<String> remaining =
         mongoOperations
@@ -447,7 +447,7 @@ class Tmf630MongoSplitCollectionIT {
   @DisplayName("d.6 removeChild: returns 0 for non-existent (parent, item)")
   void removeChildMissingReturnsZero() {
     writeExecutor.saveWithSplits(order("D2", "OPEN", List.of(item("a", "X"))));
-    long removed =
+    int removed =
         writeExecutor.removeChild(MongoSplitOrder.class, "D2", "nope", MongoSplitOrderItem.class);
     assertThat(removed).isZero();
   }
