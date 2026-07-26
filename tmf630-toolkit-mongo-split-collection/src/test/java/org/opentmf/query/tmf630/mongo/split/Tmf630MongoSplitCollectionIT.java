@@ -324,6 +324,129 @@ class Tmf630MongoSplitCollectionIT {
     assertThat(loaded.getItems().get(99).getId()).isEqualTo("i-99");
   }
 
+  @Test
+  @DisplayName("d.6 updateChild: replaces one child's payload in place, preserves itemOrder")
+  void updateChildReplacesPayloadOnly() {
+    writeExecutor.saveWithSplits(
+        order("U1", "OPEN", List.of(item("a", "X"), item("b", "Y"), item("c", "Z"))));
+
+    long modified =
+        writeExecutor.updateChild(MongoSplitOrder.class, "U1", "b", item("b", "MODIFIED"));
+    assertThat(modified).isEqualTo(1L);
+
+    List<org.bson.Document> after =
+        mongoOperations
+            .getCollection("split_order_item")
+            .find(new org.bson.Document("parentId", "U1"))
+            .sort(new org.bson.Document("itemOrder", 1))
+            .into(new ArrayList<>());
+    assertThat(after).hasSize(3);
+    assertThat(after.get(1).get("itemId")).isEqualTo("b");
+    assertThat(after.get(1).get("itemOrder")).isEqualTo(1);
+    org.bson.Document bPayload = (org.bson.Document) after.get(1).get("payload");
+    assertThat(bPayload.getString("state")).isEqualTo("MODIFIED");
+  }
+
+  @Test
+  @DisplayName("d.6 updateChild: returns 0 for non-existent (parent, item)")
+  void updateChildMissingReturnsZero() {
+    writeExecutor.saveWithSplits(order("U2", "OPEN", List.of(item("a", "X"))));
+    long modified =
+        writeExecutor.updateChild(MongoSplitOrder.class, "U2", "nope", item("nope", "V"));
+    assertThat(modified).isZero();
+  }
+
+  @Test
+  @DisplayName("d.6 removeChild: deletes one child, leaves the rest alone")
+  void removeChildDeletesOne() {
+    writeExecutor.saveWithSplits(
+        order("D1", "OPEN", List.of(item("a", "X"), item("b", "Y"), item("c", "Z"))));
+    long removed =
+        writeExecutor.removeChild(MongoSplitOrder.class, "D1", "b", MongoSplitOrderItem.class);
+    assertThat(removed).isEqualTo(1L);
+
+    List<String> remaining =
+        mongoOperations
+            .getCollection("split_order_item")
+            .find(new org.bson.Document("parentId", "D1"))
+            .sort(new org.bson.Document("itemOrder", 1))
+            .into(new ArrayList<>())
+            .stream()
+            .map(d -> (String) d.get("itemId"))
+            .toList();
+    assertThat(remaining).containsExactly("a", "c");
+  }
+
+  @Test
+  @DisplayName("d.6 removeChild: returns 0 for non-existent (parent, item)")
+  void removeChildMissingReturnsZero() {
+    writeExecutor.saveWithSplits(order("D2", "OPEN", List.of(item("a", "X"))));
+    long removed =
+        writeExecutor.removeChild(MongoSplitOrder.class, "D2", "nope", MongoSplitOrderItem.class);
+    assertThat(removed).isZero();
+  }
+
+  @Test
+  @DisplayName("d.6 reindexChildren: compacts itemOrder to 0..N-1 after gaps")
+  void reindexChildrenCompactsOrder() {
+    writeExecutor.saveWithSplits(
+        order(
+            "R1",
+            "OPEN",
+            List.of(item("a", "X"), item("b", "Y"), item("c", "Z"), item("d", "W"))));
+    writeExecutor.removeChild(MongoSplitOrder.class, "R1", "b", MongoSplitOrderItem.class);
+    writeExecutor.removeChild(MongoSplitOrder.class, "R1", "c", MongoSplitOrderItem.class);
+
+    List<Integer> ordersBefore =
+        mongoOperations
+            .getCollection("split_order_item")
+            .find(new org.bson.Document("parentId", "R1"))
+            .sort(new org.bson.Document("itemOrder", 1))
+            .into(new ArrayList<>())
+            .stream()
+            .map(d -> (Integer) d.get("itemOrder"))
+            .toList();
+    assertThat(ordersBefore).containsExactly(0, 3);
+
+    writeExecutor.reindexChildren(MongoSplitOrder.class, "R1", MongoSplitOrderItem.class);
+
+    List<Integer> ordersAfter =
+        mongoOperations
+            .getCollection("split_order_item")
+            .find(new org.bson.Document("parentId", "R1"))
+            .sort(new org.bson.Document("itemOrder", 1))
+            .into(new ArrayList<>())
+            .stream()
+            .map(d -> (Integer) d.get("itemOrder"))
+            .toList();
+    assertThat(ordersAfter).containsExactly(0, 1);
+  }
+
+  @Test
+  @DisplayName(
+      "d.6 saveWithSplitsReconciled: adds new, updates changed, removes absent — final state matches saveWithSplits")
+  void reconciledSaveConvergesToSameFinalState() {
+    writeExecutor.saveWithSplits(
+        order("R2", "OPEN", List.of(item("a", "X"), item("b", "Y"), item("c", "Z"))));
+
+    // Inbound: modify b, drop c, add d. a unchanged.
+    MongoSplitOrder inbound =
+        order("R2", "OPEN", List.of(item("a", "X"), item("b", "MOD"), item("d", "NEW")));
+    writeExecutor.saveWithSplitsReconciled(inbound);
+
+    List<org.bson.Document> after =
+        mongoOperations
+            .getCollection("split_order_item")
+            .find(new org.bson.Document("parentId", "R2"))
+            .sort(new org.bson.Document("itemOrder", 1))
+            .into(new ArrayList<>());
+    assertThat(after)
+        .extracting(d -> (String) d.get("itemId"))
+        .containsExactly("a", "b", "d");
+    assertThat(((org.bson.Document) after.get(1).get("payload")).getString("state"))
+        .isEqualTo("MOD");
+  }
+
   // --- helpers ---
 
   private static MongoSplitOrder order(String id, String status, List<MongoSplitOrderItem> items) {

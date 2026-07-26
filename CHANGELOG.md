@@ -6,6 +6,27 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 
 ### Added (MongoDB split-and-merge — v3.0.0 Phase (d), MVP first cut)
 
+- **Phase (d.6) — per-item PATCH primitives + reconciling save for Mongo.** Rounds
+  out the write story beyond `saveWithSplits` + `appendChild`. Three new methods
+  on `Tmf630MongoSplitWriteExecutor` (parallel to c.6-full for JSONB):
+  - `updateChild(parentType, parentId, itemId, updatedChild)` — `$set`s the
+    wrapper doc's {@code payload} sub-document for one child; preserves
+    `itemOrder`. Returns the modified count (1 on success, 0 if not found).
+  - `removeChild(parentType, parentId, itemId, childType)` — deletes one wrapper
+    doc; does not renumber remaining children. Returns the deleted count.
+  - `reindexChildren(parentType, parentId, childType)` — compacts `itemOrder`
+    to `0..N-1` in current order. Housekeeping for after a series of removes.
+  - `saveWithSplitsReconciled(parent)` — same final state as `saveWithSplits`
+    but only touches wrapper docs that actually changed (insert new, update
+    changed payload/itemOrder, delete absent, leave unchanged alone). Avoids
+    the remove-all + insert-all churn on large parents where only a few
+    children moved.
+
+  Coverage: 6 new real-Mongo IT scenarios via `Tmf630MongoSplitCollectionIT`
+  (update in place, update-missing 0, remove one, remove-missing 0, reindex
+  after gaps, reconciled convergence across add/modify/drop). Module test
+  count: 42 → 48.
+
 - **`MongoSplitAwareFilterTranslator` — split-aware URL filter routing for Mongo**
   (Phase d.2, first cut). Given a JsonPath `filter=` expression that references a
   `@Tmf630MongoSplitCollection` field, resolves the parent set via a two-step
@@ -151,6 +172,33 @@ All notable changes to `tmf630-toolkit` are documented in this file.
   release.
 
 ### Added (PostgreSQL-with-JSONB split-and-merge — v3.0.0 Phase (c), incremental)
+
+- **Phase (c.6, full) — per-item PATCH primitives + reconciling save for JSONB.**
+  Closes out c.6's remaining scope. Three new methods on
+  `Tmf630JsonbWriteExecutor`:
+  - `updateChild(parentDomainType, parentId, itemId, updatedChild)` — `UPDATE`
+    the child row's payload in-place; preserves `item_order`. Returns the
+    affected-row count (1 on success, 0 if not found).
+  - `removeChild(parentDomainType, parentId, itemId, childType)` — `DELETE`
+    one child row; does not renumber remaining children. Returns the
+    affected-row count.
+  - `reindexChildren(parentDomainType, parentId, childType)` — reassigns
+    `item_order` to `0..N-1` in current order. Optional housekeeping after a
+    series of removes that left gaps.
+  - `saveWithSplitsReconciled(domain)` — same final state as `saveWithSplits`
+    but only touches rows that actually changed: `INSERT` new, `UPDATE`
+    changed payload/item_order, `DELETE` absent, leave unchanged alone.
+    Avoids the DELETE-all + INSERT-all churn on large parents.
+
+  Payload equality uses textual comparison first, falls back to structural
+  Jackson tree equality (whitespace/key-order tolerant) via the executor's
+  own `ObjectMapper` — same shape as the reader's other Jackson paths.
+
+  Coverage: 6 new real-Postgres IT scenarios via
+  `Tmf630JsonbSplitCollectionIT` (update in place preserves order,
+  update-missing 0, remove one, remove-missing 0, reindex compacts gaps,
+  reconciled convergence across add/modify/drop). Total JSONB module test
+  count: 158 → 164.
 
 - **`Tmf630JsonbSplitScaleIT` — SDWAN-scale parity IT** (Phase c.7, closing
   out Phase (c)). Seeds 500 split children per parent (the PIA-observed

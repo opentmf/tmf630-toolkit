@@ -400,6 +400,180 @@ class Tmf630JsonbSplitCollectionIT {
     assertThat(childIds).containsExactly("x", "y", "z");
   }
 
+  @Test
+  @DisplayName("c.6-full updateChild: replaces one child's payload in place, preserves order")
+  void updateChildReplacesPayloadOnly() {
+    SplitOrderDomain order = new SplitOrderDomain();
+    order.setId("U1");
+    order.setStatus("OPEN");
+    order.setItems(List.of(item("a", "X"), item("b", "Y"), item("c", "Z")));
+    writeExecutor.saveWithSplits(order);
+
+    SplitOrderItem updated = item("b", "MODIFIED");
+    int touched = writeExecutor.updateChild(SplitOrderDomain.class, "U1", "b", updated);
+    assertThat(touched).isEqualTo(1);
+
+    List<String> statesInOrder =
+        jdbcClient
+            .sql(
+                "SELECT payload->>'state' FROM split_order_item "
+                    + "WHERE parent_id = ? ORDER BY item_order")
+            .param(1, "U1")
+            .query(String.class)
+            .list();
+    assertThat(statesInOrder).containsExactly("X", "MODIFIED", "Z");
+  }
+
+  @Test
+  @DisplayName("c.6-full updateChild: returns 0 for a non-existent (parent, item)")
+  void updateChildMissingReturnsZero() {
+    SplitOrderDomain order = new SplitOrderDomain();
+    order.setId("U2");
+    order.setStatus("OPEN");
+    order.setItems(List.of(item("a", "X")));
+    writeExecutor.saveWithSplits(order);
+
+    int touched =
+        writeExecutor.updateChild(SplitOrderDomain.class, "U2", "nope", item("nope", "V"));
+    assertThat(touched).isZero();
+  }
+
+  @Test
+  @DisplayName("c.6-full removeChild: deletes one row, leaves others alone")
+  void removeChildDeletesOne() {
+    SplitOrderDomain order = new SplitOrderDomain();
+    order.setId("D1");
+    order.setStatus("OPEN");
+    order.setItems(List.of(item("a", "X"), item("b", "Y"), item("c", "Z")));
+    writeExecutor.saveWithSplits(order);
+    assertThat(childCount("D1")).isEqualTo(3);
+
+    int removed = writeExecutor.removeChild(SplitOrderDomain.class, "D1", "b", SplitOrderItem.class);
+    assertThat(removed).isEqualTo(1);
+    assertThat(childCount("D1")).isEqualTo(2);
+
+    List<String> remaining =
+        jdbcClient
+            .sql("SELECT item_id FROM split_order_item WHERE parent_id = ? ORDER BY item_order")
+            .param(1, "D1")
+            .query(String.class)
+            .list();
+    assertThat(remaining).containsExactly("a", "c");
+  }
+
+  @Test
+  @DisplayName("c.6-full removeChild: returns 0 for a non-existent (parent, item)")
+  void removeChildMissingReturnsZero() {
+    SplitOrderDomain order = new SplitOrderDomain();
+    order.setId("D2");
+    order.setStatus("OPEN");
+    order.setItems(List.of(item("a", "X")));
+    writeExecutor.saveWithSplits(order);
+
+    int removed = writeExecutor.removeChild(SplitOrderDomain.class, "D2", "nope", SplitOrderItem.class);
+    assertThat(removed).isZero();
+    assertThat(childCount("D2")).isEqualTo(1);
+  }
+
+  @Test
+  @DisplayName("c.6-full reindexChildren: compacts item_order to 0..N-1 after gaps")
+  void reindexChildrenCompactsOrder() {
+    SplitOrderDomain order = new SplitOrderDomain();
+    order.setId("R1");
+    order.setStatus("OPEN");
+    order.setItems(List.of(item("a", "X"), item("b", "Y"), item("c", "Z"), item("d", "W")));
+    writeExecutor.saveWithSplits(order);
+    // Delete two — leaves item_order gaps at 1 and 2.
+    writeExecutor.removeChild(SplitOrderDomain.class, "R1", "b", SplitOrderItem.class);
+    writeExecutor.removeChild(SplitOrderDomain.class, "R1", "c", SplitOrderItem.class);
+
+    List<Integer> ordersBefore =
+        jdbcClient
+            .sql("SELECT item_order FROM split_order_item WHERE parent_id = ? ORDER BY item_order")
+            .param(1, "R1")
+            .query(Integer.class)
+            .list();
+    assertThat(ordersBefore).containsExactly(0, 3);
+
+    writeExecutor.reindexChildren(SplitOrderDomain.class, "R1", SplitOrderItem.class);
+
+    List<Integer> ordersAfter =
+        jdbcClient
+            .sql("SELECT item_order FROM split_order_item WHERE parent_id = ? ORDER BY item_order")
+            .param(1, "R1")
+            .query(Integer.class)
+            .list();
+    assertThat(ordersAfter).containsExactly(0, 1);
+  }
+
+  @Test
+  @DisplayName(
+      "c.6-full saveWithSplitsReconciled: identical inbound produces zero payload UPDATEs")
+  void reconciledSaveNoOpForIdenticalInput() {
+    SplitOrderDomain order = new SplitOrderDomain();
+    order.setId("R2");
+    order.setStatus("OPEN");
+    order.setItems(List.of(item("a", "X"), item("b", "Y")));
+    writeExecutor.saveWithSplits(order);
+
+    // Snapshot payloads before the reconciled save.
+    List<String> before =
+        jdbcClient
+            .sql("SELECT payload::text FROM split_order_item WHERE parent_id = ? ORDER BY item_order")
+            .param(1, "R2")
+            .query(String.class)
+            .list();
+
+    // Re-save the identical instance via reconciler.
+    writeExecutor.saveWithSplitsReconciled(order);
+
+    List<String> after =
+        jdbcClient
+            .sql("SELECT payload::text FROM split_order_item WHERE parent_id = ? ORDER BY item_order")
+            .param(1, "R2")
+            .query(String.class)
+            .list();
+    assertThat(after).isEqualTo(before);
+    assertThat(childCount("R2")).isEqualTo(2);
+  }
+
+  @Test
+  @DisplayName(
+      "c.6-full saveWithSplitsReconciled: adds new, updates changed, removes absent — final state matches saveWithSplits")
+  void reconciledSaveConvergesToSameFinalState() {
+    SplitOrderDomain original = new SplitOrderDomain();
+    original.setId("R3");
+    original.setStatus("OPEN");
+    original.setItems(List.of(item("a", "X"), item("b", "Y"), item("c", "Z")));
+    writeExecutor.saveWithSplits(original);
+
+    // Inbound: modify b's state, drop c, add d. a is unchanged.
+    SplitOrderDomain inbound = new SplitOrderDomain();
+    inbound.setId("R3");
+    inbound.setStatus("OPEN");
+    inbound.setItems(List.of(item("a", "X"), item("b", "MOD"), item("d", "NEW")));
+    writeExecutor.saveWithSplitsReconciled(inbound);
+
+    List<String> ids =
+        jdbcClient
+            .sql("SELECT item_id FROM split_order_item WHERE parent_id = ? ORDER BY item_order")
+            .param(1, "R3")
+            .query(String.class)
+            .list();
+    assertThat(ids).containsExactly("a", "b", "d");
+
+    String bState =
+        jdbcClient
+            .sql(
+                "SELECT payload->>'state' FROM split_order_item "
+                    + "WHERE parent_id = ? AND item_id = ?")
+            .param(1, "R3")
+            .param(2, "b")
+            .query(String.class)
+            .single();
+    assertThat(bState).isEqualTo("MOD");
+  }
+
   private static SplitOrderItem item(String id, String state) {
     SplitOrderItem item = new SplitOrderItem();
     item.setId(id);

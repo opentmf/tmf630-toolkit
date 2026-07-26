@@ -2,15 +2,21 @@ package org.opentmf.query.tmf630.mongo.split;
 
 import java.lang.reflect.Field;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import org.bson.Document;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoOperations;
 import org.springframework.data.mongodb.core.convert.MongoConverter;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -210,4 +216,232 @@ public class Tmf630MongoSplitWriteExecutor {
   }
 
   private record SplitSnapshot(MongoSplitCollectionMetadata split, List<Object> children) {}
+
+  /**
+   * PATCH primitive — replaces the {@code payload} sub-document of one existing
+   * child in-place. Serves JSON-Patch operations of the form
+   * {@code replace /items/<itemId>/<subpath>} where the caller has already merged
+   * the sub-path change into the full child value. Does not touch
+   * {@code itemOrder} — position within the parent is preserved.
+   *
+   * <p>Returns the count of documents modified: {@code 1} on success, {@code 0} if
+   * the (parent, item) tuple does not exist.
+   */
+  @Transactional
+  public long updateChild(
+      Class<?> parentType, Object parentId, Object itemId, Object updatedChild) {
+    if (parentId == null) throw new IllegalArgumentException("parentId must not be null");
+    if (itemId == null) throw new IllegalArgumentException("itemId must not be null");
+    if (updatedChild == null) throw new IllegalArgumentException("updatedChild must not be null");
+    MongoSplitCollectionMetadata split = resolveSplit(parentType, updatedChild.getClass());
+    Document payload = new Document();
+    mongoOperations.getConverter().write(updatedChild, payload);
+    Query q =
+        new Query(
+            Criteria.where(split.parentIdField())
+                .is(parentId)
+                .and(split.itemIdField())
+                .is(itemId));
+    Update update = new Update().set(split.payloadField(), payload);
+    return mongoOperations.updateFirst(q, update, split.childCollection()).getModifiedCount();
+  }
+
+  /**
+   * PATCH primitive — deletes one child. Serves JSON-Patch operations of the form
+   * {@code remove /items/<itemId>}. Does not renumber remaining children's
+   * {@code itemOrder}; gaps are harmless (the read merge sorts by order, not
+   * position). If dense ordering matters, follow with
+   * {@link #reindexChildren(Class, Object, Class)}.
+   *
+   * <p>Returns {@code 1} on success, {@code 0} if the child does not exist.
+   */
+  @Transactional
+  public long removeChild(
+      Class<?> parentType, Object parentId, Object itemId, Class<?> childType) {
+    if (parentId == null) throw new IllegalArgumentException("parentId must not be null");
+    if (itemId == null) throw new IllegalArgumentException("itemId must not be null");
+    MongoSplitCollectionMetadata split = resolveSplit(parentType, childType);
+    Query q =
+        new Query(
+            Criteria.where(split.parentIdField())
+                .is(parentId)
+                .and(split.itemIdField())
+                .is(itemId));
+    return mongoOperations.remove(q, split.childCollection()).getDeletedCount();
+  }
+
+  /**
+   * Reindexes {@code itemOrder} to {@code 0, 1, 2, ...} for the given parent's
+   * children in the order returned by their current {@code itemOrder}. Optional
+   * housekeeping after a series of {@link #removeChild} calls that left gaps.
+   */
+  @Transactional
+  public void reindexChildren(Class<?> parentType, Object parentId, Class<?> childType) {
+    if (parentId == null) throw new IllegalArgumentException("parentId must not be null");
+    MongoSplitCollectionMetadata split = resolveSplit(parentType, childType);
+    Query q =
+        new Query(Criteria.where(split.parentIdField()).is(parentId))
+            .with(Sort.by(Sort.Order.asc(split.itemOrderField())));
+    List<Document> wrappers = mongoOperations.find(q, Document.class, split.childCollection());
+    int order = 0;
+    for (Document wrapper : wrappers) {
+      Object itemId = wrapper.get(split.itemIdField());
+      Query one =
+          new Query(
+              Criteria.where(split.parentIdField())
+                  .is(parentId)
+                  .and(split.itemIdField())
+                  .is(itemId));
+      mongoOperations.updateFirst(
+          one, new Update().set(split.itemOrderField(), order++), split.childCollection());
+    }
+  }
+
+  /**
+   * Reconciling save — same final state as {@link #saveWithSplits(Object)} but only
+   * touches documents that actually changed. For each split collection:
+   *
+   * <ul>
+   *   <li>children present in the inbound instance and absent in the DB → INSERT,
+   *   <li>children present in both with a different payload → UPDATE (payload +
+   *       itemOrder),
+   *   <li>children absent in the inbound instance but present in the DB → DELETE,
+   *   <li>children unchanged → left alone (no write, no change-stream event).
+   * </ul>
+   *
+   * <p>Use this instead of {@link #saveWithSplits(Object)} when the parent has many
+   * children and the client typically changes only a few per request — avoids the
+   * remove-all + insert-all churn.
+   */
+  @Transactional
+  public <T> T saveWithSplitsReconciled(T parent) {
+    MongoSplitEntityMetadata metadata =
+        registry
+            .forParentType(parent.getClass())
+            .orElseThrow(
+                () ->
+                    new IllegalStateException(
+                        "Type "
+                            + parent.getClass().getName()
+                            + " is not @Tmf630MongoSplitBacked"));
+    Object parentId = metadata.idOf(parent);
+    if (parentId == null) {
+      throw new IllegalStateException("Parent instance has null id");
+    }
+    List<SplitSnapshot> snapshots = new ArrayList<>();
+    for (MongoSplitCollectionMetadata split : metadata.splits()) {
+      List<Object> children = metadata.readSplitField(parent, split.fieldName());
+      snapshots.add(new SplitSnapshot(split, children));
+      metadata.setSplitField(parent, split.fieldName(), null);
+    }
+    try {
+      mongoOperations.save(parent, metadata.parentCollection());
+      for (SplitSnapshot snap : snapshots) {
+        reconcileSplitChildren(snap.split, parentId, snap.children);
+      }
+      return parent;
+    } finally {
+      for (SplitSnapshot snap : snapshots) {
+        metadata.setSplitField(parent, snap.split.fieldName(), snap.children);
+      }
+    }
+  }
+
+  private void reconcileSplitChildren(
+      MongoSplitCollectionMetadata split, Object parentId, List<Object> inbound) {
+    // Load existing (itemId → payload) for this parent.
+    Query all = new Query(Criteria.where(split.parentIdField()).is(parentId));
+    List<Document> existingDocs =
+        mongoOperations.find(all, Document.class, split.childCollection());
+    Map<Object, Document> existingByItemId = new HashMap<>();
+    for (Document doc : existingDocs) {
+      existingByItemId.put(doc.get(split.itemIdField()), doc);
+    }
+    MongoConverter converter = mongoOperations.getConverter();
+
+    Set<Object> seen = new HashSet<>();
+    int order = 0;
+    if (inbound != null) {
+      for (Object child : inbound) {
+        Document payload = new Document();
+        converter.write(child, payload);
+        Object itemId = extractChildId(child, payload, split);
+        if (itemId == null) itemId = "i-" + order;
+        seen.add(itemId);
+        Document existing = existingByItemId.get(itemId);
+        if (existing == null) {
+          insertChildWrapper(split, parentId, itemId, order, payload);
+        } else {
+          Document existingPayload = existing.get(split.payloadField(), Document.class);
+          if (existingPayload == null || !existingPayload.equals(payload)) {
+            Query one =
+                new Query(
+                    Criteria.where(split.parentIdField())
+                        .is(parentId)
+                        .and(split.itemIdField())
+                        .is(itemId));
+            mongoOperations.updateFirst(
+                one,
+                new Update().set(split.payloadField(), payload).set(split.itemOrderField(), order),
+                split.childCollection());
+          } else if (!Integer.valueOf(order).equals(existing.get(split.itemOrderField()))) {
+            Query one =
+                new Query(
+                    Criteria.where(split.parentIdField())
+                        .is(parentId)
+                        .and(split.itemIdField())
+                        .is(itemId));
+            mongoOperations.updateFirst(
+                one, new Update().set(split.itemOrderField(), order), split.childCollection());
+          }
+        }
+        order++;
+      }
+    }
+    // DELETE anything in DB but not in the inbound set.
+    for (Object stale : existingByItemId.keySet()) {
+      if (!seen.contains(stale)) {
+        Query one =
+            new Query(
+                Criteria.where(split.parentIdField())
+                    .is(parentId)
+                    .and(split.itemIdField())
+                    .is(stale));
+        mongoOperations.remove(one, split.childCollection());
+      }
+    }
+  }
+
+  private void insertChildWrapper(
+      MongoSplitCollectionMetadata split,
+      Object parentId,
+      Object itemId,
+      int order,
+      Document payload) {
+    Document wrapper = new Document();
+    wrapper.put(split.parentIdField(), parentId);
+    wrapper.put(split.itemIdField(), itemId);
+    wrapper.put(split.itemOrderField(), order);
+    wrapper.put(split.payloadField(), payload);
+    mongoOperations.insert(wrapper, split.childCollection());
+  }
+
+  private MongoSplitCollectionMetadata resolveSplit(Class<?> parentType, Class<?> childType) {
+    MongoSplitEntityMetadata metadata =
+        registry
+            .forParentType(parentType)
+            .orElseThrow(
+                () ->
+                    new IllegalStateException(
+                        "Type " + parentType.getName() + " is not @Tmf630MongoSplitBacked"));
+    MongoSplitCollectionMetadata split = metadata.splitByChildType(childType);
+    if (split == null) {
+      throw new IllegalStateException(
+          "No @Tmf630MongoSplitCollection on "
+              + parentType.getName()
+              + " for child type "
+              + childType.getName());
+    }
+    return split;
+  }
 }
