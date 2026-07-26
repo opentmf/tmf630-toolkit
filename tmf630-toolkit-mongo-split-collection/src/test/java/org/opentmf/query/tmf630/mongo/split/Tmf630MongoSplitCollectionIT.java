@@ -325,6 +325,72 @@ class Tmf630MongoSplitCollectionIT {
   }
 
   @Test
+  @DisplayName(
+      "d.3+d.4 translateAsPipeline: single-round-trip $lookup pipeline returns matching parents")
+  void pipelineRoutesToLookupAndReturnsMatchingParents() {
+    writeExecutor.saveWithSplits(
+        order("P-A", "OPEN", List.of(item("a1", "SHIPPED"), item("a2", "SHIPPED"))));
+    writeExecutor.saveWithSplits(
+        order("P-B", "OPEN", List.of(item("b1", "PENDING"), item("b2", "SHIPPED"))));
+    writeExecutor.saveWithSplits(
+        order("P-C", "OPEN", List.of(item("c1", "PENDING"))));
+
+    org.springframework.data.mongodb.core.aggregation.Aggregation pipeline =
+        splitAwareFilter.translateAsPipeline(
+            MongoSplitOrder.class, "$[?(@.items[?(@.state == 'PENDING')])]");
+    assertThat(pipeline).isNotNull();
+
+    List<MongoSplitOrder> matched =
+        mongoOperations.aggregate(pipeline, "split_order", MongoSplitOrder.class).getMappedResults();
+    assertThat(matched)
+        .extracting(MongoSplitOrder::getId)
+        .containsExactlyInAnyOrder("P-B", "P-C");
+  }
+
+  @Test
+  @DisplayName(
+      "d.3+d.4 translateAsPipeline: same-element correlation semantics preserved via inner pipeline $match")
+  void pipelineSameElementSemantics() {
+    // Only P-Y has a single item satisfying both PENDING and priority > 5.
+    writeExecutor.saveWithSplits(
+        order("P-X", "OPEN", List.of(itemP("x1", "PENDING", 3), itemP("x2", "SHIPPED", 8))));
+    writeExecutor.saveWithSplits(
+        order("P-Y", "OPEN", List.of(itemP("y1", "PENDING", 9))));
+
+    org.springframework.data.mongodb.core.aggregation.Aggregation pipeline =
+        splitAwareFilter.translateAsPipeline(
+            MongoSplitOrder.class,
+            "$[?(@.items[?(@.state == 'PENDING' && @.priority > 5)])]");
+    List<MongoSplitOrder> matched =
+        mongoOperations.aggregate(pipeline, "split_order", MongoSplitOrder.class).getMappedResults();
+    assertThat(matched).extracting(MongoSplitOrder::getId).containsExactly("P-Y");
+  }
+
+  @Test
+  @DisplayName(
+      "d.3+d.4 translateAsPipeline: no matching child produces an empty result (not an error)")
+  void pipelineNoMatchProducesEmpty() {
+    writeExecutor.saveWithSplits(
+        order("P-Z", "OPEN", List.of(item("z1", "SHIPPED"))));
+    org.springframework.data.mongodb.core.aggregation.Aggregation pipeline =
+        splitAwareFilter.translateAsPipeline(
+            MongoSplitOrder.class, "$[?(@.items[?(@.state == 'IMPOSSIBLE')])]");
+    List<MongoSplitOrder> matched =
+        mongoOperations.aggregate(pipeline, "split_order", MongoSplitOrder.class).getMappedResults();
+    assertThat(matched).isEmpty();
+  }
+
+  @Test
+  @DisplayName(
+      "d.3+d.4 translateAsPipeline: parent-only filter returns null (caller uses normal path)")
+  void pipelineParentOnlyReturnsNull() {
+    org.springframework.data.mongodb.core.aggregation.Aggregation pipeline =
+        splitAwareFilter.translateAsPipeline(
+            MongoSplitOrder.class, "$[?(@.status == 'OPEN')]");
+    assertThat(pipeline).isNull();
+  }
+
+  @Test
   @DisplayName("d.6 updateChild: replaces one child's payload in place, preserves itemOrder")
   void updateChildReplacesPayloadOnly() {
     writeExecutor.saveWithSplits(

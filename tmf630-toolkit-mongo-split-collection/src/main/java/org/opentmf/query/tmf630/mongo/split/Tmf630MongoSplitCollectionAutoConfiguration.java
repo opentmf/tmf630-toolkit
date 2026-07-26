@@ -90,11 +90,19 @@ public class Tmf630MongoSplitCollectionAutoConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
+  public MongoSplitPipelineBuilder tmf630MongoSplitPipelineBuilder(
+      MongoInnerPredicateTranslator innerPredicateTranslator) {
+    return new ParentFirstLookupPipelineBuilder(innerPredicateTranslator);
+  }
+
+  @Bean
+  @ConditionalOnMissingBean
   public MongoSplitAwareFilterTranslator tmf630MongoSplitAwareFilterTranslator(
       MongoSplitEntityRegistry registry,
       MongoOperations mongoOperations,
-      MongoInnerPredicateTranslator innerPredicateTranslator) {
+      MongoInnerPredicateTranslator innerPredicateTranslator,
+      MongoSplitPipelineBuilder pipelineBuilder) {
     return new MongoSplitAwareFilterTranslator(
-        registry, mongoOperations, innerPredicateTranslator);
+        registry, mongoOperations, innerPredicateTranslator, pipelineBuilder);
   }
 }

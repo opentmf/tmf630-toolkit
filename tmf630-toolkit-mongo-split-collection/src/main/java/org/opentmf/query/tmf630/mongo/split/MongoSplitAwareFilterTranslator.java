@@ -7,6 +7,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.opentmf.query.tmf630.filtering.TmfFilteringException;
 import org.springframework.data.mongodb.core.MongoOperations;
+import org.springframework.data.mongodb.core.aggregation.Aggregation;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 
@@ -56,14 +57,28 @@ public class MongoSplitAwareFilterTranslator {
   private final MongoSplitEntityRegistry registry;
   private final MongoOperations mongoOperations;
   private final MongoInnerPredicateTranslator innerTranslator;
+  private final MongoSplitPipelineBuilder pipelineBuilder;
 
   public MongoSplitAwareFilterTranslator(
       MongoSplitEntityRegistry registry,
       MongoOperations mongoOperations,
       MongoInnerPredicateTranslator innerTranslator) {
+    this(
+        registry,
+        mongoOperations,
+        innerTranslator,
+        new ParentFirstLookupPipelineBuilder(innerTranslator));
+  }
+
+  public MongoSplitAwareFilterTranslator(
+      MongoSplitEntityRegistry registry,
+      MongoOperations mongoOperations,
+      MongoInnerPredicateTranslator innerTranslator,
+      MongoSplitPipelineBuilder pipelineBuilder) {
     this.registry = registry;
     this.mongoOperations = mongoOperations;
     this.innerTranslator = innerTranslator;
+    this.pipelineBuilder = pipelineBuilder;
   }
 
   /**
@@ -108,6 +123,48 @@ public class MongoSplitAwareFilterTranslator {
                 + "'$[?(@." + split.fieldName() + "[?(...)])]'. "
                 + "Split the request into a parent filter plus a sub-endpoint call, "
                 + "or restructure the URL.");
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Phase (d.3 + d.4) primary entry point — returns a single-round-trip
+   * {@link Aggregation} pipeline on the parent collection that yields exactly the
+   * parents matching the split-side predicate, or {@code null} if the filter has no
+   * split reference (caller falls back to its normal filter path).
+   *
+   * <p>Prefer this over {@link #translate(Class, String)} when your read path can
+   * accept an aggregation instead of a {@link Criteria} — one round-trip vs. two,
+   * and never risks a {@code $in} list overflowing at pathological cardinalities.
+   */
+  public Aggregation translateAsPipeline(Class<?> parentType, String filterExpression) {
+    if (filterExpression == null || filterExpression.isBlank()) return null;
+    MongoSplitEntityMetadata metadata =
+        registry
+            .forParentType(parentType)
+            .orElseThrow(
+                () ->
+                    new TmfFilteringException(
+                        "No @Tmf630MongoSplitBacked mapping registered for "
+                            + parentType.getName()));
+    if (metadata.splits().isEmpty()) return null;
+
+    for (MongoSplitCollectionMetadata split : metadata.splits()) {
+      Matcher matcher = topLevelCorrelationPattern(split.fieldName()).matcher(filterExpression);
+      if (matcher.matches()) {
+        return pipelineBuilder.build(split, matcher.group(1));
+      }
+    }
+    for (MongoSplitCollectionMetadata split : metadata.splits()) {
+      if (filterExpression.contains("@." + split.fieldName() + "[")) {
+        throw new TmfFilteringException(
+            "Filter '"
+                + filterExpression
+                + "' references split field '"
+                + split.fieldName()
+                + "' outside the supported top-level array-correlation shape "
+                + "'$[?(@." + split.fieldName() + "[?(...)])]'.");
       }
     }
     return null;

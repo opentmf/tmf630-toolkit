@@ -6,6 +6,54 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 
 ### Added (MongoDB split-and-merge — v3.0.0 Phase (d), MVP first cut)
 
+- **Phase (d.3 + d.4) — parent-first `$lookup` aggregation with inner pipeline
+  emission** (single-round-trip alternative to d.2's two-query approach). Two new
+  types:
+  - `MongoSplitPipelineBuilder` — strategy interface for turning a split-side
+    filter into a Mongo `Aggregation` on the parent collection. Three shapes
+    from the roadmap map to implementations; this cut ships one.
+  - `ParentFirstLookupPipelineBuilder` — default `MongoSplitPipelineBuilder`
+    for this MVP. Emits an extended `$lookup` whose inner pipeline enforces the
+    parent-child correlation via `$expr: { $eq: ["$<parentIdField>", "$$pId"] }`
+    plus the translated child-side criteria, terminated by `$limit: 1` so the
+    join short-circuits at the first hit per parent. Post-stages retain only
+    parents whose helper array is non-empty and strip the helper field from the
+    projection.
+
+  New API on `MongoSplitAwareFilterTranslator`:
+  - `translateAsPipeline(parentType, filterExpression)` — returns the
+    `Aggregation` (or `null` for parent-only filters, matching the existing
+    `translate(...)` fall-back contract). Callers execute via
+    `mongoOperations.aggregate(pipeline, "<parentCollection>",
+    <ParentType>.class).getMappedResults()`.
+
+  Compared to today's d.2 codepath:
+  - **One round trip vs. two** — no distinct query then `$in`.
+  - **No `$in` list to overflow** at pathological cardinalities (100k+ matching
+    parents no longer risks BSON size limits or query-planner surprises).
+  - **Same-element correlation preserved** — compound child predicates
+    (`state == 'PENDING' && priority > 5`) evaluate on a single child doc
+    inside the `$lookup` inner pipeline.
+
+  The existing two-round-trip `translate(...)` API is retained: consumers with
+  a QueryDSL-driven parent repository can still use it; new integrations
+  should prefer `translateAsPipeline(...)`.
+
+  Deferred to later d.x cuts under the same 3.0.0-SNAPSHOT:
+  - Item-first (`$match` on children → `$group parentId` → `$lookup` back to
+    parent → `$replaceRoot`) — better when the parent set is large and the
+    child filter is very selective.
+  - `$unionWith` fallback shape — for pipelines that must compose across
+    collections outside a transaction.
+
+  Coverage: 6 unit tests on `ParentFirstLookupPipelineBuilder` (stage order,
+  `$lookup` targets and let, inner pipeline shape with `$expr`/inner match/
+  `$limit`, retention `$match` on non-empty helper array, `$project` strip of
+  helper, compound `&&` inner predicate) + 4 real-Mongo IT scenarios via
+  `Tmf630MongoSplitCollectionIT` (pipeline routes and returns matching parents,
+  same-element correlation with two-condition predicate, no-match empty result,
+  parent-only filter returns `null`). Module test count: 48 → 58.
+
 - **Phase (d.6) — per-item PATCH primitives + reconciling save for Mongo.** Rounds
   out the write story beyond `saveWithSplits` + `appendChild`. Three new methods
   on `Tmf630MongoSplitWriteExecutor` (parallel to c.6-full for JSONB):
