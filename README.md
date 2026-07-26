@@ -254,6 +254,30 @@ JPA-only and other non-Mongo services should **not** add this dependency. The ba
 toolkit's plain `Sort` resolver continues to 400 on correlated terms, which is the
 correct behaviour for a JPA backend.
 
+#### Spring Boot — JPA-backed services adding correlated sort (3.0.0)
+
+JPA-backed services that need correlated sort against a JOIN-mapped
+`@OneToMany` / `@ManyToMany` / `@ElementCollection` (canonically the TMF
+characteristics pattern `characteristics[name=X].value`) add the optional
+JPA aggregation module:
+
+```xml
+<dependency>
+  <groupId>org.opentmf.query</groupId>
+  <artifactId>tmf630-toolkit-jpa-correlated-sort</artifactId>
+</dependency>
+```
+
+Adding this dependency:
+- Requires `spring-data-jpa` + `querydsl-jpa` (usually already present in
+  a JPA service).
+- Auto-registers a `Tmf630JpaCorrelatedSortExecutor` bean when an
+  `EntityManager` bean is on the context.
+- Scope in 3.0.0 first cut: simple-rich single-hop
+  `sort=field[key=value].leaf`. JsonPath sort grammar, positional `[N]`,
+  wildcards `[*]`, aggregators, and coercions are rejected with clear
+  messages naming the escape hatch (JSONB backend for the full grammar).
+
 ### Plain Spring (manual wiring)
 
 ```xml

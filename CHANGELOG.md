@@ -6,6 +6,42 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 
 ### Added (JPA gap closure — v3.0.0 Phase (a))
 
+- **New module `tmf630-toolkit-jpa-correlated-sort`** (Phase a.4 of V3 roadmap,
+  first cut). Adds `Tmf630JpaCorrelatedSortExecutor` — an entry-point bean that
+  compiles `TmfSort` terms into a JPQL query executed via `EntityManager`, honoring
+  correlated sub-queries for the simple-rich grammar. Auto-wired when the
+  toolkit sees an `EntityManager` bean; developer usage mirrors the
+  Mongo-aggregation module (`executor.findAll(rootType, predicate, tmfSort, pageable)`).
+
+  Supported sort grammar in this first cut:
+  - Plain dotted terms (`sort=name,-createdAt`) — rendered as standard
+    `OrderSpecifier`s over the parent path.
+  - Simple-rich single-hop `hopField[matchKey=matchValue].leafField`
+    (e.g. `sort=characteristics[name=price].value`) — rendered as a
+    correlated scalar sub-query via `JPAExpressions`:
+    ```
+    ORDER BY (SELECT alias.value FROM parent.characteristics alias
+              WHERE alias.name = 'price') ASC|DESC
+    ```
+    Same-element semantics guaranteed by construction (single sub-query, single
+    aliased subroot). Works only on `@OneToMany` / `@ManyToMany` /
+    `@ElementCollection` associations.
+
+  Explicit **rejection** with actionable messages for grammar that is out of
+  scope for the JPA path (see V3_ROADMAP.md §2 for the scope decision):
+  - JsonPath sort grammar (`sort=$.arr[?(...)].leaf`) — deferred; on JSONB
+    services (Phase b) it maps natively via `jsonb_path_query_first`.
+  - Positional `[N]` — not portable across JPA dialects without
+    `@OrderColumn` assumptions the toolkit cannot make.
+  - Wildcard `[*]` — same reason.
+  - Aggregators `min()` / `max()` — deferred.
+  - Coercions `num()` / `str()` / `date()` — dialect-specific SQL that
+    doesn't compile portably.
+
+  The `opentmf.tmf630.paging.nulls-last` property from Phase (a.1) is honored
+  by the correlated-sort executor: when true, every emitted `OrderSpecifier` is
+  decorated with `.nullsLast()`.
+
 - **Array correlation in `filter=` JSONPath now works on JPA for JOIN-mapped
   collections** (Phase a.3 of V3 roadmap). Pre-3.0.0, a URL like
   `?filter=$[?(@.externalReference[?(@.name == 'X' && @.id == 'Y')])]` returned
