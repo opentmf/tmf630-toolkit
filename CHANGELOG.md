@@ -4,6 +4,104 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 
 ## [3.0.0] - 2026-07-26
 
+### Added (MongoDB split-and-merge — v3.0.0 Phase (d), MVP first cut)
+
+- **New module `tmf630-toolkit-mongo-split-collection`** — the Mongo mirror of
+  `tmf630-toolkit-jsonb`'s split-and-merge feature set. Enables an
+  annotation-driven "parent doc with a large child collection lifted into a
+  companion collection" pattern for MongoDB, so services that own PIA-scale
+  entities (SDWAN service orders with hundreds of order items per parent) can
+  express the split at the domain-model level instead of hand-rolling the
+  storage sharding, back-reference bookkeeping, and sub-endpoint controllers.
+
+  Two new annotations:
+
+  - `@Tmf630MongoSplitBacked` — type-level opt-in on the parent domain
+    document. Documents without it are ignored by the split module and use
+    Spring Data Mongo's default embedding behavior. Mirrors
+    `@Tmf630JsonbBacked`.
+  - `@Tmf630MongoSplitCollection(childCollection=..., childType=...,
+    maxInlineItems=100, parentIdField=..., itemIdField=..., itemOrderField=...,
+    payloadField=...)` — field-level annotation on a collection-typed field of
+    the parent, declaring how to route it into a companion Mongo collection.
+    URL grammar and response contract mirror
+    `@Tmf630JsonbSplitCollection`; only the storage engine and index
+    conventions differ.
+
+  Runtime components:
+
+  - `MongoSplitEntityRegistry` — one-shot boot-time scan of the Mongo mapping
+    context; picks up every `@Tmf630MongoSplitBacked` type and caches its
+    resolved metadata (collection name from `@Document`, id field, per-split
+    child-collection settings). Lock-free `ConcurrentHashMap` reads
+    thereafter.
+  - `Tmf630MongoSplitWriteExecutor.saveWithSplits(parent)` — POST/PATCH-full-
+    document write: strips the split fields off the parent, upserts the slim
+    parent into its collection, wipes the parent's existing children in each
+    split collection, and inserts the new children as wrapper documents
+    `{_id: ObjectId, parentId, itemId, itemOrder, payload: <child BSON>}`.
+    The parent instance is restored to its original shape after persistence
+    so callers can keep using it. `@Transactional` — atomicity requires a
+    replica set with a `MongoTransactionManager` bean; standalone Mongo runs
+    non-atomically (documented caveat).
+  - `Tmf630MongoSplitWriteExecutor.appendChild(parentType, parentId, child)`
+    — optimised path for the JSON-Patch `add /items/-` case. Assigns
+    `itemOrder` from the current per-parent child count.
+  - `Tmf630MongoSplitReadMerger.merge(parent)` — read-side counterpart:
+    fetches up to `maxInlineItems` children per split collection ordered by
+    `itemOrder`, deserialises them from wrapper docs, and populates the
+    parent's split fields. No-op on untracked types so it's safe to call in
+    generic paths.
+  - `Tmf630MongoSubResourceController<C, P>` — abstract base for
+    sub-endpoints; developer declares a thin `@RestController` subclass with
+    concrete `C`/`P` types and gets paginated `GET /` and single-item
+    `GET /{itemId}` handlers for free. Mirrors the JSONB module's
+    `Tmf630JsonbSubResourceController` exactly at the URL contract level.
+
+  **Wrapper-document design decision.** The child collection stores each
+  child as `{_id: ObjectId, parentId, itemId, itemOrder, payload: <child
+  BSON>}` rather than spreading the child's fields at the top level. This
+  sidesteps Spring Data Mongo's mandatory `id ↔ _id` field mapping — the
+  child POJO's own `id` field is preserved verbatim inside `payload`, while
+  the wrapper's `_id` is a fresh Mongo-managed ObjectId. Cross-parent
+  `itemId` collisions are impossible-by-construction, and no
+  `@Field`/`@Id`/`@Document` annotation is required on the child POJO. The
+  shape mirrors the JSONB module's row-with-payload design, so the two
+  backends can be reasoned about uniformly.
+
+  Auto-config: `Tmf630MongoSplitCollectionAutoConfiguration`, ordered
+  `afterName` `MongoAutoConfiguration` and `MongoDataAutoConfiguration` so
+  `MongoOperations`/`MongoMappingContext` are available when our bean
+  definitions register. Depends only on `spring-data-mongodb` — no coupling
+  to any specific Mongo driver version or app framework beyond what
+  spring-data-mongodb itself requires.
+
+  Coverage: 10 real-Mongo IT scenarios via `Tmf630MongoSplitCollectionIT`
+  (registry discovery, save round-trip, resave full-replace, appendChild
+  positional order, auto-assigned child ids for identity-less children,
+  sub-endpoint paged listing, sub-endpoint single-item lookup + 404, empty
+  child list, no-op merge on untracked type, cap-at-maxInlineItems merge)
+  plus 20 unit tests on the registry, metadata helpers, and read merger
+  with mocked `MongoOperations`. Total module test count: 30.
+
+  Explicit out-of-scope for this MVP first-cut (deferred to later d.x
+  sub-milestones — c-series pattern):
+
+  - **d.2** — split-aware URL filter routing. The c.2/c.3 predicate splitter
+    is currently Postgres-specific; generalising it and porting to a Mongo
+    aggregation predicate is the largest remaining chunk.
+  - **d.3** — three-shape aggregation router (item-first
+    `$match`→`$group`→`$lookup`; parent-first `$lookup` with inner pipeline;
+    `$unionWith` fallback outside a transaction). PIA's
+    `MongoAggregationBuilderForProductOrder` remains the reference.
+  - **d.4** — `$lookup` inner-pipeline emission for cross-collection joins
+    that include per-parent `$sort` + `$limit` inside the join.
+  - **d.6** — PATCH ops beyond `saveWithSplits`: per-item `replace`,
+    `remove`, and reconciling-diff on the child collection.
+
+  Follow-up cuts will land these under the same v3.0.0 SNAPSHOT before
+  release.
+
 ### Added (PostgreSQL-with-JSONB split-and-merge — v3.0.0 Phase (c), incremental)
 
 - **`Tmf630JsonbSplitScaleIT` — SDWAN-scale parity IT** (Phase c.7, closing

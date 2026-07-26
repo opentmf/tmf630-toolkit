@@ -59,6 +59,7 @@
     <module>tmf630-toolkit-mongo-aggregation</module>
     <module>tmf630-toolkit-jpa-correlated-sort</module>
     <module>tmf630-toolkit-jsonb</module>
+    <module>tmf630-toolkit-mongo-split-collection</module>
     <module>tmf630-toolkit-all</module>
   </modules>
 
