@@ -35,7 +35,9 @@ public class Tmf630WebMvcConfigurer implements WebMvcConfigurer {
   public void addArgumentResolvers(@NonNull List<HandlerMethodArgumentResolver> resolvers) {
     TmfSortParser sortParser =
         new TmfSortParser(
-            properties.getSortAllowlist(), properties.isAllowNestedSortProperties());
+            properties.getSortAllowlist(),
+            properties.isAllowNestedSortProperties(),
+            properties.isNullsLast());
     resolvers.add(0, new TmfSortHandlerMethodArgumentResolver(sortParser));
     resolvers.add(1, new TmfRichSortHandlerMethodArgumentResolver(sortParser));
     // Resolution order matters: TmfRichPageableHandlerMethodArgumentResolver claims

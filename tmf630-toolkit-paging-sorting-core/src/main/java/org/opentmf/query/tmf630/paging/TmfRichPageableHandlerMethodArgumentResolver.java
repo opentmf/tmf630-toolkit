@@ -27,7 +27,10 @@ public class TmfRichPageableHandlerMethodArgumentResolver
   public TmfRichPageableHandlerMethodArgumentResolver(Tmf630PagingSettings settings) {
     this.settings = settings;
     this.sortParser =
-        new TmfSortParser(settings.sortAllowlist(), settings.allowNestedSortProperties());
+        new TmfSortParser(
+            settings.sortAllowlist(),
+            settings.allowNestedSortProperties(),
+            settings.nullsLast());
   }
 
   @Override
@@ -48,7 +51,10 @@ public class TmfRichPageableHandlerMethodArgumentResolver
     List<String> sortParams = sortArray == null ? List.of() : List.of(sortArray);
 
     TmfSort tmfSort = sortParser.parseRich(sortParams);
-    Sort plainSort = tmfSort.requiresAggregation() ? Sort.unsorted() : tmfSort.toPlainSort();
+    Sort plainSort =
+        tmfSort.requiresAggregation()
+            ? Sort.unsorted()
+            : tmfSort.toPlainSort(settings.nullsLast());
 
     Pageable pageable;
     if (StringUtils.hasText(offsetRaw) || StringUtils.hasText(limitRaw)) {

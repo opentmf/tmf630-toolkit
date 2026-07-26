@@ -1947,6 +1947,7 @@ MongoDB and wants the correlated-sort features (JSONPath / simple-rich grammar w
 | `opentmf.tmf630.paging.strict-mode`                         | `true`  | If `true`, out-of-range offsets 416; if `false`, they return an empty page |
 | `opentmf.tmf630.paging.allow-nested-sort-properties`        | `false` | Whether `sort=parent.child` is allowed                                  |
 | `opentmf.tmf630.paging.sort-allowlist`                      | empty   | List of allowed sort field names; empty means unrestricted              |
+| `opentmf.tmf630.paging.nulls-last`                          | `false` | If `true`, every plain sort order is decorated with `Sort.Order.nullsLast()` — null-valued rows sort last regardless of ASC/DESC direction. Cross-backend parity with Mongo's 2.1.1 nulls-last handling. Hibernate emits explicit `NULLS LAST` SQL only when it differs from the dialect default (elided on Postgres ASC, emitted on Postgres DESC); non-native dialects fall back to a synthetic `CASE WHEN` sort key (index-scan cost implications on large tables) |
 
 #### Common filtering properties
 

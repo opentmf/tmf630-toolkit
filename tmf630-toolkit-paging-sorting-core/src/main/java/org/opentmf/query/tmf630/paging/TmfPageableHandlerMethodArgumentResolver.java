@@ -28,7 +28,9 @@ public class TmfPageableHandlerMethodArgumentResolver extends PageableHandlerMet
     this.settings = settings;
     this.sortParser =
         new TmfSortParser(
-            settings.sortAllowlist(), settings.allowNestedSortProperties());
+            settings.sortAllowlist(),
+            settings.allowNestedSortProperties(),
+            settings.nullsLast());
   }
 
   @Override
@@ -58,7 +60,8 @@ public class TmfPageableHandlerMethodArgumentResolver extends PageableHandlerMet
       // (For methods using TmfRichPageable, this branch is irrelevant — that resolver
       // takes precedence via supportsParameter above.)
       TmfSort rich = sortParser.parseRich(sortParams);
-      parsedSort = rich.requiresAggregation() ? Sort.unsorted() : rich.toPlainSort();
+      parsedSort =
+          rich.requiresAggregation() ? Sort.unsorted() : rich.toPlainSort(settings.nullsLast());
     } else {
       parsedSort = sortParser.parse(sortParams);
     }

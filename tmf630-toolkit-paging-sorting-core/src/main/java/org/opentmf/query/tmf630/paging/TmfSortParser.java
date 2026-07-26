@@ -13,14 +13,21 @@ public class TmfSortParser {
 
   private final Set<String> allowlist;
   private final boolean allowNestedProperties;
+  private final boolean nullsLast;
 
   public TmfSortParser(Collection<String> allowlist, boolean allowNestedProperties) {
+    this(allowlist, allowNestedProperties, false);
+  }
+
+  public TmfSortParser(
+      Collection<String> allowlist, boolean allowNestedProperties, boolean nullsLast) {
     this.allowlist = allowlist == null ? Set.of() : new HashSet<>(allowlist);
     this.allowNestedProperties = allowNestedProperties;
+    this.nullsLast = nullsLast;
   }
 
   public Sort parse(List<String> sortParams) {
-    return parseInternal(sortParams, false).toPlainSort();
+    return parseInternal(sortParams, false).toPlainSort(nullsLast);
   }
 
   public TmfSort parseRich(List<String> sortParams) {

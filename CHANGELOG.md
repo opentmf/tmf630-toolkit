@@ -2,6 +2,31 @@
 
 All notable changes to `tmf630-toolkit` are documented in this file.
 
+## [3.0.0] - 2026-07-26
+
+### Added
+
+- **Nulls-last-regardless-of-direction property.** New opt-in property
+  `opentmf.tmf630.paging.nulls-last` (default `false`, backward-compatible).
+  When set to `true`, every plain sort order emitted by the toolkit is
+  decorated with `Sort.Order.nullsLast()` (Spring Data's
+  `NullHandling.NULLS_LAST`). The decoration flows through
+  `TmfSortParser` → `TmfSort.toPlainSort(true)` and both pageable
+  resolvers (plain `Pageable` and `TmfRichPageable`). Closes the
+  cross-backend consistency gap where Mongo has offered
+  nulls-last-regardless-of-direction since 2.1.1 (via the `_hasKey`
+  companion in `Tmf630MongoCorrelatedSortExecutor`) but JPA inherited
+  whatever the underlying database defaults to (Postgres/Oracle
+  nulls-last in ASC, MySQL/H2 nulls-first in ASC). Backend rendering
+  notes: on Postgres, Hibernate emits the SQL `NULLS LAST` modifier
+  only when it differs from the dialect's inherent default (elided on
+  ASC where nulls-last is already the default, emitted on DESC); the
+  semantic outcome — null-valued rows appearing last in the result
+  regardless of direction — holds either way. Non-native dialects
+  (MySQL/H2/older SQL Server) fall back to Hibernate's `CASE WHEN
+  x IS NULL` synthetic sort key; this has index-scan cost implications
+  on large tables, which is why the property is opt-in and per-service.
+
 ## [2.1.5] - 2026-07-24
 
 ### Added

@@ -9,9 +9,21 @@ public record Tmf630PagingSettings(
     int maxLimit,
     boolean strictMode,
     boolean allowNestedSortProperties,
-    List<String> sortAllowlist) {
+    List<String> sortAllowlist,
+    boolean nullsLast) {
 
   public Tmf630PagingSettings {
     sortAllowlist = sortAllowlist == null ? Collections.emptyList() : List.copyOf(sortAllowlist);
+  }
+
+  public Tmf630PagingSettings(
+      boolean enabled,
+      int defaultLimit,
+      int maxLimit,
+      boolean strictMode,
+      boolean allowNestedSortProperties,
+      List<String> sortAllowlist) {
+    this(enabled, defaultLimit, maxLimit, strictMode, allowNestedSortProperties, sortAllowlist,
+        false);
   }
 }

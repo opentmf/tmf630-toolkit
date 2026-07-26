@@ -14,6 +14,7 @@ public class Tmf630PagingProperties {
   private boolean strictMode = true;
   private boolean allowNestedSortProperties = false;
   private List<String> sortAllowlist = new ArrayList<>();
+  private boolean nullsLast = false;
 
   public Tmf630PagingSettings toSettings() {
     return new Tmf630PagingSettings(
@@ -22,7 +23,8 @@ public class Tmf630PagingProperties {
         maxLimit,
         strictMode,
         allowNestedSortProperties,
-        sortAllowlist);
+        sortAllowlist,
+        nullsLast);
   }
 
   public boolean isEnabled() {
@@ -71,5 +73,13 @@ public class Tmf630PagingProperties {
 
   public void setSortAllowlist(List<String> sortAllowlist) {
     this.sortAllowlist = sortAllowlist;
+  }
+
+  public boolean isNullsLast() {
+    return nullsLast;
+  }
+
+  public void setNullsLast(boolean nullsLast) {
+    this.nullsLast = nullsLast;
   }
 }

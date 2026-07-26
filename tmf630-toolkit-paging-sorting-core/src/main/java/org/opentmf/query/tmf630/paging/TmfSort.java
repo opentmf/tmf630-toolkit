@@ -30,6 +30,10 @@ public record TmfSort(List<TmfSortTerm> terms) {
   }
 
   public Sort toPlainSort() {
+    return toPlainSort(false);
+  }
+
+  public Sort toPlainSort(boolean nullsLast) {
     if (requiresAggregation()) {
       throw new IllegalStateException(
           "TmfSort contains correlated terms; cannot be converted to a plain Spring Data Sort.");
@@ -39,7 +43,8 @@ public record TmfSort(List<TmfSortTerm> terms) {
     }
     List<Sort.Order> orders = new ArrayList<>(terms.size());
     for (TmfSortTerm term : terms) {
-      orders.add(new Sort.Order(term.direction(), term.expression()));
+      Sort.Order order = new Sort.Order(term.direction(), term.expression());
+      orders.add(nullsLast ? order.nullsLast() : order);
     }
     return Sort.by(orders);
   }
