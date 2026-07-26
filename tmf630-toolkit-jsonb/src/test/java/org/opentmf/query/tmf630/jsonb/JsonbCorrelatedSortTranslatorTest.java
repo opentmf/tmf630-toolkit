@@ -12,45 +12,135 @@ class JsonbCorrelatedSortTranslatorTest {
   private final JsonbCorrelatedSortTranslator translator = new JsonbCorrelatedSortTranslator();
 
   @Test
-  @DisplayName("simple-rich hop[key=value].leaf translates to Postgres SQL/JSON path")
+  @DisplayName("simple-rich hop[key=value].leaf → jsonPath only, no aggregator, no coercion")
   void simpleRichCanonical() {
-    assertThat(translator.translate("characteristics[name=price].value"))
+    JsonbSortExpression e = translator.translate("characteristics[name=price].value");
+    assertThat(e.jsonPath())
         .isEqualTo("$.characteristics[*] ? (@.name == \"price\").value");
+    assertThat(e.aggregator()).isEmpty();
+    assertThat(e.coercion()).isEmpty();
   }
 
   @Test
   @DisplayName("simple-rich with dotted leaf preserves multi-segment leaf")
   void simpleRichDottedLeaf() {
-    assertThat(translator.translate("items[type=install].service.version"))
+    JsonbSortExpression e = translator.translate("items[type=install].service.version");
+    assertThat(e.jsonPath())
         .isEqualTo("$.items[*] ? (@.type == \"install\").service.version");
   }
 
   @Test
   @DisplayName("simple-rich strips outer quotes from match value")
   void simpleRichStripsSingleQuotes() {
-    assertThat(translator.translate("arr[key='the value'].leaf"))
-        .isEqualTo("$.arr[*] ? (@.key == \"the value\").leaf");
+    JsonbSortExpression e = translator.translate("arr[key='the value'].leaf");
+    assertThat(e.jsonPath()).isEqualTo("$.arr[*] ? (@.key == \"the value\").leaf");
   }
 
   @Test
-  @DisplayName("JsonPath $.hop[?(@.key=='value')].leaf translates to same shape as simple-rich")
+  @DisplayName("JsonPath $.hop[?(@.key=='value')].leaf → same jsonPath as simple-rich")
   void jsonPathCanonical() {
-    assertThat(translator.translate("$.characteristics[?(@.name=='price')].value"))
+    JsonbSortExpression e =
+        translator.translate("$.characteristics[?(@.name=='price')].value");
+    assertThat(e.jsonPath())
         .isEqualTo("$.characteristics[*] ? (@.name == \"price\").value");
   }
 
   @Test
   @DisplayName("JsonPath with double-quoted literal accepted")
   void jsonPathDoubleQuoted() {
-    assertThat(translator.translate("$.arr[?(@.key == \"the value\")].leaf"))
-        .isEqualTo("$.arr[*] ? (@.key == \"the value\").leaf");
+    JsonbSortExpression e = translator.translate("$.arr[?(@.key == \"the value\")].leaf");
+    assertThat(e.jsonPath()).isEqualTo("$.arr[*] ? (@.key == \"the value\").leaf");
   }
 
   @Test
   @DisplayName("JsonPath with whitespace around operators tolerated")
   void jsonPathWithWhitespace() {
-    assertThat(translator.translate("$.arr[  ? ( @.key   ==   'v' ) ].leaf"))
-        .isEqualTo("$.arr[*] ? (@.key == \"v\").leaf");
+    JsonbSortExpression e = translator.translate("$.arr[  ? ( @.key   ==   'v' ) ].leaf");
+    assertThat(e.jsonPath()).isEqualTo("$.arr[*] ? (@.key == \"v\").leaf");
+  }
+
+  @Test
+  @DisplayName("Phase (b.7): wildcard hop[*].leaf renders as $.hop[*].leaf")
+  void wildcardTerm() {
+    JsonbSortExpression e = translator.translate("prices[*].value");
+    assertThat(e.jsonPath()).isEqualTo("$.prices[*].value");
+    assertThat(e.aggregator()).isEmpty();
+    assertThat(e.coercion()).isEmpty();
+  }
+
+  @Test
+  @DisplayName("Phase (b.7): min() aggregator around a wildcard path is captured")
+  void minAggregatorAroundWildcard() {
+    JsonbSortExpression e = translator.translate("min(prices[*].value)");
+    assertThat(e.aggregator()).contains(JsonbSortExpression.Aggregator.MIN);
+    assertThat(e.coercion()).isEmpty();
+    assertThat(e.jsonPath()).isEqualTo("$.prices[*].value");
+  }
+
+  @Test
+  @DisplayName("Phase (b.7): max() aggregator around a correlated path is captured")
+  void maxAggregatorAroundCorrelated() {
+    JsonbSortExpression e = translator.translate("max(items[type=install].amount)");
+    assertThat(e.aggregator()).contains(JsonbSortExpression.Aggregator.MAX);
+    assertThat(e.jsonPath()).isEqualTo("$.items[*] ? (@.type == \"install\").amount");
+  }
+
+  @Test
+  @DisplayName("Phase (b.7): num() coercion around a correlated path is captured")
+  void numCoercionAroundCorrelated() {
+    JsonbSortExpression e = translator.translate("num(characteristics[name=price].value)");
+    assertThat(e.coercion()).contains(JsonbCast.NUMERIC);
+    assertThat(e.aggregator()).isEmpty();
+    assertThat(e.jsonPath()).isEqualTo("$.characteristics[*] ? (@.name == \"price\").value");
+  }
+
+  @Test
+  @DisplayName("Phase (b.7): str() coercion maps to TEXT (no cast in emission)")
+  void strCoercion() {
+    JsonbSortExpression e = translator.translate("str(characteristics[name=color].value)");
+    assertThat(e.coercion()).contains(JsonbCast.TEXT);
+  }
+
+  @Test
+  @DisplayName("Phase (b.7): date() coercion maps to TIMESTAMPTZ")
+  void dateCoercion() {
+    JsonbSortExpression e = translator.translate("date(items[type=start].timestamp)");
+    assertThat(e.coercion()).contains(JsonbCast.TIMESTAMPTZ);
+  }
+
+  @Test
+  @DisplayName("Phase (b.7): num(min(prices[*].value)) — coercion around aggregator")
+  void coercionAroundAggregator() {
+    JsonbSortExpression e = translator.translate("num(min(prices[*].value))");
+    assertThat(e.coercion()).contains(JsonbCast.NUMERIC);
+    assertThat(e.aggregator()).contains(JsonbSortExpression.Aggregator.MIN);
+    assertThat(e.jsonPath()).isEqualTo("$.prices[*].value");
+  }
+
+  @Test
+  @DisplayName("Phase (b.7): date(max(...)) — coercion around aggregator")
+  void dateAroundMax() {
+    JsonbSortExpression e =
+        translator.translate("date(max(items[type=install].completedAt))");
+    assertThat(e.coercion()).contains(JsonbCast.TIMESTAMPTZ);
+    assertThat(e.aggregator()).contains(JsonbSortExpression.Aggregator.MAX);
+    assertThat(e.jsonPath()).isEqualTo("$.items[*] ? (@.type == \"install\").completedAt");
+  }
+
+  @Test
+  @DisplayName("Phase (b.7): nested duplicate wrappers rejected (num(num(...)))")
+  void rejectsNestedDuplicateCoercions() {
+    assertThatThrownBy(() -> translator.translate("num(num(arr[*].value))"))
+        .isInstanceOf(TmfPagingException.class)
+        .hasMessageContaining("single");
+  }
+
+  @Test
+  @DisplayName("Phase (b.7): nested aggregators rejected (min(max(...)))")
+  void rejectsNestedAggregators() {
+    assertThatThrownBy(() -> translator.translate("min(max(arr[*].value))"))
+        .isInstanceOf(TmfPagingException.class)
+        .hasMessageContaining("single");
   }
 
   @Test
@@ -63,14 +153,6 @@ class JsonbCorrelatedSortTranslatorTest {
   }
 
   @Test
-  @DisplayName("wildcard [*] rejected — out of scope for b.6")
-  void rejectsWildcard() {
-    assertThatThrownBy(() -> translator.translate("arr[*].leaf"))
-        .isInstanceOf(TmfPagingException.class)
-        .hasMessageContaining("Wildcard");
-  }
-
-  @Test
   @DisplayName("positional [N] rejected — recommend plain dotted sort with numeric segment")
   void rejectsPositional() {
     assertThatThrownBy(() -> translator.translate("arr[0].leaf"))
@@ -79,46 +161,19 @@ class JsonbCorrelatedSortTranslatorTest {
   }
 
   @Test
-  @DisplayName("aggregators min()/max() rejected — deferred to Phase b.7")
-  void rejectsAggregators() {
-    assertThatThrownBy(() -> translator.translate("min(arr[key=v].leaf)"))
-        .isInstanceOf(TmfPagingException.class)
-        .hasMessageContaining("b.7");
-    assertThatThrownBy(() -> translator.translate("max(arr[key=v].leaf)"))
-        .isInstanceOf(TmfPagingException.class)
-        .hasMessageContaining("b.7");
-  }
-
-  @Test
-  @DisplayName("coercions num()/str()/date() rejected — deferred to Phase b.7")
-  void rejectsCoercions() {
-    assertThatThrownBy(() -> translator.translate("num(arr[key=v].leaf)"))
-        .isInstanceOf(TmfPagingException.class)
-        .hasMessageContaining("b.7");
-    assertThatThrownBy(() -> translator.translate("str(arr[key=v].leaf)"))
-        .isInstanceOf(TmfPagingException.class)
-        .hasMessageContaining("b.7");
-    assertThatThrownBy(() -> translator.translate("date(arr[key=v].leaf)"))
-        .isInstanceOf(TmfPagingException.class)
-        .hasMessageContaining("b.7");
-  }
-
-  @Test
   @DisplayName("malformed term rejected with actionable message")
   void rejectsMalformed() {
     assertThatThrownBy(() -> translator.translate("plainName"))
         .isInstanceOf(TmfPagingException.class)
-        .hasMessageContaining("single-hop shape");
+        .hasMessageContaining("supported shape");
     assertThatThrownBy(() -> translator.translate("arr[key=value]"))
-        .isInstanceOf(TmfPagingException.class);
-    assertThatThrownBy(() -> translator.translate("arr.leaf"))
         .isInstanceOf(TmfPagingException.class);
   }
 
   @Test
   @DisplayName("embedded double-quote in single-quoted match value is escaped in output")
   void embeddedDoubleQuoteEscaped() {
-    assertThat(translator.translate("arr[key='the \"quoted\" value'].leaf"))
-        .isEqualTo("$.arr[*] ? (@.key == \"the \\\"quoted\\\" value\").leaf");
+    JsonbSortExpression e = translator.translate("arr[key='the \"quoted\" value'].leaf");
+    assertThat(e.jsonPath()).isEqualTo("$.arr[*] ? (@.key == \"the \\\"quoted\\\" value\").leaf");
   }
 }

@@ -1,5 +1,6 @@
 package org.opentmf.query.tmf630.jsonb;
 
+import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.opentmf.query.tmf630.exception.TmfPagingException;
@@ -42,65 +43,125 @@ public class JsonbCorrelatedSortTranslator {
 
   /**
    * {@code $.hop[?(@.key == 'value')].leaf} — group 1=hop, 2=key, 3=value (with
-   * quotes), 4=leaf. Deliberately narrow — the b.6 first cut supports only a single
-   * top-level equality predicate. Compound predicates land later.
+   * quotes), 4=leaf. Deliberately narrow — supports only a single top-level equality
+   * predicate. Compound predicates land later.
    */
   private static final Pattern JSONPATH_TERM =
       Pattern.compile(
           "^\\$\\.?([A-Za-z_][A-Za-z0-9_]*)\\[\\s*\\?\\s*\\(\\s*@\\.([A-Za-z_][A-Za-z0-9_]*)\\s*==\\s*(['\"])([^'\"]*)\\3\\s*\\)\\s*]\\.([A-Za-z_][A-Za-z0-9_.]*)$");
 
   /**
-   * Translates a correlated sort term to a Postgres SQL/JSON path expression.
-   * Detects the grammar by shape (SIMPLE_RICH: contains {@code [k=v]};
-   * JSONPATH: starts with {@code $} and contains {@code [?(}).
+   * {@code hop[*].leaf} wildcard-projection form — group 1=hop, 2=leaf. Only meaningful
+   * inside an aggregator wrapper (b.7); a bare wildcard sort without aggregator would
+   * pick an arbitrary row's value, which is rarely what the caller wants — such
+   * expressions are still translated (Postgres accepts them), but the aggregator
+   * wrapping is the common use case.
    */
-  public String translate(String expression) {
-    rejectDisallowedGrammar(expression);
-    Matcher simple = SIMPLE_RICH.matcher(expression);
+  private static final Pattern WILDCARD_TERM =
+      Pattern.compile(
+          "^([A-Za-z_][A-Za-z0-9_]*)\\[\\*]\\.([A-Za-z_][A-Za-z0-9_.]*)$");
+
+  /**
+   * Translates a correlated sort term to a {@link JsonbSortExpression}, peeling off
+   * outer wrappers ({@code num()} / {@code str()} / {@code date()} coercion and
+   * {@code min()} / {@code max()} aggregator) before parsing the inner path.
+   * Wrappers apply in this exact order from outside in: coercion first, then
+   * aggregator, then the correlated / wildcard / plain path — so
+   * {@code num(min(prices[*].value))} decomposes as coercion={@code NUMERIC},
+   * aggregator={@code MIN}, jsonPath={@code $.prices[*].value}.
+   */
+  public JsonbSortExpression translate(String expression) {
+    if (expression == null || expression.isBlank()) {
+      throw new TmfPagingException("Correlated sort term must not be blank.");
+    }
+    String trimmed = expression.trim();
+    rejectPositional(trimmed);
+
+    Optional<JsonbCast> coercion = Optional.empty();
+    Optional<JsonbSortExpression.Aggregator> aggregator = Optional.empty();
+    String remainder = trimmed;
+
+    Optional<JsonbCast> outerCoercion = detectCoercion(remainder);
+    if (outerCoercion.isPresent()) {
+      coercion = outerCoercion;
+      remainder = stripWrapper(remainder);
+    }
+
+    Optional<JsonbSortExpression.Aggregator> outerAggregator = detectAggregator(remainder);
+    if (outerAggregator.isPresent()) {
+      aggregator = outerAggregator;
+      remainder = stripWrapper(remainder);
+    }
+
+    // Reject a second, illegal wrapper (e.g. num(num(...)) or min(max(...))).
+    if (detectCoercion(remainder).isPresent() || detectAggregator(remainder).isPresent()) {
+      throw new TmfPagingException(
+          "Only a single coercion (num/str/date) wrapping a single aggregator (min/max)"
+              + " is supported. Nested duplicates rejected: "
+              + expression);
+    }
+
+    String jsonPath = translatePath(remainder);
+    return new JsonbSortExpression(aggregator, coercion, jsonPath);
+  }
+
+  private static String translatePath(String path) {
+    Matcher simple = SIMPLE_RICH.matcher(path);
     if (simple.matches()) {
       return "$." + simple.group(1) + "[*] ? (@." + simple.group(2) + " == \""
           + escapeForDoubleQuoted(stripQuotes(simple.group(3).trim())) + "\")."
           + simple.group(4);
     }
-    Matcher jsonPath = JSONPATH_TERM.matcher(expression);
+    Matcher jsonPath = JSONPATH_TERM.matcher(path);
     if (jsonPath.matches()) {
       return "$." + jsonPath.group(1) + "[*] ? (@." + jsonPath.group(2) + " == \""
           + escapeForDoubleQuoted(jsonPath.group(4)) + "\")." + jsonPath.group(5);
     }
+    Matcher wildcard = WILDCARD_TERM.matcher(path);
+    if (wildcard.matches()) {
+      return "$." + wildcard.group(1) + "[*]." + wildcard.group(2);
+    }
     throw new TmfPagingException(
-        "Correlated sort term does not match the supported single-hop shape"
-            + " 'hop[key=value].leaf' (simple-rich) or"
-            + " '$.hop[?(@.key == \"value\")].leaf' (JsonPath): "
-            + expression);
+        "Correlated sort path does not match a supported shape ('hop[key=value].leaf',"
+            + " '$.hop[?(@.key == \"value\")].leaf', or 'hop[*].leaf'): "
+            + path);
   }
 
-  private static void rejectDisallowedGrammar(String expression) {
-    if (expression == null || expression.isBlank()) {
-      throw new TmfPagingException("Correlated sort term must not be blank.");
+  private static Optional<JsonbCast> detectCoercion(String expression) {
+    if (expression.startsWith("num(") && expression.endsWith(")")) {
+      return Optional.of(JsonbCast.NUMERIC);
     }
-    String trimmed = expression.trim();
-    if (trimmed.contains("[*]")) {
-      throw new TmfPagingException(
-          "Wildcard [*] in JSONB correlated sort is not supported (out of scope for"
-              + " Phase b.6). Term: "
-              + expression);
+    if (expression.startsWith("str(") && expression.endsWith(")")) {
+      return Optional.of(JsonbCast.TEXT);
     }
+    if (expression.startsWith("date(") && expression.endsWith(")")) {
+      return Optional.of(JsonbCast.TIMESTAMPTZ);
+    }
+    return Optional.empty();
+  }
+
+  private static Optional<JsonbSortExpression.Aggregator> detectAggregator(String expression) {
+    if (expression.startsWith("min(") && expression.endsWith(")")) {
+      return Optional.of(JsonbSortExpression.Aggregator.MIN);
+    }
+    if (expression.startsWith("max(") && expression.endsWith(")")) {
+      return Optional.of(JsonbSortExpression.Aggregator.MAX);
+    }
+    return Optional.empty();
+  }
+
+  /** Strips one wrapper — assumes caller has already confirmed the shape via detect*. */
+  private static String stripWrapper(String expression) {
+    int openParen = expression.indexOf('(');
+    return expression.substring(openParen + 1, expression.length() - 1).trim();
+  }
+
+  private static void rejectPositional(String trimmed) {
     if (trimmed.matches(".*\\[\\d+].*")) {
       throw new TmfPagingException(
           "Positional [N] in JSONB correlated sort is not supported (use plain dotted"
               + " sort with numeric segments: e.g. sort=arr.0.leaf). Term: "
-              + expression);
-    }
-    if (trimmed.startsWith("min(")
-        || trimmed.startsWith("max(")) {
-      throw new TmfPagingException(
-          "Sort aggregators min() / max() land in Phase b.7 (out of scope for b.6).");
-    }
-    if (trimmed.startsWith("num(")
-        || trimmed.startsWith("str(")
-        || trimmed.startsWith("date(")) {
-      throw new TmfPagingException(
-          "Sort coercions num() / str() / date() land in Phase b.7 (out of scope for b.6).");
+              + trimmed);
     }
   }
 

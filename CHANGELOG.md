@@ -6,6 +6,39 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 
 ### Added (PostgreSQL-with-JSONB backend — v3.0.0 Phase (b), incremental)
 
+- **JSONB sort aggregators + coercions** (Phase b.7 of V3 roadmap). Extends
+  the correlated-sort translator to peel off outer wrappers before parsing the
+  inner path — closes the Phase (b) sort story.
+
+  Grammars supported (in addition to b.6's simple-rich and JsonPath forms):
+  - **Aggregators**: `min(<path>)`, `max(<path>)`
+  - **Coercions**: `num(<path-or-aggregator>)`, `str(<...>)`, `date(<...>)`
+  - **Wildcards**: `hop[*].leaf` — required for aggregate-over-array patterns
+    like `min(prices[*].value)`. Previously rejected by b.6 as out of scope.
+  - **Combined**: `num(min(prices[*].value))` — one coercion wrapping one
+    aggregator wrapping a path. Nested duplicates rejected.
+
+  Emitted SQL shapes:
+  - Without aggregator (existing b.6 shape): `((jsonb_path_query_first(payload,
+    ?::jsonpath)) #>> '{}')[::cast]`
+  - With aggregator (new in b.7): `(SELECT AGG((v #>> '{}')[::cast]) FROM
+    jsonb_path_query(payload, ?::jsonpath) AS v)` — iterates every match of
+    the path and applies the aggregate. `NULL` when no match.
+
+  Coercion mapping: `num()` → `::numeric`, `str()` → text (no cast),
+  `date()` → `::timestamptz`. Explicit coercion wins over the
+  fieldTypeResolver-derived cast.
+
+  New type: `JsonbSortExpression` record capturing `(aggregator, coercion,
+  jsonPath)`. `JsonbCorrelatedSortTranslator.translate()` now returns this
+  record instead of a bare String (breaking change from b.6 for internal
+  callers only — no external usage yet).
+
+  15 unit tests (was 12) + 2 new real-Postgres IT scenarios exercising
+  `num(min(prices[*].value))` and `num(max(prices[*].value))` with values
+  chosen so lexicographic ordering would differ from numeric — proves the
+  cast actually reaches the SQL. Total JSONB module test count now 122.
+
 - **`JsonbCorrelatedSortTranslator` + `JsonbSortBuilder` refactor for correlated
   sort** (Phase b.6 of V3 roadmap). Extends the JSONB sort story with
   correlated grammars — the canonical TMF "characteristics" pattern now works

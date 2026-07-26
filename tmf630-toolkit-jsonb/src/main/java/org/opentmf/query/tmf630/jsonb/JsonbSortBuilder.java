@@ -96,20 +96,62 @@ public class JsonbSortBuilder {
 
   private String correlatedTermFragment(
       TmfSortTerm term, Function<String, Class<?>> fieldTypeResolver, List<Object> params) {
-    String jsonPath = correlatedTranslator.translate(term.expression());
-    // Resolve the leaf field's Java type for cast selection. The resolver may not
-    // recognise the compound expression — try the leaf name (last dotted segment)
-    // as a fallback, then default to TEXT.
+    JsonbSortExpression expr = correlatedTranslator.translate(term.expression());
+    JsonbCast cast = resolveCast(expr, term, fieldTypeResolver);
+    params.add(expr.jsonPath());
+    String fragment =
+        expr.aggregator().isPresent()
+            ? aggregateSubqueryFragment(expr.aggregator().get(), cast)
+            : firstMatchFragment(cast);
+    return fragment + " " + directionKeyword(term) + nullsTail();
+  }
+
+  /**
+   * Picks the SQL cast for a correlated-sort term. Explicit coercion wrappers
+   * ({@code num()}/{@code str()}/{@code date()}) win; otherwise fall back to the
+   * fieldTypeResolver-derived Java type of the leaf field (or the full expression
+   * if the resolver recognises it).
+   */
+  private static JsonbCast resolveCast(
+      JsonbSortExpression expr,
+      TmfSortTerm term,
+      Function<String, Class<?>> fieldTypeResolver) {
+    if (expr.coercion().isPresent()) {
+      return expr.coercion().get();
+    }
     Class<?> fieldType = fieldTypeResolver.apply(term.expression());
     if (fieldType == null) {
       fieldType = fieldTypeResolver.apply(extractLeafFieldName(term.expression()));
     }
-    JsonbCast cast = JsonbCast.forJavaType(fieldType);
+    return JsonbCast.forJavaType(fieldType);
+  }
+
+  /**
+   * {@code ((jsonb_path_query_first(payload, ?::jsonpath)) #>> '{}')[::cast]} —
+   * emitted when the sort expression has no aggregator wrapper. Picks the first
+   * matching value from the path; NULL if no match.
+   */
+  private String firstMatchFragment(JsonbCast cast) {
     String extraction =
         "((jsonb_path_query_first(" + payloadColumn + ", ?::jsonpath)) #>> '{}')";
-    String casted = cast == JsonbCast.TEXT ? extraction : extraction + cast.suffix();
-    params.add(jsonPath);
-    return casted + " " + directionKeyword(term) + nullsTail();
+    return cast == JsonbCast.TEXT ? extraction : extraction + cast.suffix();
+  }
+
+  /**
+   * {@code (SELECT AGG((v #>> '{}')[::cast]) FROM jsonb_path_query(payload, ?::jsonpath)
+   * AS v)} — emitted when {@code min()} or {@code max()} wraps the path. Iterates over
+   * every match of the path expression and applies the aggregate.
+   */
+  private String aggregateSubqueryFragment(
+      JsonbSortExpression.Aggregator aggregator, JsonbCast cast) {
+    String inner = "(v #>> '{}')" + (cast == JsonbCast.TEXT ? "" : cast.suffix());
+    return "(SELECT "
+        + aggregator.sqlName()
+        + "("
+        + inner
+        + ") FROM jsonb_path_query("
+        + payloadColumn
+        + ", ?::jsonpath) AS v)";
   }
 
   private static String extractLeafFieldName(String expression) {

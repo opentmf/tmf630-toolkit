@@ -246,6 +246,73 @@ class Tmf630JsonbFilterExecutorIT {
   }
 
   @Test
+  @DisplayName(
+      "Phase (b.7): num(min(prices[*].value)) — coercion around aggregator over wildcard array")
+  void aggregatorWithCoercionOverWildcardArray() throws Exception {
+    repository.deleteAll();
+    seedWithPrices("W1", 100, 200, 300); // min = 100
+    seedWithPrices("W2", 50, 999);       // min = 50
+    seedWithPrices("W3", 400, 500);      // min = 400
+
+    TmfSort sort =
+        new TmfSort(
+            List.of(
+                new TmfSortTerm(
+                    Sort.Direction.ASC,
+                    TmfSortTerm.Kind.JSONPATH,
+                    "num(min(prices[*].value))")));
+    Page<JsonbTestDomain> page =
+        executor.findAll(
+            JsonbTestDomain.class, JsonbClause.alwaysTrue(), sort, Pageable.unpaged(),
+            field -> Integer.class);
+    // ASC by min numeric price: W2 (50) < W1 (100) < W3 (400).
+    assertThat(page.getContent()).extracting(JsonbTestDomain::getId)
+        .containsExactly("W2", "W1", "W3");
+  }
+
+  @Test
+  @DisplayName(
+      "Phase (b.7): max(prices[*].value) DESC — aggregator without coercion, "
+          + "text sort would break lexicographically for these numbers")
+  void aggregatorMaxOverWildcard() throws Exception {
+    repository.deleteAll();
+    // These values chosen so lex ordering differs from numeric ordering:
+    // "500" > "1000" lexicographically, but 1000 > 500 numerically.
+    seedWithPrices("A", 999);
+    seedWithPrices("B", 1500);
+    seedWithPrices("C", 200);
+
+    // With num() coercion, numeric ordering wins.
+    TmfSort sortNumeric =
+        new TmfSort(
+            List.of(
+                new TmfSortTerm(
+                    Sort.Direction.DESC,
+                    TmfSortTerm.Kind.JSONPATH,
+                    "num(max(prices[*].value))")));
+    Page<JsonbTestDomain> pageNumeric =
+        executor.findAll(
+            JsonbTestDomain.class, JsonbClause.alwaysTrue(), sortNumeric,
+            Pageable.unpaged(), field -> Integer.class);
+    assertThat(pageNumeric.getContent()).extracting(JsonbTestDomain::getId)
+        .containsExactly("B", "A", "C");
+  }
+
+  private void seedWithPrices(String id, int... prices) throws Exception {
+    StringBuilder json = new StringBuilder();
+    json.append("{\"id\":\"").append(id).append("\",\"prices\":[");
+    for (int i = 0; i < prices.length; i++) {
+      if (i > 0) json.append(",");
+      json.append("{\"value\":").append(prices[i]).append("}");
+    }
+    json.append("]}");
+    JsonbTestRow row = new JsonbTestRow();
+    row.setId(id);
+    row.setPayload(json.toString());
+    repository.save(row);
+  }
+
+  @Test
   @DisplayName("combined filter + sort + paging composes cleanly")
   void combined() {
     JsonbClause where =
