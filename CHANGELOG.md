@@ -6,6 +6,43 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 
 ### Added (PostgreSQL-with-JSONB split-and-merge — v3.0.0 Phase (c), incremental)
 
+- **`Tmf630JsonbSubResourceController<C, P>` — split-collection sub-endpoint
+  base class** (Phase c.5 of V3 roadmap). Developer declares a thin subclass
+  and gets the {@code GET /{parent}/{parentId}/{childRoute}} and
+  {@code GET /{parent}/{parentId}/{childRoute}/{itemId}} routes for free:
+  ```java
+  @RestController
+  @RequestMapping("/productOrder/{parentId}/productOrderItem")
+  public class ProductOrderItemSubController
+      extends Tmf630JsonbSubResourceController<ProductOrderItem, ProductOrder> {
+    public ProductOrderItemSubController(
+        JdbcClient jdbcClient, ObjectMapper objectMapper, JsonbEntityRegistry registry) {
+      super(jdbcClient, objectMapper, registry, ProductOrderItem.class, ProductOrder.class);
+    }
+  }
+  ```
+  Base class handlers:
+  - `GET /` — paged list of children scoped to `{parentId}`, ordered by
+    `item_order`. Returns `Page<C>` with `totalElements` set to the count
+    across all children (not just the current page).
+  - `GET /{itemId}` — single child under the given parent, or 404.
+
+  This is what over-cap parents need — if `maxInlineItems=100` and a parent
+  has 500 children, the first 100 come inline via the merged
+  parent response (c.4); the client uses the sub-endpoint to page through
+  the remaining 400.
+
+  Type parameters {@code C} (child) and {@code P} (parent) passed explicitly
+  at construction to avoid the reflection cost of resolving generic bounds
+  at every request. The pom's `spring-web` dep is marked `optional` — pulled
+  in only when the developer's service already needs it (which any REST
+  service does).
+
+  5 real-Postgres IT scenarios via `Tmf630JsonbSubResourceControllerIT`:
+  first page returns 2 items with `totalElements=4`, second page returns
+  remaining 2, single-item lookup, 404 for non-existent item, empty list
+  for parent without children. Total JSONB module test count: 142.
+
 - **`Tmf630JsonbWriteExecutor` — auto-splitting write hook** (Phase c.6, partial —
   full-replace + append; per-item PATCH modify/remove in a follow-up cut).
   Developer's POST/PATCH controllers now call `writeExecutor.saveWithSplits(domain)`
