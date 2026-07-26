@@ -2,6 +2,8 @@ package org.opentmf.query.tmf630.jsonb;
 
 import jakarta.persistence.Table;
 import java.lang.reflect.Field;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.util.Assert;
 
@@ -19,7 +21,8 @@ public record JsonbEntityMetadata(
     Class<?> domainType,
     String payloadField,
     String tableName,
-    JsonbAuditColumns auditColumns) {
+    JsonbAuditColumns auditColumns,
+    List<JsonbSplitCollectionMetadata> splitCollections) {
 
   public JsonbEntityMetadata {
     Assert.notNull(rowType, "rowType must not be null");
@@ -27,6 +30,7 @@ public record JsonbEntityMetadata(
     Assert.hasText(payloadField, "payloadField must not be blank");
     Assert.hasText(tableName, "tableName must not be blank");
     Assert.notNull(auditColumns, "auditColumns must not be null");
+    splitCollections = splitCollections == null ? List.of() : List.copyOf(splitCollections);
   }
 
   /**
@@ -65,8 +69,33 @@ public record JsonbEntityMetadata(
               + "' declared by @Tmf630JsonbBacked.payloadField().");
     }
     return new JsonbEntityMetadata(
-        rowType, domainType, payloadField, resolveTableName(rowType),
-        JsonbAuditColumns.discover(rowType));
+        rowType,
+        domainType,
+        payloadField,
+        resolveTableName(rowType),
+        JsonbAuditColumns.discover(rowType),
+        discoverSplitCollections(domainType));
+  }
+
+  /**
+   * Scans the domain type (walks superclasses) for {@link Tmf630JsonbSplitCollection}
+   * annotations. Each such field produces one {@link JsonbSplitCollectionMetadata} entry.
+   * Empty list if none — the entity remains a plain single-table JSONB row.
+   */
+  private static List<JsonbSplitCollectionMetadata> discoverSplitCollections(Class<?> domainType) {
+    List<JsonbSplitCollectionMetadata> out = new ArrayList<>();
+    Class<?> cursor = domainType;
+    while (cursor != null && cursor != Object.class) {
+      for (Field field : cursor.getDeclaredFields()) {
+        Tmf630JsonbSplitCollection annotation =
+            field.getAnnotation(Tmf630JsonbSplitCollection.class);
+        if (annotation != null) {
+          out.add(JsonbSplitCollectionMetadata.from(field.getName(), annotation));
+        }
+      }
+      cursor = cursor.getSuperclass();
+    }
+    return out;
   }
 
   private static String resolveTableName(Class<?> rowType) {

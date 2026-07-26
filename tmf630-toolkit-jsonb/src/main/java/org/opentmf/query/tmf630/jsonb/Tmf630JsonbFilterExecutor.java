@@ -1,8 +1,12 @@
 package org.opentmf.query.tmf630.jsonb;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Function;
 import org.opentmf.query.tmf630.filtering.TmfFilteringException;
@@ -106,7 +110,11 @@ public class Tmf630JsonbFilterExecutor {
       statement = statement.param(paramIndex++, param);
     }
     List<T> rows =
-        statement.query((rs, rowNum) -> deserialize(rs.getString(payloadColumn), domainType)).list();
+        statement
+            .query(
+                (rs, rowNum) ->
+                    mergeAndDeserialize(rs.getString(payloadColumn), domainType, metadata))
+            .list();
 
     long total = runCount(tableName, effectiveWhere, hasWhere);
     Pageable effectivePageable = pageable == null ? Pageable.unpaged() : pageable;
@@ -128,15 +136,64 @@ public class Tmf630JsonbFilterExecutor {
     return total == null ? 0L : total;
   }
 
-  private <T> T deserialize(String payloadJson, Class<T> domainType) {
+  /**
+   * Deserializes a row's payload, merging in any split-collection children per §3.4 of
+   * the JSONB design doc. When the domain type declares no
+   * {@link Tmf630JsonbSplitCollection} fields (the common case), this is equivalent to
+   * a plain {@code ObjectMapper.readValue}. When splits ARE declared, the parent
+   * payload is parsed as a tree, each split-collection field is fetched from its child
+   * table (capped at {@code maxInlineItems}, ordered by {@code item_order}), and the
+   * assembled tree is materialised into the domain type — one merged JSON per parent
+   * row from the client's perspective.
+   */
+  private <T> T mergeAndDeserialize(
+      String payloadJson, Class<T> domainType, JsonbEntityMetadata metadata) {
     if (payloadJson == null) {
       return null;
     }
     try {
-      return objectMapper.readValue(payloadJson, domainType);
+      if (metadata.splitCollections().isEmpty()) {
+        return objectMapper.readValue(payloadJson, domainType);
+      }
+      JsonNode parentNode = objectMapper.readTree(payloadJson);
+      String parentId = parentNode.path("id").asText(null);
+      if (parentId != null && parentNode.isObject()) {
+        ObjectNode parentObj = (ObjectNode) parentNode;
+        for (JsonbSplitCollectionMetadata split : metadata.splitCollections()) {
+          parentObj.set(split.fieldName(), fetchChildrenAsArrayNode(split, parentId));
+        }
+      }
+      return objectMapper.treeToValue(parentNode, domainType);
     } catch (IOException e) {
       throw new UncheckedIOException(
           "Failed to deserialize JSONB payload into " + domainType.getName(), e);
     }
+  }
+
+  /**
+   * Fetches up to {@code maxInlineItems} child rows for one parent, ordered by
+   * {@code item_order}. Returns a Jackson {@link ArrayNode} — a JsonNode
+   * representation of the merged payload's split-collection field.
+   */
+  private ArrayNode fetchChildrenAsArrayNode(
+      JsonbSplitCollectionMetadata split, String parentId) throws IOException {
+    String sql =
+        "SELECT "
+            + split.payloadColumn()
+            + " FROM "
+            + split.childTable()
+            + " WHERE "
+            + split.parentIdColumn()
+            + " = ? ORDER BY "
+            + split.itemOrderColumn()
+            + " LIMIT "
+            + split.maxInlineItems();
+    List<String> childPayloads =
+        jdbcClient.sql(sql).param(1, parentId).query(String.class).list();
+    ArrayNode arr = objectMapper.createArrayNode();
+    for (String childJson : childPayloads) {
+      arr.add(objectMapper.readTree(childJson));
+    }
+    return arr;
   }
 }

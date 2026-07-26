@@ -4,6 +4,57 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 
 ## [3.0.0] - 2026-07-26
 
+### Added (PostgreSQL-with-JSONB split-and-merge — v3.0.0 Phase (c), incremental)
+
+- **`@Tmf630JsonbSplitCollection` annotation + read-merge** (Phases c.1 and c.4
+  of V3 roadmap). First-class support for the productOrderItem-style pattern
+  from `docs/JSONB_BACKEND_DESIGN.md` §3.4 — a domain-model collection field
+  can be marked as "split-stored" and the toolkit persists it into a companion
+  child table while presenting a merged JSON document to clients.
+
+  What ships in this cut:
+
+  **c.1** — annotation + metadata plumbing:
+  - `@Tmf630JsonbSplitCollection` — placed on a `List<Child>` field of the
+    domain model. Attributes: `childTable`, `childType`, `maxInlineItems`
+    (default 100), plus optional `parentIdColumn` / `itemIdColumn` /
+    `itemOrderColumn` / `payloadColumn` overrides.
+  - `JsonbSplitCollectionMetadata` — immutable record capturing everything
+    the toolkit needs to know about a split at query time.
+  - `JsonbEntityMetadata` extended with `List<JsonbSplitCollectionMetadata>
+    splitCollections` component. Populated automatically by
+    `JsonbEntityMetadata.of(rowType)` — walks the domain type (and its
+    superclasses) for `@Tmf630JsonbSplitCollection` fields.
+
+  **c.4** — read merge:
+  - `Tmf630JsonbFilterExecutor` fetches split-collection children per parent
+    row and injects them into the parent's payload tree (via Jackson
+    `ObjectNode.set`) before deserializing into the domain type. When the
+    domain type has no splits, the code path is equivalent to the previous
+    plain `readValue` — zero cost for the common case.
+  - Child fetch: `SELECT payload FROM <childTable> WHERE parent_id = ?
+    ORDER BY item_order LIMIT <maxInlineItems>` — one query per (parent,
+    split-collection). Batched fetch across parents is a later optimization.
+  - `ON DELETE CASCADE` on the child table's FK handles parent-delete
+    propagation — no application-level cascade code needed. Verified in IT.
+
+  What stays out of this cut (later c.x sub-milestones):
+  - **c.2** — predicate splitter (filter across parent + child fields).
+  - **c.3** — query planner (item-first vs parent-first SQL).
+  - **c.5** — `Tmf630JsonbSubResourceController` base class for
+    `GET /{parent}/{id}/{childRoute}` sub-endpoint.
+  - **c.6** — auto-splitting persistence hook + PATCH-append/modify/delete
+    optimization. Write-side today goes through the developer's own
+    persistence code; the IT exercises this via direct JDBC insert.
+  - **c.7** — SDWAN-scale parity ITs (large item counts, header emission).
+
+  Test coverage: 6 unit tests on the metadata scanner + 5 real-Postgres IT
+  scenarios via `Tmf630JsonbSplitCollectionIT` — canonical read merge
+  (3 items, in-order), out-of-insertion-order children (verifies
+  `ORDER BY item_order`), parent with zero children (yields empty list),
+  multiple parents (each gets its own children), ON DELETE CASCADE.
+  Total JSONB module test count now 133.
+
 ### Added (PostgreSQL-with-JSONB backend — v3.0.0 Phase (b), incremental)
 
 - **JSONB sort aggregators + coercions** (Phase b.7 of V3 roadmap). Extends
