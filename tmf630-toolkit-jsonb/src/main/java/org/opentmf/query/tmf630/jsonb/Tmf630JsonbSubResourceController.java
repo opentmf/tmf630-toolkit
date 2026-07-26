@@ -85,7 +85,7 @@ public abstract class Tmf630JsonbSubResourceController<C, P> {
    * or {@code 404 Not Found} if no such child exists.
    */
   @GetMapping("/{itemId}")
-  public ResponseEntity<C> getOneChild(
+  public ResponseEntity<C> getChild(
       @PathVariable("parentId") String parentId, @PathVariable("itemId") String itemId) {
     JsonbSplitCollectionMetadata split = requireSplitMetadata();
     Optional<String> payloadJson =

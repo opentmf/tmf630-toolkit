@@ -61,15 +61,15 @@ public class JsonbSplitAwareFilterTranslator {
    * split-awareness for the given domain type. When the domain has no split
    * collections, this is equivalent to calling the base translator directly.
    */
-  public JsonbClause translate(Class<?> domainType, String filterExpression) {
+  public JsonbClause translate(Class<?> parentType, String filterExpression) {
     JsonbEntityMetadata metadata =
         registry
-            .forDomainType(domainType)
+            .forDomainType(parentType)
             .orElseThrow(
                 () ->
                     new TmfFilteringException(
                         "No @Tmf630JsonbBacked row entity registered for domain type: "
-                            + domainType.getName()));
+                            + parentType.getName()));
 
     if (metadata.splitCollections().isEmpty()) {
       return delegate.translate(filterExpression);

@@ -144,7 +144,7 @@ public class Tmf630MongoSplitWriteExecutor {
    * current child count for this parent.
    */
   @Transactional
-  public void appendChild(Class<?> parentType, Object parentId, Object child) {
+  public void appendChild(Class<?> parentType, String parentId, Object child) {
     MongoSplitEntityMetadata metadata =
         registry
             .forParentType(parentType)
@@ -229,7 +229,7 @@ public class Tmf630MongoSplitWriteExecutor {
    */
   @Transactional
   public long updateChild(
-      Class<?> parentType, Object parentId, Object itemId, Object updatedChild) {
+      Class<?> parentType, String parentId, String itemId, Object updatedChild) {
     if (parentId == null) throw new IllegalArgumentException("parentId must not be null");
     if (itemId == null) throw new IllegalArgumentException("itemId must not be null");
     if (updatedChild == null) throw new IllegalArgumentException("updatedChild must not be null");
@@ -257,7 +257,7 @@ public class Tmf630MongoSplitWriteExecutor {
    */
   @Transactional
   public long removeChild(
-      Class<?> parentType, Object parentId, Object itemId, Class<?> childType) {
+      Class<?> parentType, String parentId, String itemId, Class<?> childType) {
     if (parentId == null) throw new IllegalArgumentException("parentId must not be null");
     if (itemId == null) throw new IllegalArgumentException("itemId must not be null");
     MongoSplitCollectionMetadata split = resolveSplit(parentType, childType);
@@ -276,7 +276,7 @@ public class Tmf630MongoSplitWriteExecutor {
    * housekeeping after a series of {@link #removeChild} calls that left gaps.
    */
   @Transactional
-  public void reindexChildren(Class<?> parentType, Object parentId, Class<?> childType) {
+  public void reindexChildren(Class<?> parentType, String parentId, Class<?> childType) {
     if (parentId == null) throw new IllegalArgumentException("parentId must not be null");
     MongoSplitCollectionMetadata split = resolveSplit(parentType, childType);
     Query q =

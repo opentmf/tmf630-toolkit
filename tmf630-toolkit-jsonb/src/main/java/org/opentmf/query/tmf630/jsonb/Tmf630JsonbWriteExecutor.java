@@ -60,32 +60,33 @@ public class Tmf630JsonbWriteExecutor {
   }
 
   /**
-   * Persists a domain instance and its split children atomically. Idempotent for the
-   * parent (UPSERT); full-replace for each split collection.
+   * Persists a parent instance and its split children atomically. Idempotent for the
+   * parent (UPSERT); full-replace for each split collection. Returns the (mutated —
+   * split fields temporarily cleared then restored) parent instance for fluent use.
    */
   @Transactional
-  public <T> void saveWithSplits(T domain) {
-    if (domain == null) {
-      throw new IllegalArgumentException("domain must not be null");
+  public <T> T saveWithSplits(T parent) {
+    if (parent == null) {
+      throw new IllegalArgumentException("parent must not be null");
     }
     JsonbEntityMetadata metadata =
         registry
-            .forDomainType(domain.getClass())
+            .forDomainType(parent.getClass())
             .orElseThrow(
                 () ->
                     new TmfFilteringException(
                         "No @Tmf630JsonbBacked row entity registered for domain type: "
-                            + domain.getClass().getName()));
+                            + parent.getClass().getName()));
     try {
-      // Serialize the domain to a mutable tree — split fields will be removed from it
+      // Serialize the parent to a mutable tree — split fields will be removed from it
       // before the parent payload is persisted. valueToTree round-trips through the
       // Jackson serializer so annotations like @JsonInclude and @JsonIgnore apply.
-      ObjectNode parentTree = objectMapper.valueToTree(domain);
+      ObjectNode parentTree = objectMapper.valueToTree(parent);
       String parentId = parentTree.path("id").asText(null);
       if (parentId == null || parentId.isEmpty()) {
         throw new TmfFilteringException(
-            "Domain instance must have a non-empty 'id' field for split-write: "
-                + domain.getClass().getSimpleName());
+            "Parent instance must have a non-empty 'id' field for split-write: "
+                + parent.getClass().getSimpleName());
       }
 
       // Extract split fields from the tree first (mutates it), so the parent payload
@@ -99,12 +100,13 @@ public class Tmf630JsonbWriteExecutor {
 
       upsertParent(metadata, parentId, objectMapper.writeValueAsString(parentTree));
 
-      for (java.util.Map.Entry<JsonbSplitCollectionMetadata, JsonNode> entry : extracted.entrySet()) {
+      for (Map.Entry<JsonbSplitCollectionMetadata, JsonNode> entry : extracted.entrySet()) {
         replaceSplitChildren(entry.getKey(), parentId, entry.getValue());
       }
+      return parent;
     } catch (IOException e) {
       throw new UncheckedIOException(
-          "Failed to serialize domain " + domain.getClass().getName() + " for split-write",
+          "Failed to serialize parent " + parent.getClass().getName() + " for split-write",
           e);
     }
   }
@@ -193,24 +195,24 @@ public class Tmf630JsonbWriteExecutor {
    * §3.4. Assigns the next item_order (max + 1) atomically via a subquery.
    */
   @Transactional
-  public <T> void appendChild(Class<T> parentDomainType, String parentId, Object childInstance) {
+  public void appendChild(Class<?> parentType, String parentId, Object child) {
     if (parentId == null || parentId.isEmpty()) {
       throw new IllegalArgumentException("parentId must not be blank");
     }
-    if (childInstance == null) {
-      throw new IllegalArgumentException("childInstance must not be null");
+    if (child == null) {
+      throw new IllegalArgumentException("child must not be null");
     }
     JsonbEntityMetadata metadata =
         registry
-            .forDomainType(parentDomainType)
+            .forDomainType(parentType)
             .orElseThrow(
                 () ->
                     new TmfFilteringException(
                         "No @Tmf630JsonbBacked row entity registered for domain type: "
-                            + parentDomainType.getName()));
-    JsonbSplitCollectionMetadata split = findSplitForChildType(metadata, childInstance.getClass());
+                            + parentType.getName()));
+    JsonbSplitCollectionMetadata split = findSplitForChildType(metadata, child.getClass());
     try {
-      JsonNode childNode = objectMapper.valueToTree(childInstance);
+      JsonNode childNode = objectMapper.valueToTree(child);
       String childPayload = childNode.toString();
       String childId = resolveChildId(childNode, -1); // -1 signals no known position yet
       if ("-1".equals(childId)) {
@@ -247,7 +249,7 @@ public class Tmf630JsonbWriteExecutor {
     } catch (Exception e) {
       if (e instanceof RuntimeException re) throw re;
       throw new UncheckedIOException(
-          "Failed to serialize child " + childInstance.getClass().getName() + " for append",
+          "Failed to serialize child " + child.getClass().getName() + " for append",
           new IOException(e));
     }
   }
@@ -278,8 +280,8 @@ public class Tmf630JsonbWriteExecutor {
    * error should check the return value and 404 accordingly.
    */
   @Transactional
-  public <T> int updateChild(
-      Class<T> parentDomainType, String parentId, String itemId, Object updatedChild) {
+  public int updateChild(
+      Class<?> parentType, String parentId, String itemId, Object updatedChild) {
     if (parentId == null || parentId.isEmpty()) {
       throw new IllegalArgumentException("parentId must not be blank");
     }
@@ -290,7 +292,7 @@ public class Tmf630JsonbWriteExecutor {
       throw new IllegalArgumentException("updatedChild must not be null");
     }
     JsonbSplitCollectionMetadata split =
-        resolveSplitForChild(parentDomainType, updatedChild.getClass());
+        resolveSplitForChild(parentType, updatedChild.getClass());
     String payload = objectMapper.valueToTree(updatedChild).toString();
     return jdbcClient
         .sql(
@@ -319,15 +321,15 @@ public class Tmf630JsonbWriteExecutor {
    * <p>Returns {@code 1} on success, {@code 0} if the child does not exist.
    */
   @Transactional
-  public <T> int removeChild(
-      Class<T> parentDomainType, String parentId, String itemId, Class<?> childType) {
+  public int removeChild(
+      Class<?> parentType, String parentId, String itemId, Class<?> childType) {
     if (parentId == null || parentId.isEmpty()) {
       throw new IllegalArgumentException("parentId must not be blank");
     }
     if (itemId == null || itemId.isEmpty()) {
       throw new IllegalArgumentException("itemId must not be blank");
     }
-    JsonbSplitCollectionMetadata split = resolveSplitForChild(parentDomainType, childType);
+    JsonbSplitCollectionMetadata split = resolveSplitForChild(parentType, childType);
     return jdbcClient
         .sql(
             "DELETE FROM "
@@ -361,25 +363,25 @@ public class Tmf630JsonbWriteExecutor {
    * <p>Parent row: same UPSERT as {@code saveWithSplits}.
    */
   @Transactional
-  public <T> void saveWithSplitsReconciled(T domain) {
-    if (domain == null) {
-      throw new IllegalArgumentException("domain must not be null");
+  public <T> T saveWithSplitsReconciled(T parent) {
+    if (parent == null) {
+      throw new IllegalArgumentException("parent must not be null");
     }
     JsonbEntityMetadata metadata =
         registry
-            .forDomainType(domain.getClass())
+            .forDomainType(parent.getClass())
             .orElseThrow(
                 () ->
                     new TmfFilteringException(
                         "No @Tmf630JsonbBacked row entity registered for domain type: "
-                            + domain.getClass().getName()));
+                            + parent.getClass().getName()));
     try {
-      ObjectNode parentTree = objectMapper.valueToTree(domain);
+      ObjectNode parentTree = objectMapper.valueToTree(parent);
       String parentId = parentTree.path("id").asText(null);
       if (parentId == null || parentId.isEmpty()) {
         throw new TmfFilteringException(
-            "Domain instance must have a non-empty 'id' field for split-write: "
-                + domain.getClass().getSimpleName());
+            "Parent instance must have a non-empty 'id' field for split-write: "
+                + parent.getClass().getSimpleName());
       }
 
       Map<JsonbSplitCollectionMetadata, JsonNode> extracted =
@@ -391,9 +393,10 @@ public class Tmf630JsonbWriteExecutor {
       for (Map.Entry<JsonbSplitCollectionMetadata, JsonNode> entry : extracted.entrySet()) {
         reconcileSplitChildren(entry.getKey(), parentId, entry.getValue());
       }
+      return parent;
     } catch (IOException e) {
       throw new UncheckedIOException(
-          "Failed to serialize domain " + domain.getClass().getName() + " for reconciled save",
+          "Failed to serialize parent " + parent.getClass().getName() + " for reconciled save",
           e);
     }
   }
@@ -536,11 +539,11 @@ public class Tmf630JsonbWriteExecutor {
    * housekeeping after a series of {@link #removeChild} calls that left gaps.
    */
   @Transactional
-  public <T> void reindexChildren(Class<T> parentDomainType, String parentId, Class<?> childType) {
+  public void reindexChildren(Class<?> parentType, String parentId, Class<?> childType) {
     if (parentId == null || parentId.isEmpty()) {
       throw new IllegalArgumentException("parentId must not be blank");
     }
-    JsonbSplitCollectionMetadata split = resolveSplitForChild(parentDomainType, childType);
+    JsonbSplitCollectionMetadata split = resolveSplitForChild(parentType, childType);
     List<String> orderedIds =
         jdbcClient
             .sql(
@@ -562,15 +565,15 @@ public class Tmf630JsonbWriteExecutor {
   }
 
   private JsonbSplitCollectionMetadata resolveSplitForChild(
-      Class<?> parentDomainType, Class<?> childType) {
+      Class<?> parentType, Class<?> childType) {
     JsonbEntityMetadata metadata =
         registry
-            .forDomainType(parentDomainType)
+            .forDomainType(parentType)
             .orElseThrow(
                 () ->
                     new TmfFilteringException(
                         "No @Tmf630JsonbBacked row entity registered for domain type: "
-                            + parentDomainType.getName()));
+                            + parentType.getName()));
     return findSplitForChildType(metadata, childType);
   }
 
