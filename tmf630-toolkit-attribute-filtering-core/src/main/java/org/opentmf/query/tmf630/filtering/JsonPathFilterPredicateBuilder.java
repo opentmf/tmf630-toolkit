@@ -3,6 +3,7 @@ package org.opentmf.query.tmf630.filtering;
 import com.jayway.jsonpath.InvalidPathException;
 import com.jayway.jsonpath.JsonPath;
 import com.querydsl.core.BooleanBuilder;
+import com.querydsl.core.types.ExpressionUtils;
 import com.querydsl.core.types.Expression;
 import com.querydsl.core.types.Operator;
 import com.querydsl.core.types.Predicate;
@@ -509,8 +510,9 @@ public class JsonPathFilterPredicateBuilder {
       String allowlistPrefix,
       boolean allowNestedPaths) {
     if (isJpaEntity(rootEntity) && containsPositionalIndex(comparison.fieldPath())) {
-      throw new TmfFilteringException(
-          "Positional index [N] in jsonPath filter is supported only for document databases.");
+      return Optional.of(
+          buildJpaPositionalPredicate(
+              rootEntity, rootPath, comparison, settings, allowNestedPaths));
     }
     // The allowlist is authored by JavaBean field name; positional index [N] narrows
     // which element, not which field, so it is stripped before the allowlist check.
@@ -531,6 +533,115 @@ public class JsonPathFilterPredicateBuilder {
       return Optional.of(buildRegexPredicate(rootPath, resolvedField, comparison.literal()));
     }
     return Optional.of(buildTypedPredicate(comparison, rootPath, resolvedField));
+  }
+
+  /**
+   * Compiles {@code hopField[N].leaf <op> literal} on a JPA entity to a correlated
+   * {@code EXISTS} subquery keyed on JPQL's {@code INDEX(alias)} function. The hop
+   * field must be a JOIN-mapped collection annotated with {@code @OrderColumn} — the
+   * annotation is what makes {@code [N]} meaningful under a normalized relational
+   * schema. Rejected shapes: nested positional indices, positional after a scalar hop,
+   * or a positional at the leaf (nonsensical for a comparison filter).
+   */
+  private Predicate buildJpaPositionalPredicate(
+      Class<?> rootEntity,
+      PathBuilder<?> rootPath,
+      ComparisonNode comparison,
+      Tmf630FilterSettings settings,
+      boolean allowNestedPaths) {
+    PositionalPath positional = parseSimplePositional(comparison.fieldPath());
+    if (positional == null) {
+      throw new TmfFilteringException(
+          "Positional index [N] in jsonPath filter on a JPA entity is supported only in the"
+              + " single-hop shape 'field[N].leaf' (v3.0.0 first cut). Nested positional"
+              + " indices, positional after a scalar hop, or positional at the leaf are not"
+              + " yet supported. Term: "
+              + comparison.fieldPath());
+    }
+    Field collectionField = findField(rootEntity, positional.hopField());
+    if (collectionField == null) {
+      throw new TmfFilteringException(
+          "Unknown field '" + positional.hopField() + "' on " + rootEntity.getSimpleName()
+              + " in filter path: " + comparison.fieldPath());
+    }
+    if (!Collection.class.isAssignableFrom(collectionField.getType())
+        || !isJoinMappedField(collectionField)) {
+      throw new TmfFilteringException(
+          "Positional index [N] in filter requires the field to be a JOIN-mapped collection"
+              + " (@OneToMany, @ManyToMany, or @ElementCollection). Field: "
+              + positional.hopField());
+    }
+    if (!hasOrderColumn(collectionField)) {
+      throw new TmfFilteringException(
+          "Positional index [N] in filter is only meaningful on a JPA collection that opts"
+              + " into ordered persistence via @OrderColumn. Add @OrderColumn to '"
+              + positional.hopField()
+              + "' on "
+              + rootEntity.getSimpleName()
+              + ", or use a keyed match like "
+              + positional.hopField()
+              + "[?(@.name=='...')] instead.");
+    }
+    Class<?> elementType = resolveCollectionElementType(collectionField);
+    PathBuilder<?> subroot =
+        new PathBuilder<>(
+            elementType, "_jpaPos_" + JPA_CORRELATION_ALIAS_COUNTER.incrementAndGet());
+    ResolvedField leafField =
+        pathResolver.resolve(elementType, positional.leafPath(), allowNestedPaths);
+    Predicate leafPredicate = buildSubqueryLeafPredicate(comparison, subroot, leafField);
+    com.querydsl.core.types.dsl.NumberExpression<Integer> index =
+        Expressions.numberTemplate(Integer.class, "index({0})", subroot);
+    Predicate combined = ExpressionUtils.allOf(index.eq(positional.index()), leafPredicate);
+    com.querydsl.core.types.CollectionExpression<?, ?> listExpression =
+        rootPath.getList(positional.hopField(), (Class) elementType);
+    return buildJpaExistsPredicate(listExpression, subroot, combined);
+  }
+
+  private Predicate buildSubqueryLeafPredicate(
+      ComparisonNode comparison, PathBuilder<?> subroot, ResolvedField leafField) {
+    if (comparison.literal().kind() == LiteralKind.NULL) {
+      return buildNullPredicate(comparison.operator(), subroot, leafField);
+    }
+    if (comparison.operator() == ComparisonOperator.REGEX) {
+      return buildRegexPredicate(subroot, leafField, comparison.literal());
+    }
+    return buildTypedPredicate(comparison, subroot, leafField);
+  }
+
+  /**
+   * Parses the simple positional shape supported by v1: {@code hop[N].leaf}, where
+   * {@code hop} is a single identifier off the entity root, {@code N} is a
+   * non-negative integer, and {@code leaf} is a dotted scalar path within the
+   * collection element (no further {@code [N]}). Returns {@code null} if the shape
+   * doesn't match — the caller then rejects with a scope-specific message.
+   */
+  static PositionalPath parseSimplePositional(String fieldPath) {
+    Matcher matcher = SIMPLE_POSITIONAL.matcher(fieldPath);
+    if (!matcher.matches()) {
+      return null;
+    }
+    String leaf = matcher.group(3);
+    if (containsPositionalIndex(leaf)) {
+      return null;
+    }
+    return new PositionalPath(matcher.group(1), Integer.parseInt(matcher.group(2)), leaf);
+  }
+
+  private static final Pattern SIMPLE_POSITIONAL =
+      Pattern.compile("^([A-Za-z_][A-Za-z0-9_]*)\\[(\\d+)\\]\\.(.+)$");
+
+  record PositionalPath(String hopField, int index, String leafPath) {}
+
+  @SuppressWarnings("java:S1872")
+  private static boolean hasOrderColumn(Field field) {
+    for (Annotation annotation : field.getAnnotations()) {
+      String name = annotation.annotationType().getName();
+      if ("jakarta.persistence.OrderColumn".equals(name)
+          || "javax.persistence.OrderColumn".equals(name)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private boolean isAllowedFieldOrReport(
@@ -625,7 +736,7 @@ public class JsonPathFilterPredicateBuilder {
     return allowlist.contains(fieldPath);
   }
 
-  private boolean containsPositionalIndex(String fieldPath) {
+  private static boolean containsPositionalIndex(String fieldPath) {
     for (int i = 0; i < fieldPath.length() - 1; i++) {
       if (fieldPath.charAt(i) == '[' && Character.isDigit(fieldPath.charAt(i + 1))) {
         return true;

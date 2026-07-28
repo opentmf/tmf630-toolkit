@@ -58,35 +58,36 @@ they would against a non-split backend.
 ## Capability matrix by backend
 
 All spec references below are to the seven-part **TMF-630 REST API Design Guidelines**:
-Part 1 at **v4.2.0**, Parts 2–7 at **v4.0.0** (the current TM Forum public release set).
+Part 1 at **v4.0.2**, Parts 2–7 at **v4.0.0** (the current TM Forum public release set; version numbers taken from each PDF's own metadata, not its filename).
 The "TMF-630 artefact" column names the exact document and, where the source doc
 numbers its subsections, the section number; Part 6 doesn't number its subsections in
 its TOC, so those rows name the subsection heading verbatim.
 
-Legend: ✅ full • 🟡 partial (see linked note) • 🚫 not applicable / out of scope.
-Rows 1–11 describe direct TMF-630 features; rows 12–14 are toolkit-specific
-extensions; rows 15–16 cover TMF-630 Part 4 §2.
+Legend: `✓ Yes` (full support; may have documented prerequisites) • `~ Partial` (see linked note) • `↗ via …` (delivered by a sibling library) • `— N/A` (feature doesn't apply architecturally to this backend) • `⊘ Won't do` (deliberate non-implementation on design grounds) • `✗ No` (real gap; not implemented).
+Rows 1–12 describe direct TMF-630 features; rows 13–15 are toolkit-specific
+extensions; rows 16–17 cover TMF-630 Part 4 §2.
 
 | # | TMF-630 artefact — description | JPA | Mongo | PostgreSQL JSONB |
 |---|---|---|---|---|
-| 1 | **Part 1 v4.2.0 §4.3** — `fields=` partial representation | ✅ | ✅ | ✅ |
-| 2 | **Part 1 v4.2.0 §4.4** — attribute filtering (26 operators) | ✅ | ✅ | ✅ |
-| 3 | **Part 1 v4.2.0 §4.5** — pagination (`offset`/`limit`, `X-Total-Count`, `206`) | ✅ | ✅ | ✅ |
-| 4 | **Part 1 v4.2.0 §4.5** — `Link` header pagination navigation | ✅ | ✅ | ✅ |
-| 5 | **Part 1 v4.2.0 §4.7** — sorting (`+`/`-` direction, multi-field, dotted) | ✅ | ✅ | ✅ |
-| 6 | **Part 6 v4.0.0 "Collection filtering using JSONPath"** — basic `filter=` grammar (`==`, `!=`, `>`, `>=`, `<`, `<=`, `&&`, `||`, `!`) | ✅ | ✅ | ✅ |
-| 7 | **Part 6 v4.0.0 "Collection filtering using JSONPath"** — array correlation `arr[?(@.x==...)]` | 🟡 JOIN-mapped only ([note](#jpa-filter-support-scope)) | ✅ `$elemMatch` | ✅ native SQL/JSON path |
-| 8 | **Part 6 v4.0.0 "JSON Path"** — positional index `[N]` in `filter=` | 🚫 | ✅ | ✅ |
-| 9 | **Part 6 v4.0.0 "JSON Path"** — `length() == N` on `filter=` | ✅ | ✅ | ✅ |
-| 10 | **Part 6 v4.0.0 "Sorting selector"** — correlated `sort=arr[key=X].value` | 🟡 simple-rich only ([note](#12-correlated-sort-mongodb)) | ✅ ([aggregation module](#spring-boot--mongodb-backed-services-adding-correlated-sort)) | ✅ native SQL/JSON path |
-| 11 | **Part 1 v4.2.0 §3.3 + §3.4** — status codes + uniform error body | ✅ | ✅ | ✅ |
-| 12 | *Toolkit extension* — `@Tmf630*SplitCollection` master-detail split | 🚫 | ✅ [(section 14)](#14-master-detail-split--mongo) | ✅ [(section 15)](#15-master-detail-split--postgresql-jsonb) |
-| 13 | *Toolkit extension* — split-collection sub-endpoint controller | 🚫 | ✅ | ✅ |
-| 14 | *Toolkit extension* — top-level `filter=` OR across parent + split | 🚫 | ✅ `$unionWith` | ✅ SQL `OR` |
-| 15 | **Part 4 v4.0.0 §2.5** — versioned resource path form `/{id}:(version=X)` + latest-version resolver | ✅ | ✅ | ✅ |
-| 16 | **Part 4 v4.0.0 §2.6** — RBAC (role-based access control on versioned resources) | 🚫 out of scope — see [`opentmf/openid-rbac-security`](https://github.com/opentmf/openid-rbac-security), the sibling library from the same opentmf project family | 🚫 same | 🚫 same |
+| 1 | **Part 1 v4.0.2 §4.3** — `fields=` partial representation | ✓ Yes | ✓ Yes | ✓ Yes |
+| 2 | **Part 1 v4.0.2 §4.4** — attribute filtering (26 operators) | ✓ Yes | ✓ Yes | ✓ Yes |
+| 3 | **Part 1 v4.0.2 §4.5** — pagination (`offset`/`limit`, `X-Total-Count`, `206`) | ✓ Yes | ✓ Yes | ✓ Yes |
+| 4 | **Part 1 v4.0.2 §4.5** — `Link` header pagination navigation | ✓ Yes | ✓ Yes | ✓ Yes |
+| 5 | **Part 1 v4.0.2 §4.7** — sorting (`+`/`-` direction, multi-field, dotted) | ✓ Yes | ✓ Yes | ✓ Yes |
+| 6 | **Part 6 v4.0.0 "Collection filtering using JSONPath"** — basic `filter=` grammar (`==`, `!=`, `>`, `>=`, `<`, `<=`, `&&`, `\|\|`, `!`) | ✓ Yes | ✓ Yes | ✓ Yes |
+| 7 | **Part 6 v4.0.0 "Collection filtering using JSONPath"** — array correlation `arr[?(@.x==...)]` | ✓ Yes — requires the collection to be a JOIN-mapped `@OneToMany`/`@ManyToMany`/`@ElementCollection` ([note](#jpa-filter-support-scope)) | ✓ Yes (`$elemMatch`) | ✓ Yes (native SQL/JSON path) |
+| 8 | **Part 6 v4.0.0 "JSON Path"** — positional index `[N]` in `filter=` | ✓ Yes (single-hop) — requires `@OrderColumn` on the target collection so element position is defined | ✓ Yes | ✓ Yes |
+| 9 | **Part 6 v4.0.0 "JSON Path"** — `length() == N` on `filter=` | ✓ Yes | ✓ Yes | ✓ Yes |
+| 10 | **Part 6 v4.0.0 "Partial resource representation using JSONPath"** — `fields=` with JSONPath predicates / bracket-list forms (`fields=note[?(@.author=='X')]`, `fields=['id','href',...]`) | ⊘ Won't do — the recommendation conflates projection (`fields=`) with sub-element filtering, overlapping `filter=` with no defined precedence. Use `filter=` for row selection and `fields=` for column selection | ⊘ same | ⊘ same |
+| 11 | **Part 6 v4.0.0 "Sorting selector"** — correlated `sort=arr[key=X].value` | ~ Partial — multi-hop chains + `min()`/`max()` + direction-aware implicit reducer; positional `[N]` / coercions / full JsonPath still rejected ([note](#12-correlated-sort-mongodb)) | ✓ Yes ([aggregation module](#spring-boot--mongodb-backed-services-adding-correlated-sort)) | ✓ Yes (native SQL/JSON path) |
+| 12 | **Part 1 v4.0.2 §3.3 + §3.4** — status codes + uniform error body | ✓ Yes | ✓ Yes | ✓ Yes |
+| 13 | *Toolkit extension* — `@Tmf630*SplitCollection` master-detail split | — N/A — JPA's normalized schema already stores parent and children in separate tables; nothing to split | ✓ Yes ([section 14](#14-master-detail-split--mongo)) | ✓ Yes ([section 15](#15-master-detail-split--postgresql-jsonb)) |
+| 14 | *Toolkit extension* — split-collection sub-endpoint controller | — N/A — same | ✓ Yes | ✓ Yes |
+| 15 | *Toolkit extension* — top-level `filter=` OR across parent + split | — N/A — same | ✓ Yes (`$unionWith`) | ✓ Yes (SQL `OR`) |
+| 16 | **Part 4 v4.0.0 §2.5** — versioned resource path form `/{id}:(version=X)` + latest-version resolver | ✓ Yes | ✓ Yes | ✓ Yes |
+| 17 | **Part 4 v4.0.0 §2.6** — RBAC (role-based access control on versioned resources) | ↗ via [`opentmf/openid-rbac-security`](https://github.com/opentmf/openid-rbac-security) — sibling library from the same opentmf project family | ↗ same | ↗ same |
 
-Rows 12–14 (split-and-merge) are toolkit-specific extensions not covered by TMF-630 today.
+Rows 13–15 (split-and-merge) are toolkit-specific extensions not covered by TMF-630 today.
 The URL contract exposed to clients stays TMF-630 conformant — the extension is entirely
 server-side.
 
@@ -150,8 +151,10 @@ server-side.
 - Correlated sort (MongoDB) — JSONPath (`$.arr[?(@.name=='k')].value`) and simple-rich
   (`arr[name=k].value`) grammars, both compiled to a single `Aggregation` pipeline. Ships
   in the optional `tmf630-toolkit-mongo-aggregation` module.
-- Correlated sort (JPA, since 3.0.0) — simple-rich `sort=field[key=value].leaf` against a
-  JOIN-mapped `@OneToMany`/`@ManyToMany`/`@ElementCollection`. Ships in the optional
+- Correlated sort (JPA, since 3.0.0) — rich `sort=field[key=value].leaf` against a
+  JOIN-mapped `@OneToMany`/`@ManyToMany`/`@ElementCollection`, including multi-hop
+  chains (`a[k=v].b[k=v].leaf`), explicit `min()`/`max()` aggregators, and a
+  direction-aware implicit reducer (matches Mongo's `$min`/`$max`). Ships in the optional
   `tmf630-toolkit-jpa-correlated-sort` module.
 - **PostgreSQL-with-JSONB backend (3.0.0)** — full TMF-630 query contract against a
   Postgres `payload jsonb` column via native SQL/JSON path. Ships in the optional
@@ -359,10 +362,20 @@ Adding this dependency:
   a JPA service).
 - Auto-registers a `Tmf630JpaCorrelatedSortExecutor` bean when an
   `EntityManager` bean is on the context.
-- Scope in 3.0.0 first cut: simple-rich single-hop
-  `sort=field[key=value].leaf`. JsonPath sort grammar, positional `[N]`,
-  wildcards `[*]`, aggregators, and coercions are rejected with clear
-  messages naming the escape hatch (JSONB backend for the full grammar).
+- Scope in 3.0.0:
+  - `sort=field[key=value].leaf` — single-hop rich sort.
+  - `sort=a[k=v].b[k=v].leaf` — multi-hop chains, any depth (each hop must be
+    a JOIN-mapped `@OneToMany`/`@ManyToMany`/`@ElementCollection`).
+  - `sort=min(...)` / `sort=max(...)` — explicit aggregators; direction is
+    orthogonal (`sort=-min(x)` = descending by per-parent min).
+  - Direction-aware implicit reducer for multi-match children: ASC → MIN,
+    DESC → MAX (matches Mongo executor).
+  - `nulls-last` honored via `opentmf.tmf630.paging.nulls-last` across
+    plain and rich terms.
+
+  Still rejected with clear messages (JSONB backend takes over for these):
+  full JsonPath sort grammar (`$.arr[?(...)].leaf`), positional `[N]`,
+  wildcards `[*]`, and coercions `num()`/`str()`/`date()`.
 
 ### Plain Spring (manual wiring)
 
@@ -3198,21 +3211,23 @@ The full section-by-section audit is in
 
 | Spec area                                              | Status                                                                                                                                                        |
 | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Part 1 §3.3 status codes emitted by toolkit             | ✅ `200`, `206`, `400`, `416` (host app owns the rest)                                                                                                        |
-| Part 1 §3.4 error body shape (`code`, `reason`, `message`, optional fields) | ✅ Uniform across filter / sort / paging / range handlers (2.1.5)                                                                                              |
-| Part 1 §4.3 `fields=` partial representation           | ✅ Including `fields=none`, always-include `id`/`href`                                                                                                          |
-| Part 1 §4.4 attribute filtering (`.gt=`, `.eq=`, etc.) | ✅ 26 operators, both suffix and URL-encoded literal forms                                                                                                    |
-| Part 1 §4.5 pagination (`offset`, `limit`, `X-Total-Count`, `206`) | ✅ Including `Link` header for navigation (2.1.5) and `416` for out-of-range offsets                                                                          |
-| Part 1 §4.7 sorting                                    | ✅ `+`/`-` direction, comma-separated multi-field, dotted nested paths                                                                                        |
-| Part 6 JSONPath `filter=`                              | ✅ Restricted subset — see [Mongo](#mongo-filter-support-scope) / [JPA](#jpa-filter-support-scope) support scope. Includes `length()==N` and `[N]` (2.1.5). |
-| Part 6 JSONPath `sort=`                                | ✅ End-to-end, both plain-find and correlated-sort executor paths                                                                                             |
-| Part 1 §5 modify / §6 create / §7 delete / §8 task / §9 monitor / §10 notifications / §11 versioning / §12 event | 🚫 Out of toolkit scope — application-level                                                                                                                  |
-| Part 2 polymorphism / extension / depth-expand / EntityRefOrValue | 🚫 Modelling patterns (out of scope) — `depth`/`expand` names are reserved so they aren't misread as attribute filters                                       |
-| Part 3 hypermedia / JSON-LD                            | 🚫 Optional per spec; not implemented                                                                                                                        |
-| Part 4 Export/Import Task / Entity Versioning / RBAC   | 🚫 Application-level                                                                                                                                          |
-| Part 5 JSON Patch Query                                | 🚫 Toolkit doesn't do PATCH                                                                                                                                   |
-| Part 6 `fields=` with JSONPath expression              | ❌ Known gap — `fields=` accepts only dotted names + `fields=none`. On the 2.2.x roadmap                                                                       |
-| Part 7 JSON Schemas                                    | 🚫 Modelling patterns                                                                                                                                         |
+| Part 1 §3.3 status codes emitted by toolkit             | ✓ Yes — `200`, `206`, `400`, `416` (host app owns the rest)                                                                                                        |
+| Part 1 §3.4 error body shape (`code`, `reason`, `message`, optional fields) | ✓ Yes — uniform across filter / sort / paging / range handlers (2.1.5)                                                                                              |
+| Part 1 §4.3 `fields=` partial representation           | ✓ Yes — including `fields=none`, always-include `id`/`href`                                                                                                          |
+| Part 1 §4.4 attribute filtering (`.gt=`, `.eq=`, etc.) | ✓ Yes — 26 operators, both suffix and URL-encoded literal forms                                                                                                    |
+| Part 1 §4.5 pagination (`offset`, `limit`, `X-Total-Count`, `206`) | ✓ Yes — including `Link` header for navigation (2.1.5) and `416` for out-of-range offsets                                                                          |
+| Part 1 §4.7 sorting                                    | ✓ Yes — `+`/`-` direction, comma-separated multi-field, dotted nested paths                                                                                        |
+| Part 6 JSONPath `filter=`                              | ✓ Yes — restricted subset; see [Mongo](#mongo-filter-support-scope) / [JPA](#jpa-filter-support-scope) support scope. Includes `length()==N` and `[N]` (2.1.5). |
+| Part 6 JSONPath `sort=`                                | ✓ Yes — end-to-end, both plain-find and correlated-sort executor paths                                                                                             |
+| Part 1 §5 modify / §6 create / §7 delete / §8 task / §9 monitor / §10 notifications / §11 versioning / §12 event | — N/A — CRUD, workflow, and event patterns sit outside a query toolkit's architecture; application-level                                                        |
+| Part 2 polymorphism / extension / EntityRefOrValue     | ↗ via [`opentmf/opentmf-v4-models`](https://github.com/opentmf/opentmf-v4-models) or [`opentmf/dnext-v4-models`](https://github.com/opentmf/dnext-v4-models) — Jackson 3 subtypes registered per module via `registerExtensions(JsonMapper.Builder)` |
+| Part 2 depth / expand — query-time nested-resource expansion | — N/A — the toolkit's `fields=` selector covers the shallow-vs-deep story on its own axis; the two param names are reserved so they aren't misread as attribute filters |
+| Part 3 hypermedia / JSON-LD                            | — N/A — response-representation concern, orthogonal to query                                                                                                     |
+| Part 4 §1 Export/Import Task                           | — N/A — bulk transfer / job orchestration; application-level                                                                                                     |
+| Part 4 §2 Entity Versioning (URL grammar + latest-version resolver) | ✓ Yes — shipped as of v3.0.0; see [top matrix row 16](#capability-matrix-by-backend)                                                                                |
+| Part 4 §2.6 RBAC                                       | ↗ via [`opentmf/openid-rbac-security`](https://github.com/opentmf/openid-rbac-security) — declarative `application.yml` role gates                                 |
+| Part 5 JSON Patch Query                                | ↗ via [`opentmf/opentmf-json-patch`](https://github.com/opentmf/opentmf-json-patch) — RFC 6902 (JSON Patch) + RFC 7396 (JSON Merge Patch) on Jackson 3             |
+| Part 7 JSON Schemas                                    | — N/A — modelling patterns; delivered by the v4-models libraries above                                                                                            |
 
 ## POC databases used
 

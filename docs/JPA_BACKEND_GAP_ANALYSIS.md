@@ -3,6 +3,24 @@
 **Status:** analysis / decision support, not a spec
 **Written against:** `2.1.6-SNAPSHOT` (latest release `2.1.5`, 2026-07-24)
 **Audience:** toolkit maintainer, deciding whether/how to close the pure-JPA gap
+
+> **Post-v3.0.0 update (2026-07-28):** rows 2–5 of the executive-summary table
+> below are partially superseded by the `tmf630-toolkit-jpa-correlated-sort`
+> module and its v3.0.0 pragmatic-parity additions:
+>
+> - Row 2 (simple-rich `arr[id=X].leaf`) — **shipped** (v3.0.0-first).
+> - Row 3 (JsonPath `$.arr[?(...)].leaf`) — still deferred; rejected with a
+>   message pointing at the JSONB backend.
+> - Row 4 (`[*]` / `[N]`) — still deferred; rejected. `[*]` reduces to
+>   `min()`/`max()`; `[N]` is not portable across JPA dialects.
+> - Row 5 (`min()`/`max()`) — **shipped**. This document called it "impractical
+>   portably", but plain SQL aggregate subqueries (`SELECT MIN(x) …`) are
+>   dialect-portable — the v3.0.0 executor uses them.
+> - Row 7 (nulls-last parity) — **already worked** via `.nullsLast()` uniformly
+>   applied; the memo predating v3.0.0 rich-sort work overstated the gap.
+>
+> Portability-driven rejections (positional, coercions, full JsonPath predicate
+> DSL) remain deferred as **architectural** choices, not schedule items.
 **Related design docs:**
 - [`correlated-sort.md`](./correlated-sort.md) — the sort feature this document lists as
   the largest gap

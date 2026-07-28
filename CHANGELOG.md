@@ -4,6 +4,78 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 
 ## [3.0.0] - 2026-07-26
 
+### Added (positional `[N]` in JPA `filter=` with `@OrderColumn` — v3.0.0)
+
+- **`filter=$[?(@.hopField[N].leaf == literal)]` now supported on JPA** — compiles
+  to a correlated `EXISTS` subquery keyed on JPQL's `INDEX(alias)` function:
+  ```sql
+  WHERE EXISTS (
+    SELECT 1 FROM parent.hopField alias
+    WHERE INDEX(alias) = N AND alias.leaf = <literal>
+  )
+  ```
+  Portable across every Hibernate-supported dialect — no `ROW_NUMBER()` /
+  `LATERAL` / `TOP N` split.
+
+- **Prerequisite: `@OrderColumn` on the collection.** Element position is
+  undefined on a plain `@OneToMany` (SQL doesn't guarantee row order); the caller
+  opts into ordered persistence by annotating the collection with `@OrderColumn`.
+  When missing, the filter is rejected with an actionable 400 naming the exact
+  annotation and pointing at the keyed-match alternative (row 7 in the capability
+  matrix).
+
+- **Scope in v3.0.0:** single-hop positional (`hopField[N].leaf`). Nested
+  positional (`hopField[N].sub[M].leaf`) and positional after a scalar hop
+  (`parent.child[N].leaf`) still reject with a specific "not yet supported"
+  message pointing at the JSONB backend for the full grammar.
+
+- **Capability matrix reworded:** rows 7 and 8 now read as `✓ Yes` with a
+  prerequisite (JOIN-mapped for row 7; `@OrderColumn` for row 8) instead of the
+  earlier `~ Partial` / `✗ No` framing. The implementation was already complete
+  in each case — the caller-side schema is the gate, not toolkit incompleteness.
+
+### Added (JPA correlated sort — pragmatic parity with Mongo — v3.0.0)
+
+- **Multi-hop chains on JPA rich sort** —
+  `tmf630-toolkit-jpa-correlated-sort` now accepts
+  `sort=a[k1=v1].b[k2=v2].leaf` (any depth), compiling each chain to a correlated
+  subquery with chained JPQL joins:
+  ```sql
+  ORDER BY (
+    SELECT [MIN|MAX](aliasN.leafField)
+    FROM parent.hopField0 alias0
+    JOIN alias0.hopField1 alias1
+    ...
+    WHERE alias0.matchKey0 = 'val0' AND alias1.matchKey1 = 'val1' AND ...
+  ) ASC|DESC [NULLS LAST]
+  ```
+  Each hop field must be a JOIN-mapped association
+  (`@OneToMany`/`@ManyToMany`/`@ElementCollection`); non-collection or non-mapped
+  fields are rejected with an actionable message.
+
+- **Explicit `min()` / `max()` aggregator wrappers** —
+  `sort=min(items[sku=A].price)` / `sort=max(...)`. Direction is orthogonal to the
+  aggregator: `sort=-min(x)` means "descending order of the per-parent min".
+
+- **Direction-aware implicit reducer** — when the caller omits `min()`/`max()` and
+  the hop chain matches multiple children, the executor silently reduces via `MIN`
+  (ASC direction) or `MAX` (DESC), mirroring
+  `Tmf630MongoCorrelatedSortExecutor`'s direction-aware `$min`/`$max`. This
+  replaces the previous behavior of raising Hibernate's "scalar subquery returned
+  more than one row" error.
+
+- **`nulls-last` parity across term kinds** — the `opentmf.tmf630.paging.nulls-last`
+  flag now takes effect on rich sort subqueries too (was already true; documented
+  here for clarity). QueryDSL emits `NULLS LAST` uniformly; Hibernate handles
+  dialect emulation.
+
+Still deliberately rejected on JPA with actionable messages: positional `[N]`
+(non-portable across dialects), wildcards `[*]` (use explicit `min()`/`max()`),
+coercions `num()`/`str()`/`date()` (dialect divergence), and full JsonPath sort
+grammar `$.arr[?(...)].leaf` (needs a JsonPath-predicate → SQL-WHERE mini-DSL that
+belongs on the JSONB backend). These rejections point users at the JSONB backend
+where the full grammar is native.
+
 ### Added (entity versioning — TMF-630 Part 4 §2 — v3.0.0)
 
 - **`TmfVersionedId` record + argument resolver** —

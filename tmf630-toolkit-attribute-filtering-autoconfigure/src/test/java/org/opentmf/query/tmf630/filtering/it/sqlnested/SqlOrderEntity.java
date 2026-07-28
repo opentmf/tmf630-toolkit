@@ -7,6 +7,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.OneToMany;
+import jakarta.persistence.OrderColumn;
 import jakarta.persistence.Table;
 import java.util.ArrayList;
 import java.util.List;
@@ -33,6 +34,13 @@ public class SqlOrderEntity {
       orphanRemoval = true,
       mappedBy = "order")
   private List<SqlOrderItem> items = new ArrayList<>();
+
+  @OneToMany(
+      cascade = CascadeType.ALL,
+      orphanRemoval = true,
+      mappedBy = "order")
+  @OrderColumn(name = "note_order")
+  private List<SqlOrderNote> notes = new ArrayList<>();
 
   public Long getId() {
     return id;
@@ -69,5 +77,18 @@ public class SqlOrderEntity {
   public void addItem(SqlOrderItem item) {
     item.setOrder(this);
     items.add(item);
+  }
+
+  public List<SqlOrderNote> getNotes() {
+    return notes;
+  }
+
+  public void setNotes(List<SqlOrderNote> notes) {
+    this.notes = notes;
+  }
+
+  public void addNote(SqlOrderNote note) {
+    note.setOrder(this);
+    notes.add(note);
   }
 }

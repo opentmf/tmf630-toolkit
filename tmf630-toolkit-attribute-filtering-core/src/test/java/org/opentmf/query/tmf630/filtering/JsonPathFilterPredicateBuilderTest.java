@@ -1172,7 +1172,11 @@ class JsonPathFilterPredicateBuilderTest {
   }
 
   @Test
-  void positionalIndexRejectedOnJpaEntity() {
+  void positionalIndexRejectedOnJpaEntityWhenCollectionNotJoinMapped() {
+    // JpaLikeEntity carries a raw List<ExternalReference> field with no
+    // @OneToMany/@ManyToMany/@ElementCollection annotation, so it can't be reached
+    // as a correlated subquery. The rejection message names the required annotations
+    // so the caller knows what to add.
     FieldPathResolver pathResolver = new FieldPathResolver();
     ValueConverter converter = new ValueConverter(new DefaultFormattingConversionService());
     PredicateFactory factory = new PredicateFactory(false, 128);
@@ -1192,8 +1196,12 @@ class JsonPathFilterPredicateBuilderTest {
                     "$[?(@.externalReference[2].id == 'X')]",
                     allowlist,
                     cfg));
-    assertTrue(ex.getMessage().contains("document databases"));
+    assertTrue(ex.getMessage().contains("JOIN-mapped collection"));
   }
+
+  // Positive/reject paths that need @OneToMany + @OrderColumn on the entity are covered
+  // in Tmf630PredicateSqlJpaPositionalIT (autoconfigure module) — this module doesn't
+  // have jakarta.persistence.OneToMany/OrderColumn on its test classpath.
 
   @Test
   void positionalIndexRejectedOnScalarLeaf() {

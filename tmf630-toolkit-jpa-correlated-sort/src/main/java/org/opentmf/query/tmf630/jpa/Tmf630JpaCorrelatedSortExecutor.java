@@ -1,11 +1,15 @@
 package org.opentmf.query.tmf630.jpa;
 
 import com.querydsl.core.QueryResults;
+import com.querydsl.core.types.CollectionExpression;
+import com.querydsl.core.types.Expression;
 import com.querydsl.core.types.Order;
 import com.querydsl.core.types.OrderSpecifier;
+import com.querydsl.core.types.Path;
 import com.querydsl.core.types.Predicate;
 import com.querydsl.core.types.dsl.ComparableExpressionBase;
 import com.querydsl.core.types.dsl.Expressions;
+import com.querydsl.core.types.dsl.ListPath;
 import com.querydsl.core.types.dsl.PathBuilder;
 import com.querydsl.jpa.JPAExpressions;
 import com.querydsl.jpa.JPQLQuery;
@@ -23,6 +27,9 @@ import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.opentmf.query.tmf630.exception.TmfPagingException;
+import org.opentmf.query.tmf630.jpa.SimpleRichSortTermParser.Aggregator;
+import org.opentmf.query.tmf630.jpa.SimpleRichSortTermParser.Hop;
+import org.opentmf.query.tmf630.jpa.SimpleRichSortTermParser.ParsedTerm;
 import org.opentmf.query.tmf630.paging.TmfSort;
 import org.opentmf.query.tmf630.paging.TmfSortTerm;
 import org.springframework.data.domain.Page;
@@ -30,29 +37,33 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 
 /**
- * Phase (a.4) — JPA correlated-sort executor. Consumes a {@link TmfSort} whose terms may
- * mix {@code PLAIN} and {@code SIMPLE_RICH} kinds, translates each simple-rich term to a
- * correlated scalar subquery via QueryDSL's {@link JPAExpressions}, and executes the
- * combined query through the injected {@link EntityManager}. Multi-hop simple-rich chains,
- * JsonPath sort grammar, positional {@code [N]}, wildcards {@code [*]}, aggregators, and
- * coercions are rejected at parse time with actionable messages (see
- * {@link SimpleRichSortTermParser}).
+ * JPA correlated-sort executor.
  *
- * <p>Simple-rich terms compile to:
+ * <p>Consumes a {@link TmfSort} whose terms may mix {@code PLAIN} and {@code SIMPLE_RICH}
+ * kinds. Plain terms render as ordinary {@link OrderSpecifier}s over the parent path;
+ * rich terms compile to a correlated subquery in ORDER BY, chaining JPQL joins for each
+ * hop:
  *
  * <pre>{@code
  * ORDER BY (
- *   SELECT alias.leafField
- *   FROM parent.hopField alias
- *   WHERE alias.matchKey = 'matchValue'
+ *   SELECT [MIN|MAX](aliasN.leafField)
+ *   FROM parent.hopField0 alias0
+ *   JOIN alias0.hopField1 alias1
+ *   ...
+ *   WHERE alias0.matchKey0 = 'val0' AND alias1.matchKey1 = 'val1' AND ...
  * ) ASC|DESC [NULLS LAST]
  * }</pre>
  *
- * <p>Bounded to a single row per outer parent by the semantics of the correlated
- * key-value pair; if a parent has more than one child matching the key, Hibernate/JDBC
- * will raise the standard "scalar subquery returned more than one row" error, which is
- * the honest signal that the caller needs multi-value handling (deferred to a future
- * release). This first-cut deliberately does not silently pick the min/max.
+ * <p>The subquery always aggregates the leaf via MIN (ASC direction) or MAX (DESC
+ * direction) when the caller does not specify an aggregator explicitly. This mirrors the
+ * Mongo executor's direction-aware {@code $min}/{@code $max} reducer and gracefully
+ * handles hop chains where more than one child row matches the key — the sort picks the
+ * extreme value that would land at the top for that direction. An explicit
+ * {@code min(...)} / {@code max(...)} wrapper overrides the direction-derived choice.
+ *
+ * <p>Rejected at parse time with actionable messages: JsonPath sort grammar, wildcards,
+ * positional {@code [N]}, and coercions {@code num()}/{@code str()}/{@code date()} — see
+ * {@link SimpleRichSortTermParser}.
  */
 public class Tmf630JpaCorrelatedSortExecutor {
 
@@ -66,10 +77,10 @@ public class Tmf630JpaCorrelatedSortExecutor {
   }
 
   /**
-   * Runs a paged, filtered, correlated-sort query. The predicate is filtered against
-   * the parent entity; the sort mixes plain dotted terms (rendered as standard
-   * {@link OrderSpecifier}s over the parent path) and simple-rich terms (rendered as
-   * correlated scalar subqueries).
+   * Runs a paged, filtered, correlated-sort query. The predicate is filtered against the
+   * parent entity; the sort mixes plain dotted terms (rendered as standard {@link
+   * OrderSpecifier}s over the parent path) and rich terms (rendered as correlated scalar
+   * subqueries).
    */
   @SuppressWarnings({"rawtypes", "unchecked"})
   public <T> Page<T> findAll(
@@ -100,26 +111,22 @@ public class Tmf630JpaCorrelatedSortExecutor {
     return new PageImpl<>(results.getResults(), pageable, results.getTotal());
   }
 
-  @SuppressWarnings({"rawtypes", "unchecked"})
   private <T> List<OrderSpecifier<?>> buildOrderSpecifiers(
       PathBuilder<T> root, Class<T> rootType, TmfSort tmfSort) {
     List<OrderSpecifier<?>> orders = new ArrayList<>();
     for (TmfSortTerm term : tmfSort.terms()) {
       Order direction = term.direction().isAscending() ? Order.ASC : Order.DESC;
-      OrderSpecifier<?> specifier;
-      switch (term.kind()) {
-        case PLAIN -> specifier = plainOrderSpecifier(root, direction, term.expression());
-        case SIMPLE_RICH ->
-            specifier = simpleRichOrderSpecifier(root, rootType, direction, term.expression());
-        case JSONPATH ->
-            throw new TmfPagingException(
-                "JsonPath sort grammar is not yet supported on JPA correlated sort"
-                    + " (Phase a.4 first cut). Term: "
-                    + term.expression());
-        default ->
-            throw new TmfPagingException(
-                "Unsupported sort term kind: " + term.kind() + " for " + term.expression());
-      }
+      OrderSpecifier<?> specifier =
+          switch (term.kind()) {
+            case PLAIN -> plainOrderSpecifier(root, direction, term.expression());
+            case SIMPLE_RICH -> richOrderSpecifier(root, rootType, direction, term.expression());
+            case JSONPATH ->
+                throw new TmfPagingException(
+                    "JsonPath sort grammar is not supported on JPA correlated sort — use the"
+                        + " rich form 'field[key=value].leaf' (with optional min()/max() and"
+                        + " multi-hop chains) or run against a JSONB-backed entity. Term: "
+                        + term.expression());
+          };
       if (nullsLast) {
         specifier = specifier.nullsLast();
       }
@@ -136,48 +143,101 @@ public class Tmf630JpaCorrelatedSortExecutor {
   }
 
   @SuppressWarnings({"rawtypes", "unchecked"})
-  private OrderSpecifier<?> simpleRichOrderSpecifier(
+  private OrderSpecifier<?> richOrderSpecifier(
       PathBuilder<?> root, Class<?> rootType, Order direction, String expression) {
-    SimpleRichSortTermParser.ParsedTerm parsed = SimpleRichSortTermParser.parse(expression);
-    Field collectionField = findField(rootType, parsed.hopField());
-    if (collectionField == null) {
-      throw new TmfPagingException(
-          "Unknown correlated-sort hop field '"
-              + parsed.hopField()
-              + "' on "
-              + rootType.getSimpleName());
+    ParsedTerm parsed = SimpleRichSortTermParser.parse(expression);
+    Aggregator aggregator = effectiveAggregator(parsed.aggregator(), direction);
+
+    Hop firstHop = parsed.hops().get(0);
+    Field firstField = requireCollectionField(rootType, firstHop.hopField(), expression);
+    Class<?> firstElement = resolveCollectionElementType(firstField);
+    PathBuilder<?> firstAlias = newAlias(firstElement);
+    ListPath<?, ?> firstCollection =
+        root.getList(firstHop.hopField(), (Class) firstElement);
+
+    com.querydsl.core.types.dsl.BooleanExpression whereExpr =
+        firstAlias
+            .getString(firstHop.matchKey())
+            .eq(Expressions.constant(firstHop.matchValue()));
+
+    PathBuilder<?> currentAlias = firstAlias;
+    Class<?> currentElement = firstElement;
+
+    List<JoinStep> additionalJoins = new ArrayList<>();
+    for (int i = 1; i < parsed.hops().size(); i++) {
+      Hop nextHop = parsed.hops().get(i);
+      Field nextField = requireCollectionField(currentElement, nextHop.hopField(), expression);
+      Class<?> nextElement = resolveCollectionElementType(nextField);
+      PathBuilder<?> nextAlias = newAlias(nextElement);
+      ListPath<?, ?> nextCollection =
+          currentAlias.getList(nextHop.hopField(), (Class) nextElement);
+      additionalJoins.add(new JoinStep(nextCollection, nextAlias));
+      whereExpr =
+          whereExpr.and(
+              nextAlias
+                  .getString(nextHop.matchKey())
+                  .eq(Expressions.constant(nextHop.matchValue())));
+      currentAlias = nextAlias;
+      currentElement = nextElement;
     }
-    if (!Collection.class.isAssignableFrom(collectionField.getType())) {
+
+    ComparableExpressionBase<Comparable> leafExpr =
+        currentAlias.getComparable(parsed.leafField(), Comparable.class);
+    Expression<?> selectExpr =
+        switch (aggregator) {
+          case MIN -> leafExpr.min();
+          case MAX -> leafExpr.max();
+          case NONE -> leafExpr;
+        };
+
+    JPQLQuery<?> subquery =
+        JPAExpressions.select(selectExpr)
+            .from(
+                (CollectionExpression<?, Object>) firstCollection,
+                (Path<Object>) firstAlias);
+    for (JoinStep step : additionalJoins) {
+      subquery =
+          subquery.innerJoin(
+              (CollectionExpression<?, Object>) step.collection(),
+              (Path<Object>) step.alias());
+    }
+    subquery = subquery.where(whereExpr);
+
+    return new OrderSpecifier(direction, subquery);
+  }
+
+  private static Aggregator effectiveAggregator(Aggregator declared, Order direction) {
+    if (declared != Aggregator.NONE) {
+      return declared;
+    }
+    return direction == Order.ASC ? Aggregator.MIN : Aggregator.MAX;
+  }
+
+  private PathBuilder<?> newAlias(Class<?> elementType) {
+    return new PathBuilder<>(elementType, "_jpaSort_" + aliasCounter.incrementAndGet());
+  }
+
+  private static Field requireCollectionField(Class<?> owner, String name, String expression) {
+    Field field = findField(owner, name);
+    if (field == null) {
+      throw new TmfPagingException(
+          "Unknown correlated-sort hop field '" + name + "' on " + owner.getSimpleName()
+              + " in: " + expression);
+    }
+    if (!Collection.class.isAssignableFrom(field.getType())) {
       throw new TmfPagingException(
           "Correlated sort hop must target a collection field, got '"
-              + parsed.hopField()
-              + "' of type "
-              + collectionField.getType().getSimpleName());
+              + name + "' of type " + field.getType().getSimpleName() + " in: " + expression);
     }
-    if (!isJoinMappedField(collectionField)) {
+    if (!isJoinMappedField(field)) {
       throw new TmfPagingException(
           "Correlated sort on JPA requires the collection field to be JOIN-mapped via"
               + " @OneToMany, @ManyToMany, or @ElementCollection. Field: "
-              + parsed.hopField());
+              + name
+              + " in: "
+              + expression);
     }
-    Class<?> elementType = resolveCollectionElementType(collectionField);
-    PathBuilder<?> childAlias =
-        new PathBuilder<>(
-            elementType, "_jpaSort_" + aliasCounter.incrementAndGet());
-    com.querydsl.core.types.dsl.ListPath<?, ?> collectionPath =
-        root.getList(parsed.hopField(), (Class) elementType);
-    ComparableExpressionBase<Comparable> leafExpr =
-        childAlias.getComparable(parsed.leafField(), Comparable.class);
-    JPQLQuery<?> subquery =
-        JPAExpressions.select(leafExpr)
-            .from(
-                (com.querydsl.core.types.CollectionExpression<?, Object>) collectionPath,
-                (com.querydsl.core.types.Path<Object>) childAlias)
-            .where(
-                childAlias
-                    .getString(parsed.matchKey())
-                    .eq(Expressions.constant(parsed.matchValue())));
-    return new OrderSpecifier(direction, subquery);
+    return field;
   }
 
   private static Field findField(Class<?> type, String name) {
@@ -208,4 +268,6 @@ public class Tmf630JpaCorrelatedSortExecutor {
         || field.isAnnotationPresent(ManyToMany.class)
         || field.isAnnotationPresent(ElementCollection.class);
   }
+
+  private record JoinStep(ListPath<?, ?> collection, PathBuilder<?> alias) {}
 }

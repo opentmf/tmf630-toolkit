@@ -51,11 +51,12 @@ public class SortableParent {
     this.characteristics = characteristics;
   }
 
-  public void addCharacteristic(String name, String value) {
+  public SortableCharacteristic addCharacteristic(String name, String value) {
     SortableCharacteristic c = new SortableCharacteristic();
     c.setName(name);
     c.setValue(value);
     c.setParent(this);
     characteristics.add(c);
+    return c;
   }
 }

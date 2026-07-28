@@ -1,29 +1,39 @@
 package org.opentmf.query.tmf630.jpa;
 
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.ArrayList;
+import java.util.List;
 import org.opentmf.query.tmf630.exception.TmfPagingException;
 
 /**
- * Parses a single simple-rich sort term expression of the shape
- * {@code hopField[matchKey=matchValue].leafField}, e.g.
- * {@code orderCharacteristic[name=price].value}. Anything more complex — multi-hop chains
- * ({@code a[x=y].b[z=w].c}), positional indices ({@code arr[0].leaf}), wildcards
- * ({@code arr[*].leaf}), aggregators ({@code min(...)} / {@code max(...)}), coercions
- * ({@code num(...)} / {@code str(...)} / {@code date(...)}), or the JsonPath grammar —
- * is rejected with an actionable message. Phase (a.4) of the v3.0.0 roadmap deliberately
- * ships this narrow subset for JPA; broader grammars remain the JSONB backend's territory
- * (see {@code docs/JPA_BACKEND_GAP_ANALYSIS.md} §3.1 and {@code docs/V3_ROADMAP.md} §2).
+ * Parses a rich sort-term expression into a hop chain, leaf field, and optional aggregator.
+ *
+ * <p>Accepted grammar:
+ *
+ * <pre>{@code
+ * <term>     ::= <aggregator>? <hopChain>
+ * <aggregator> ::= 'min(' <hopChain> ')' | 'max(' <hopChain> ')'
+ * <hopChain> ::= <hop> ('.' <hop>)* '.' <leaf>
+ * <hop>      ::= <ident> '[' <ident> '=' <value> ']'
+ * <leaf>     ::= <ident>
+ * <ident>    ::= [A-Za-z_][A-Za-z0-9_]*
+ * <value>    ::= <bareToken> | "'" ... "'" | '"' ... '"'
+ * }</pre>
+ *
+ * <p>Examples that parse:
+ *
+ * <ul>
+ *   <li>{@code characteristics[name=price].value} — single hop
+ *   <li>{@code items[sku=X].variants[color=red].price} — two hops
+ *   <li>{@code min(items[sku=X].variants[color=red].price)} — explicit aggregator
+ * </ul>
+ *
+ * <p>Explicitly rejected with actionable messages: JsonPath grammar ({@code $.}, {@code [?(...)]}),
+ * wildcards ({@code [*]}), positional indices ({@code [N]}), and coercions
+ * ({@code num()}/{@code str()}/{@code date()}). Those either require dialect-specific SQL that
+ * the toolkit cross-dialect promise forbids, or a JsonPath-predicate → SQL-WHERE translator
+ * that belongs on the JSONB backend.
  */
 final class SimpleRichSortTermParser {
-
-  /**
-   * {@code hopField[matchKey=matchValue].leafField}. Captured groups: 1=hop, 2=key,
-   * 3=value, 4=leaf. Whitespace is not permitted inside brackets to keep the grammar
-   * unambiguous; leading/trailing whitespace on the whole term is stripped by the caller.
-   */
-  private static final Pattern SIMPLE_RICH =
-      Pattern.compile("^([A-Za-z_][A-Za-z0-9_]*)\\[([A-Za-z_][A-Za-z0-9_]*)=([^\\]\\[]+)\\]\\.([A-Za-z_][A-Za-z0-9_]*)$");
 
   private SimpleRichSortTermParser() {}
 
@@ -31,51 +41,114 @@ final class SimpleRichSortTermParser {
     if (expression == null || expression.isBlank()) {
       throw new TmfPagingException("Correlated sort term must not be blank.");
     }
-    rejectDisallowedGrammar(expression);
-    Matcher matcher = SIMPLE_RICH.matcher(expression.trim());
-    if (!matcher.matches()) {
+    String trimmed = expression.trim();
+    rejectDisallowedGrammar(trimmed);
+
+    Aggregator aggregator = Aggregator.NONE;
+    String inner = trimmed;
+    if (trimmed.startsWith("min(") && trimmed.endsWith(")")) {
+      aggregator = Aggregator.MIN;
+      inner = stripAggregatorCall(trimmed, "min", expression);
+    } else if (trimmed.startsWith("max(") && trimmed.endsWith(")")) {
+      aggregator = Aggregator.MAX;
+      inner = stripAggregatorCall(trimmed, "max", expression);
+    }
+
+    List<Hop> hops = new ArrayList<>();
+    int pos = 0;
+    String leaf = null;
+    while (pos < inner.length()) {
+      int identStart = pos;
+      while (pos < inner.length() && isIdentChar(inner.charAt(pos))) {
+        pos++;
+      }
+      if (identStart == pos) {
+        throw new TmfPagingException(
+            "Expected identifier at position " + pos + " in: " + expression);
+      }
+      String ident = inner.substring(identStart, pos);
+
+      if (pos < inner.length() && inner.charAt(pos) == '[') {
+        pos++;
+        int eqPos = inner.indexOf('=', pos);
+        int closePos = inner.indexOf(']', pos);
+        if (eqPos < 0 || closePos < 0 || eqPos > closePos) {
+          throw new TmfPagingException(
+              "Malformed hop; expected '[key=value]' in: " + expression);
+        }
+        String key = validateBareIdent(inner.substring(pos, eqPos).trim(), expression);
+        String value = stripOuterQuotes(inner.substring(eqPos + 1, closePos).trim());
+        if (value.isEmpty()) {
+          throw new TmfPagingException(
+              "Correlated sort hop match value must not be empty: " + expression);
+        }
+        pos = closePos + 1;
+        if (pos >= inner.length() || inner.charAt(pos) != '.') {
+          throw new TmfPagingException(
+              "Hop '[key=value]' must be followed by '.<field>' in: " + expression);
+        }
+        pos++;
+        hops.add(new Hop(ident, key, value));
+      } else {
+        if (pos != inner.length()) {
+          throw new TmfPagingException(
+              "Unexpected trailing input '" + inner.substring(pos) + "' in: " + expression);
+        }
+        leaf = ident;
+      }
+    }
+
+    if (hops.isEmpty() || leaf == null) {
       throw new TmfPagingException(
-          "Correlated sort term does not match the supported simple-rich shape"
-              + " 'hopField[key=value].leafField': "
+          "Correlated sort term must be 'hop[key=value].leaf' or a chain 'a[k=v].b[k=v].leaf'"
+              + " (optionally wrapped in min()/max()): "
               + expression);
     }
-    String hop = matcher.group(1);
-    String key = matcher.group(2);
-    String value = stripOuterQuotes(matcher.group(3).trim());
-    String leaf = matcher.group(4);
-    if (value.isEmpty()) {
+
+    return new ParsedTerm(List.copyOf(hops), leaf, aggregator);
+  }
+
+  private static String stripAggregatorCall(String expression, String name, String original) {
+    String inner = expression.substring(name.length() + 1, expression.length() - 1).trim();
+    if (inner.indexOf('(') >= 0 || inner.indexOf(')') >= 0) {
       throw new TmfPagingException(
-          "Correlated sort term match value must not be empty: " + expression);
+          "Nested calls are not supported inside " + name + "(): " + original);
     }
-    return new ParsedTerm(hop, key, value, leaf);
+    if (inner.isEmpty()) {
+      throw new TmfPagingException(name + "() must wrap a hop chain, not be empty: " + original);
+    }
+    return inner;
   }
 
   private static void rejectDisallowedGrammar(String expression) {
-    String trimmed = expression.trim();
-    if (trimmed.startsWith("$.") || trimmed.contains("[?(") || trimmed.contains("[*]")) {
+    if (expression.startsWith("$.") || expression.contains("[?(")) {
       throw new TmfPagingException(
-          "JsonPath / wildcard sort grammar is not yet supported on JPA correlated sort"
-              + " (Phase a.4 first cut). Use the simple-rich form 'field[key=value].leaf'"
-              + " or run against a JSONB-backed entity for the full JsonPath sort grammar."
-              + " Term: "
+          "JsonPath sort grammar is not supported on JPA correlated sort — use the rich form"
+              + " 'field[key=value].leaf' (optionally with min()/max() and multi-hop chains) or"
+              + " run against a JSONB-backed entity for the full JsonPath sort grammar. Term: "
               + expression);
     }
-    if (trimmed.matches(".*\\[\\d+].*")) {
+    if (expression.contains("[*]")) {
       throw new TmfPagingException(
-          "Positional index [N] in sort is not portable on JPA and not supported (Phase a.4"
-              + " scope decision). Use a @OrderColumn-based association plus repository-level"
-              + " Criteria for element-N sort, or run against a JSONB-backed entity. Term: "
+          "Wildcard '[*]' in sort is not supported on JPA — use min(...) / max(...) around the"
+              + " intended reduction, or a JSONB-backed entity. Term: "
               + expression);
     }
-    if (trimmed.startsWith("min(") || trimmed.startsWith("max(")) {
+    if (expression.matches(".*\\[\\d+].*")) {
       throw new TmfPagingException(
-          "Sort aggregators min() / max() are not supported in Phase a.4 (out of scope).");
+          "Positional index '[N]' in sort is not portable across JPA dialects and is not"
+              + " supported. Use a @OrderColumn-based association plus repository-level Criteria"
+              + " for element-N sort, or run against a JSONB-backed entity. Term: "
+              + expression);
     }
-    if (trimmed.startsWith("num(") || trimmed.startsWith("str(") || trimmed.startsWith("date(")) {
+    if (expression.startsWith("num(")
+        || expression.startsWith("str(")
+        || expression.startsWith("date(")) {
       throw new TmfPagingException(
-          "Sort coercions num() / str() / date() are not portable across JPA dialects and"
-              + " are not supported on JPA correlated sort. Store the field with its"
-              + " natural type on the child entity.");
+          "Sort coercions num() / str() / date() are not portable across JPA dialects and are"
+              + " not supported on JPA correlated sort. Store the field with its natural type on"
+              + " the child entity, or run against a JSONB-backed entity. Term: "
+              + expression);
     }
   }
 
@@ -90,5 +163,36 @@ final class SimpleRichSortTermParser {
     return s;
   }
 
-  record ParsedTerm(String hopField, String matchKey, String matchValue, String leafField) {}
+  private static String validateBareIdent(String token, String expression) {
+    if (token.isEmpty()) {
+      throw new TmfPagingException(
+          "Correlated sort hop match key must not be empty: " + expression);
+    }
+    for (int i = 0; i < token.length(); i++) {
+      char c = token.charAt(i);
+      boolean valid = Character.isLetterOrDigit(c) || c == '_';
+      if (i == 0 && !(Character.isLetter(c) || c == '_')) {
+        valid = false;
+      }
+      if (!valid) {
+        throw new TmfPagingException(
+            "Correlated sort hop match key must be a bare identifier: " + expression);
+      }
+    }
+    return token;
+  }
+
+  private static boolean isIdentChar(char c) {
+    return Character.isLetterOrDigit(c) || c == '_';
+  }
+
+  enum Aggregator {
+    NONE,
+    MIN,
+    MAX
+  }
+
+  record Hop(String hopField, String matchKey, String matchValue) {}
+
+  record ParsedTerm(List<Hop> hops, String leafField, Aggregator aggregator) {}
 }
