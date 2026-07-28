@@ -78,7 +78,7 @@ extensions; rows 16–17 cover TMF-630 Part 4 §2.
 | 7 | **Part 6 v4.0.0 "Collection filtering using JSONPath"** — array correlation `arr[?(@.x==...)]` | ✓ Yes — requires the collection to be a JOIN-mapped `@OneToMany`/`@ManyToMany`/`@ElementCollection` ([note](#jpa-filter-support-scope)) | ✓ Yes (`$elemMatch`) | ✓ Yes (native SQL/JSON path) |
 | 8 | **Part 6 v4.0.0 "JSON Path"** — positional index `[N]` in `filter=` | ✓ Yes (single-hop) — requires `@OrderColumn` on the target collection so element position is defined | ✓ Yes | ✓ Yes |
 | 9 | **Part 6 v4.0.0 "JSON Path"** — `length() == N` on `filter=` | ✓ Yes | ✓ Yes | ✓ Yes |
-| 10 | **Part 6 v4.0.0 "Partial resource representation using JSONPath"** — `fields=` with JSONPath predicates / bracket-list forms (`fields=note[?(@.author=='X')]`, `fields=['id','href',...]`) | ⊘ Won't do — the recommendation conflates projection (`fields=`) with sub-element filtering, overlapping `filter=` with no defined precedence. Use `filter=` for row selection and `fields=` for column selection | ⊘ same | ⊘ same |
+| 10 | **Part 6 v4.0.0 "Partial resource representation using JSONPath"** — `fields=` with JSONPath predicates / bracket-list forms (`fields=note[?(@.author=='X')]`, `fields=['id','href',...]`) | ⊘ Won't do — the spec asks for **envelope-preserving prune-in-place** (return the parent with its arrays trimmed by predicate). Our separation of row selection (`filter=`) and column selection (`fields=`) can't express that, and merging them into `fields=` overlaps `filter=` with no defined precedence. Client-side workarounds (`JsonPath.read`, `opentmf-api-clients`' client-side filter) don't close it either — both **extract** matching sub-elements and lose the parent envelope. For large embedded arrays, master-detail split ([rows 13–15](#capability-matrix-by-backend)) is the architectural answer; anything smaller is best solved with a purpose-built endpoint. | ⊘ same | ⊘ same |
 | 11 | **Part 6 v4.0.0 "Sorting selector"** — correlated `sort=arr[key=X].value` | ~ Partial — multi-hop chains + `min()`/`max()` + direction-aware implicit reducer; positional `[N]` / coercions / full JsonPath still rejected ([note](#12-correlated-sort-mongodb)) | ✓ Yes ([aggregation module](#spring-boot--mongodb-backed-services-adding-correlated-sort)) | ✓ Yes (native SQL/JSON path) |
 | 12 | **Part 1 v4.0.2 §3.3 + §3.4** — status codes + uniform error body | ✓ Yes | ✓ Yes | ✓ Yes |
 | 13 | *Toolkit extension* — `@Tmf630*SplitCollection` master-detail split | — N/A — JPA's normalized schema already stores parent and children in separate tables; nothing to split | ✓ Yes ([section 14](#14-master-detail-split--mongo)) | ✓ Yes ([section 15](#15-master-detail-split--postgresql-jsonb)) |
@@ -2560,6 +2560,27 @@ The typo spellings that appear in the Part 4 §2.5 example — `/X(Version=1.0)`
 (missing colon) and `/X:(Version=1.0)` (uppercase `Version`) — are rejected on
 purpose. The parser is strict so consumers can't accidentally rely on lenient
 behaviour we'd then have to preserve forever.
+
+#### Query-parameter fallback: `?version=N`
+
+The argument resolver also accepts the version as a query parameter when the path
+segment doesn't carry a `:(version=…)` suffix. Precedence: **the path form always
+wins whenever it carries a version.** Any conflicting `?version=…` is silently
+ignored — the developer opted into `TmfVersionedId` on the handler signature, so
+either shape produces a valid reference and a mismatched query is treated as
+noise, not a conflict.
+
+| Request | Bound `TmfVersionedId` |
+|---|---|
+| `GET /orders/42:(version=1.0)` | `id=42`, `version=1.0` (path only) |
+| `GET /orders/42?version=1.0` | `id=42`, `version=1.0` (query fills in) |
+| `GET /orders/42:(version=1.0)?version=2.0` | `id=42`, `version=1.0` (path wins, query ignored) |
+| `GET /orders/42` | `id=42`, `version=empty` (resolver returns latest) |
+| `GET /orders/42?version=` *(blank)* | `id=42`, `version=empty` |
+
+This suits clients that want to send a default `?version=…` on every call without
+tracking whether the path already pins a version — the path takes precedence on the
+handful of endpoints where it matters, the query supplies it on all the others.
 
 #### Level 3 (advanced) — non-default field names
 

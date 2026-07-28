@@ -1,6 +1,7 @@
 package org.opentmf.query.tmf630.versioning;
 
 import java.util.Map;
+import java.util.Optional;
 import org.springframework.core.MethodParameter;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.support.WebDataBinderFactory;
@@ -16,6 +17,16 @@ import org.springframework.web.servlet.HandlerMapping;
  * <p>The path-variable name is taken from a co-located {@link PathVariable} annotation
  * when present; otherwise the method parameter's compiled name (available under
  * {@code -parameters}, standard for Spring Boot builds) is used.
+ *
+ * <p><b>Query-parameter fallback for {@code version}.</b> If the parsed path segment
+ * does not carry a {@code :(version=X)} suffix, this resolver falls back to the
+ * {@code version} query parameter (e.g. {@code /orders/42?version=1}). Precedence rule:
+ * the path form wins whenever it carries a version. Callers using
+ * {@code /orders/42:(version=1)?version=2} get id=42, version=1 — the query is ignored
+ * silently. This is deliberate: declaring {@code TmfVersionedId} on the handler signals
+ * "I accept either shape"; a mismatched query is treated as noise, not conflict, so
+ * clients can safely include a default {@code version=…} on every call regardless of
+ * whether the path pins one.
  */
 public class TmfVersionedIdArgumentResolver implements HandlerMethodArgumentResolver {
 
@@ -38,7 +49,15 @@ public class TmfVersionedIdArgumentResolver implements HandlerMethodArgumentReso
                 HandlerMapping.URI_TEMPLATE_VARIABLES_ATTRIBUTE,
                 NativeWebRequest.SCOPE_REQUEST);
     String raw = uriVars == null ? null : uriVars.get(pathVarName);
-    return TmfVersionedId.parse(raw);
+    TmfVersionedId parsed = TmfVersionedId.parse(raw);
+    if (parsed.version().isPresent()) {
+      return parsed;
+    }
+    String queryVersion = webRequest.getParameter("version");
+    if (queryVersion == null || queryVersion.isBlank()) {
+      return parsed;
+    }
+    return new TmfVersionedId(parsed.id(), Optional.of(queryVersion));
   }
 
   private static String resolvePathVariableName(MethodParameter parameter) {

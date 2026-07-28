@@ -68,9 +68,77 @@ class TmfVersionedIdArgumentResolverTest {
         () -> resolver.resolveArgument(parameter, null, request, null));
   }
 
+  @Test
+  @DisplayName("query-param ?version=N fills in when path is bare")
+  void queryParamFillsInWhenPathBare() throws Exception {
+    NativeWebRequest request = requestWithPathVariable("ref", "Prod", Map.of("version", "1.0"));
+    Method sample = Sample.class.getDeclaredMethod("handler", TmfVersionedId.class, String.class);
+    MethodParameter parameter = new MethodParameter(sample, 0);
+    TmfVersionedId parsed =
+        (TmfVersionedId) resolver.resolveArgument(parameter, null, request, null);
+    assertEquals("Prod", parsed.id());
+    assertEquals(java.util.Optional.of("1.0"), parsed.version());
+  }
+
+  @Test
+  @DisplayName("path :(version=…) wins over conflicting ?version=N")
+  void pathWinsOverConflictingQuery() throws Exception {
+    NativeWebRequest request =
+        requestWithPathVariable("ref", "Prod:(version=1.0)", Map.of("version", "2.0"));
+    Method sample = Sample.class.getDeclaredMethod("handler", TmfVersionedId.class, String.class);
+    MethodParameter parameter = new MethodParameter(sample, 0);
+    TmfVersionedId parsed =
+        (TmfVersionedId) resolver.resolveArgument(parameter, null, request, null);
+    assertEquals("Prod", parsed.id());
+    assertEquals(java.util.Optional.of("1.0"), parsed.version());
+  }
+
+  @Test
+  @DisplayName("path :(version=…) wins even when query agrees (no double-set)")
+  void pathWinsWhenQueryAgrees() throws Exception {
+    NativeWebRequest request =
+        requestWithPathVariable("ref", "Prod:(version=1.0)", Map.of("version", "1.0"));
+    Method sample = Sample.class.getDeclaredMethod("handler", TmfVersionedId.class, String.class);
+    MethodParameter parameter = new MethodParameter(sample, 0);
+    TmfVersionedId parsed =
+        (TmfVersionedId) resolver.resolveArgument(parameter, null, request, null);
+    assertEquals("Prod", parsed.id());
+    assertEquals(java.util.Optional.of("1.0"), parsed.version());
+  }
+
+  @Test
+  @DisplayName("bare path with no ?version=N stays empty (latest-version semantics)")
+  void barePathNoQueryStaysEmpty() throws Exception {
+    NativeWebRequest request = requestWithPathVariable("ref", "Prod");
+    Method sample = Sample.class.getDeclaredMethod("handler", TmfVersionedId.class, String.class);
+    MethodParameter parameter = new MethodParameter(sample, 0);
+    TmfVersionedId parsed =
+        (TmfVersionedId) resolver.resolveArgument(parameter, null, request, null);
+    assertEquals("Prod", parsed.id());
+    assertTrue(parsed.version().isEmpty());
+  }
+
+  @Test
+  @DisplayName("blank ?version= is treated as absent (path result stands)")
+  void blankQueryVersionIgnored() throws Exception {
+    NativeWebRequest request = requestWithPathVariable("ref", "Prod", Map.of("version", "  "));
+    Method sample = Sample.class.getDeclaredMethod("handler", TmfVersionedId.class, String.class);
+    MethodParameter parameter = new MethodParameter(sample, 0);
+    TmfVersionedId parsed =
+        (TmfVersionedId) resolver.resolveArgument(parameter, null, request, null);
+    assertEquals("Prod", parsed.id());
+    assertTrue(parsed.version().isEmpty());
+  }
+
   private static NativeWebRequest requestWithPathVariable(String name, String value) {
+    return requestWithPathVariable(name, value, Map.of());
+  }
+
+  private static NativeWebRequest requestWithPathVariable(
+      String name, String value, Map<String, String> queryParams) {
     MockHttpServletRequest raw = new MockHttpServletRequest();
     raw.setAttribute(HandlerMapping.URI_TEMPLATE_VARIABLES_ATTRIBUTE, Map.of(name, value));
+    queryParams.forEach(raw::setParameter);
     return new ServletWebRequest(raw);
   }
 
