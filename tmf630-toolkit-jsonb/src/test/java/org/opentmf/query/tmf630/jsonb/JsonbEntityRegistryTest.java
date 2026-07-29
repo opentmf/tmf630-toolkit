@@ -39,6 +39,6 @@ class JsonbEntityRegistryTest {
   @Tmf630JsonbBacked(domainType = TestDomain.class)
   static class TestRow {
     @Id private String id;
-    private JsonNode payload;
+    JsonNode payload;
   }
 }

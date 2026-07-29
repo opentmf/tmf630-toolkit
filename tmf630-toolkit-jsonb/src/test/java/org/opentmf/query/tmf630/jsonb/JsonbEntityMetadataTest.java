@@ -80,7 +80,7 @@ class JsonbEntityMetadataTest {
   @Tmf630JsonbBacked(domainType = FullDomain.class)
   static class FullRow {
     @Id private String id;
-    private JsonNode payload;
+    JsonNode payload;
 
     @CreatedDate private OffsetDateTime createdAt;
     @LastModifiedDate private OffsetDateTime updatedAt;
@@ -92,13 +92,13 @@ class JsonbEntityMetadataTest {
   @Tmf630JsonbBacked(domainType = MinimalDomain.class)
   static class MinimalRow {
     @Id private String id;
-    private JsonNode payload;
+    JsonNode payload;
   }
 
   @Tmf630JsonbBacked(domainType = MinimalDomain.class, payloadField = "body")
   static class CustomPayloadRow {
     @Id private String id;
-    private JsonNode body;
+    JsonNode body;
   }
 
   static class UnannotatedRow {

@@ -102,17 +102,15 @@ class JsonbSplitCollectionMetadataTest {
   @Tmf630JsonbBacked(domainType = OrderDomain.class)
   static class OrderRow {
     @Id private String id;
-    private JsonNode payload;
+    JsonNode payload;
   }
 
-  static class PlainDomain {
-    private String field;
-  }
+  static class PlainDomain {}
 
   @Tmf630JsonbBacked(domainType = PlainDomain.class)
   static class PlainRow {
     @Id private String id;
-    private JsonNode payload;
+    JsonNode payload;
   }
 
   static class CustomColumnsDomain {
@@ -129,7 +127,7 @@ class JsonbSplitCollectionMetadataTest {
   @Tmf630JsonbBacked(domainType = CustomColumnsDomain.class)
   static class CustomColumnsRow {
     @Id private String id;
-    private JsonNode payload;
+    JsonNode payload;
   }
 
   static class MultiSplitDomain {
@@ -143,6 +141,6 @@ class JsonbSplitCollectionMetadataTest {
   @Tmf630JsonbBacked(domainType = MultiSplitDomain.class)
   static class MultiSplitRow {
     @Id private String id;
-    private JsonNode payload;
+    JsonNode payload;
   }
 }

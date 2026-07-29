@@ -81,7 +81,7 @@ class Tmf630JsonbAutoConfigurationTest {
   @Tmf630JsonbBacked(domainType = AutoConfigTestDomain.class)
   static class AutoConfigTestRow {
     @Id private String id;
-    private JsonNode payload;
+    JsonNode payload;
   }
 
   static class AutoConfigTestPlainRow {
