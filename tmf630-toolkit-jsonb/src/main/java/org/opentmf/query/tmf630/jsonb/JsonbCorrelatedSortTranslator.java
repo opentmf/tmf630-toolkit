@@ -110,13 +110,13 @@ public class JsonbCorrelatedSortTranslator {
     Matcher simple = SIMPLE_RICH.matcher(path);
     if (simple.matches()) {
       return "$." + simple.group(1) + "[*] ? (@." + simple.group(2) + " == \""
-          + escapeForDoubleQuoted(stripQuotes(simple.group(3).trim())) + "\")."
+          + JsonbStringEscape.escapeForDoubleQuoted(stripQuotes(simple.group(3).trim())) + "\")."
           + simple.group(4);
     }
     Matcher jsonPath = JSONPATH_TERM.matcher(path);
     if (jsonPath.matches()) {
       return "$." + jsonPath.group(1) + "[*] ? (@." + jsonPath.group(2) + " == \""
-          + escapeForDoubleQuoted(jsonPath.group(4)) + "\")." + jsonPath.group(5);
+          + JsonbStringEscape.escapeForDoubleQuoted(jsonPath.group(4)) + "\")." + jsonPath.group(5);
     }
     Matcher wildcard = WILDCARD_TERM.matcher(path);
     if (wildcard.matches()) {
@@ -177,18 +177,4 @@ public class JsonbCorrelatedSortTranslator {
     return s;
   }
 
-  private static String escapeForDoubleQuoted(String s) {
-    StringBuilder out = new StringBuilder(s.length());
-    for (int i = 0; i < s.length(); i++) {
-      char c = s.charAt(i);
-      if (c == '"') {
-        out.append('\\').append('"');
-      } else if (c == '\\') {
-        out.append('\\').append('\\');
-      } else {
-        out.append(c);
-      }
-    }
-    return out.toString();
-  }
 }

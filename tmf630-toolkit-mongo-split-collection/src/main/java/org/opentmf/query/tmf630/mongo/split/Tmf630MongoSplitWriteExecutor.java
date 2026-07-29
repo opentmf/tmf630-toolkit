@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.BiConsumer;
 import org.bson.Document;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -75,67 +76,77 @@ public class Tmf630MongoSplitWriteExecutor {
    */
   @Transactional
   public <T> T saveWithSplits(T parent) {
+    return persistParentThenChildren(
+        parent, "saveWithSplits", (snap, parentId) -> replaceSplitChildren(snap.split, parentId, snap.children));
+  }
+
+  /**
+   * Full-replace of a split collection's children: remove all existing rows for the
+   * parent, then insert the fresh set wrapped with back-refs. Used by
+   * {@link #saveWithSplits}.
+   */
+  private void replaceSplitChildren(
+      MongoSplitCollectionMetadata split, Object parentId, List<Object> children) {
+    mongoOperations.remove(
+        new Query(Criteria.where(split.parentIdField()).is(parentId)),
+        split.childCollection());
+    if (children == null || children.isEmpty()) return;
+    MongoConverter converter = mongoOperations.getConverter();
+    List<Document> docs = new ArrayList<>(children.size());
+    int order = 0;
+    for (Object child : children) {
+      Document payload = new Document();
+      converter.write(child, payload);
+      Object childId = extractChildId(child, payload, split);
+      if (childId == null) childId = "i-" + order;
+      Document wrapper = new Document();
+      wrapper.put(split.parentIdField(), parentId);
+      wrapper.put(split.itemIdField(), childId);
+      wrapper.put(split.itemOrderField(), order++);
+      wrapper.put(split.payloadField(), payload);
+      docs.add(wrapper);
+    }
+    mongoOperations.insert(docs, split.childCollection());
+  }
+
+  /**
+   * Shared snapshot-and-persist template. Resolves parent metadata, snapshots each
+   * split field into memory (clearing it on the parent so the parent-doc save doesn't
+   * duplicate children inline), saves the parent, dispatches each snapshot to the
+   * caller-provided {@code snapshotProcessor}, and always restores the snapshotted
+   * children back onto the parent instance for fluent reuse by the caller.
+   */
+  private <T> T persistParentThenChildren(
+      T parent, String opLabel, BiConsumer<SplitSnapshot, Object> snapshotProcessor) {
     MongoSplitEntityMetadata metadata =
         registry
             .forParentType(parent.getClass())
             .orElseThrow(
                 () ->
                     new IllegalStateException(
-                        TYPE_PREFIX
-                            + parent.getClass().getName()
-                            + NOT_SPLIT_BACKED
-                            + " — cannot saveWithSplits"));
-
+                        TYPE_PREFIX + parent.getClass().getName() + NOT_SPLIT_BACKED
+                            + " — cannot " + opLabel));
     Object parentId = metadata.idOf(parent);
     if (parentId == null) {
       throw new IllegalStateException(
-          "Parent instance has null id; assign an id before saveWithSplits");
+          "Parent instance has null id; assign an id before " + opLabel);
     }
-
-    // Snapshot each split field, then clear it on the parent so the persist doesn't
-    // duplicate children inline.
     List<SplitSnapshot> snapshots = new ArrayList<>();
     for (MongoSplitCollectionMetadata split : metadata.splits()) {
       List<Object> children = metadata.readSplitField(parent, split.fieldName());
       snapshots.add(new SplitSnapshot(split, children));
       metadata.setSplitField(parent, split.fieldName(), null);
     }
-
     try {
-      // 1) Upsert the slim parent doc.
       mongoOperations.save(parent, metadata.parentCollection());
-
-      // 2 & 3) For each split, wipe then re-insert children wrapped with back-refs.
-      MongoConverter converter = mongoOperations.getConverter();
       for (SplitSnapshot snap : snapshots) {
-        MongoSplitCollectionMetadata split = snap.split;
-        mongoOperations.remove(
-            new Query(Criteria.where(split.parentIdField()).is(parentId)),
-            split.childCollection());
-        if (snap.children == null || snap.children.isEmpty()) continue;
-        List<Document> docs = new ArrayList<>(snap.children.size());
-        int order = 0;
-        for (Object child : snap.children) {
-          Document payload = new Document();
-          converter.write(child, payload);
-          Object childId = extractChildId(child, payload, split);
-          if (childId == null) childId = "i-" + order;
-          Document wrapper = new Document();
-          wrapper.put(split.parentIdField(), parentId);
-          wrapper.put(split.itemIdField(), childId);
-          wrapper.put(split.itemOrderField(), order++);
-          wrapper.put(split.payloadField(), payload);
-          docs.add(wrapper);
-        }
-        mongoOperations.insert(docs, split.childCollection());
+        snapshotProcessor.accept(snap, parentId);
       }
       log.debug(
-          "tmf630-mongo-split: saved parent {} with {} split collection(s)",
-          parentId,
-          snapshots.size());
+          "tmf630-mongo-split: {} completed for parent {} with {} split collection(s)",
+          opLabel, parentId, snapshots.size());
       return parent;
     } finally {
-      // Restore snapshotted split fields so the caller's instance still has its data.
       for (SplitSnapshot snap : snapshots) {
         metadata.setSplitField(parent, snap.split.fieldName(), snap.children);
       }
@@ -321,34 +332,8 @@ public class Tmf630MongoSplitWriteExecutor {
    */
   @Transactional
   public <T> T saveWithSplitsReconciled(T parent) {
-    MongoSplitEntityMetadata metadata =
-        registry
-            .forParentType(parent.getClass())
-            .orElseThrow(
-                () ->
-                    new IllegalStateException(
-                        TYPE_PREFIX + parent.getClass().getName() + NOT_SPLIT_BACKED));
-    Object parentId = metadata.idOf(parent);
-    if (parentId == null) {
-      throw new IllegalStateException("Parent instance has null id");
-    }
-    List<SplitSnapshot> snapshots = new ArrayList<>();
-    for (MongoSplitCollectionMetadata split : metadata.splits()) {
-      List<Object> children = metadata.readSplitField(parent, split.fieldName());
-      snapshots.add(new SplitSnapshot(split, children));
-      metadata.setSplitField(parent, split.fieldName(), null);
-    }
-    try {
-      mongoOperations.save(parent, metadata.parentCollection());
-      for (SplitSnapshot snap : snapshots) {
-        reconcileSplitChildren(snap.split, parentId, snap.children);
-      }
-      return parent;
-    } finally {
-      for (SplitSnapshot snap : snapshots) {
-        metadata.setSplitField(parent, snap.split.fieldName(), snap.children);
-      }
-    }
+    return persistParentThenChildren(
+        parent, "saveWithSplitsReconciled", (snap, parentId) -> reconcileSplitChildren(snap.split, parentId, snap.children));
   }
 
   private void reconcileSplitChildren(

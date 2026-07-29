@@ -99,25 +99,21 @@ public class MongoSplitAwareFilterTranslator {
    * fall back to its normal filter path when the return is {@code null}.
    */
   public Criteria translate(Class<?> parentType, String filterExpression) {
-    if (filterExpression == null || filterExpression.isBlank()) return null;
-    MongoSplitEntityMetadata metadata = requireMetadata(parentType);
-    if (metadata.splits().isEmpty()) return null;
-
-    Decomposition decomposition =
-        TmfSplitFilterDecomposer.decompose(filterExpression, splitFieldNames(metadata));
-    if (decomposition.isEmpty()) return null;
     // Preserve the old "caller falls back to its normal filter translator" contract:
     // when the filter references no split field, the caller's full TMF grammar is a
     // strict superset of our SimpleMongoInnerPredicateTranslator, so let the caller
     // handle it. We only take over when there's split-side work to do.
-    if (decomposition.splitClauses().isEmpty()) return null;
-    if (decomposition.combinator() == Combinator.OR) {
-      throw new TmfFilteringException(
-          "OR-shaped compound filters cannot be expressed as a single Criteria — the "
-              + "criteria form can't UNION across collections. Use "
-              + "translateAsUnionWithAggregation(...) to get a $unionWith pipeline "
-              + "instead.");
-    }
+    AndShapedPreflight pf =
+        preflightAndShaped(
+            parentType,
+            filterExpression,
+            "OR-shaped compound filters cannot be expressed as a single Criteria — the "
+                + "criteria form can't UNION across collections. Use "
+                + "translateAsUnionWithAggregation(...) to get a $unionWith pipeline "
+                + "instead.");
+    if (pf == null) return null;
+    MongoSplitEntityMetadata metadata = pf.metadata();
+    Decomposition decomposition = pf.decomposition();
 
     List<Criteria> conjuncts = new ArrayList<>();
     decomposition
@@ -143,22 +139,18 @@ public class MongoSplitAwareFilterTranslator {
    * </pre>
    */
   public Aggregation translateAsPipeline(Class<?> parentType, String filterExpression) {
-    if (filterExpression == null || filterExpression.isBlank()) return null;
-    MongoSplitEntityMetadata metadata = requireMetadata(parentType);
-    if (metadata.splits().isEmpty()) return null;
-
-    Decomposition decomposition =
-        TmfSplitFilterDecomposer.decompose(filterExpression, splitFieldNames(metadata));
-    if (decomposition.isEmpty()) return null;
     // Symmetric to translate(): the caller's normal filter path is a superset of ours
     // for parent-only clauses, so short-circuit when there's no split-side work.
-    if (decomposition.splitClauses().isEmpty()) return null;
-    if (decomposition.combinator() == Combinator.OR) {
-      throw new TmfFilteringException(
-          "OR-shaped compound filters cannot be composed as a parent-first $lookup "
-              + "chain — use translateAsUnionWithAggregation(...) to get the "
-              + "$unionWith shape instead.");
-    }
+    AndShapedPreflight pf =
+        preflightAndShaped(
+            parentType,
+            filterExpression,
+            "OR-shaped compound filters cannot be composed as a parent-first $lookup "
+                + "chain — use translateAsUnionWithAggregation(...) to get the "
+                + "$unionWith shape instead.");
+    if (pf == null) return null;
+    MongoSplitEntityMetadata metadata = pf.metadata();
+    Decomposition decomposition = pf.decomposition();
 
     List<AggregationOperation> stages = new ArrayList<>();
     Optional<String> parentOnlyFilter = decomposition.parentOnlyFilter();
@@ -362,6 +354,33 @@ public class MongoSplitAwareFilterTranslator {
                 new TmfFilteringException(
                     "No @Tmf630MongoSplitBacked mapping registered for " + parentType.getName()));
   }
+
+  /**
+   * Shared preflight for the AND-shaped entry points (both {@link #translate} and
+   * {@link #translateAsPipeline}): rejects blank input, unregistered types, and empty
+   * or non-split-touching decompositions with a {@code null} return so the caller can
+   * hand off to its normal (parent-only) filter path; throws when the shape is OR-only
+   * with a message describing the correct entry point.
+   *
+   * @return {@code null} to short-circuit the caller, or a {@link AndShapedPreflight}
+   *     carrying the resolved metadata + decomposition
+   */
+  private AndShapedPreflight preflightAndShaped(
+      Class<?> parentType, String filterExpression, String orShapeErrorMessage) {
+    if (filterExpression == null || filterExpression.isBlank()) return null;
+    MongoSplitEntityMetadata metadata = requireMetadata(parentType);
+    if (metadata.splits().isEmpty()) return null;
+    Decomposition decomposition =
+        TmfSplitFilterDecomposer.decompose(filterExpression, splitFieldNames(metadata));
+    if (decomposition.isEmpty() || decomposition.splitClauses().isEmpty()) return null;
+    if (decomposition.combinator() == Combinator.OR) {
+      throw new TmfFilteringException(orShapeErrorMessage);
+    }
+    return new AndShapedPreflight(metadata, decomposition);
+  }
+
+  private record AndShapedPreflight(
+      MongoSplitEntityMetadata metadata, Decomposition decomposition) {}
 
   private static MongoSplitCollectionMetadata requireSplit(
       MongoSplitEntityMetadata metadata, String fieldName) {

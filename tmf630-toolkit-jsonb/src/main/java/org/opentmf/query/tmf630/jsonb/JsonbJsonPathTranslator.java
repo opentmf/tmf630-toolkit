@@ -144,7 +144,7 @@ public class JsonbJsonPathTranslator {
 
   private int translateQuotedLiteral(String input, int i, StringBuilder out) {
     int end = findStringEnd(input, i);
-    out.append('"').append(escapeForDoubleQuoted(input.substring(i + 1, end))).append('"');
+    out.append('"').append(JsonbStringEscape.escapeForDoubleQuoted(input.substring(i + 1, end))).append('"');
     return end + 1 - i;
   }
 
@@ -210,18 +210,4 @@ public class JsonbJsonPathTranslator {
     throw new TmfFilteringException("Unterminated string literal in filter expression");
   }
 
-  private static String escapeForDoubleQuoted(String s) {
-    StringBuilder out = new StringBuilder(s.length());
-    for (int i = 0; i < s.length(); i++) {
-      char c = s.charAt(i);
-      if (c == '"') {
-        out.append('\\').append('"');
-      } else if (c == '\\') {
-        out.append('\\').append('\\');
-      } else {
-        out.append(c);
-      }
-    }
-    return out.toString();
-  }
 }

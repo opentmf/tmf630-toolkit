@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -75,6 +76,20 @@ public class Tmf630JsonbWriteExecutor {
    */
   @Transactional
   public <T> T saveWithSplits(T parent) {
+    return persistWithSplits(parent, "split-write", this::replaceSplitChildren);
+  }
+
+  /**
+   * Shared parent-tree extraction + parent UPSERT + per-split child processing. The
+   * {@code childProcessor} is invoked per split with (split, parentId, childArrayNode)
+   * so callers can choose between {@link #replaceSplitChildren} (full-replace) and
+   * {@link #reconcileSplitChildren} (surgical diff) without repeating the extraction
+   * bookkeeping.
+   */
+  private <T> T persistWithSplits(
+      T parent,
+      String opLabel,
+      ChildArrayProcessor childProcessor) {
     if (parent == null) {
       throw new IllegalArgumentException("parent must not be null");
     }
@@ -99,10 +114,10 @@ public class Tmf630JsonbWriteExecutor {
       }
 
       // Extract split fields from the tree first (mutates it), so the parent payload
-      // we UPSERT below doesn't carry the children. But hold off on the child INSERTs
+      // we UPSERT below doesn't carry the children. But hold off on the child writes
       // until AFTER the parent UPSERT — the FK on child.parent_id would otherwise
       // fail for a brand-new parent.
-      Map<JsonbSplitCollectionMetadata, JsonNode> extracted = new java.util.LinkedHashMap<>();
+      Map<JsonbSplitCollectionMetadata, JsonNode> extracted = new LinkedHashMap<>();
       for (JsonbSplitCollectionMetadata split : metadata.splitCollections()) {
         extracted.put(split, parentTree.remove(split.fieldName()));
       }
@@ -110,14 +125,18 @@ public class Tmf630JsonbWriteExecutor {
       upsertParent(metadata, parentId, objectMapper.writeValueAsString(parentTree));
 
       for (Map.Entry<JsonbSplitCollectionMetadata, JsonNode> entry : extracted.entrySet()) {
-        replaceSplitChildren(entry.getKey(), parentId, entry.getValue());
+        childProcessor.process(entry.getKey(), parentId, entry.getValue());
       }
       return parent;
     } catch (IOException e) {
       throw new UncheckedIOException(
-          "Failed to serialize parent " + parent.getClass().getName() + " for split-write",
-          e);
+          "Failed to serialize parent " + parent.getClass().getName() + " for " + opLabel, e);
     }
+  }
+
+  @FunctionalInterface
+  private interface ChildArrayProcessor {
+    void process(JsonbSplitCollectionMetadata split, String parentId, JsonNode childArray);
   }
 
   private void upsertParent(JsonbEntityMetadata metadata, String parentId, String payloadJson) {
@@ -373,41 +392,7 @@ public class Tmf630JsonbWriteExecutor {
    */
   @Transactional
   public <T> T saveWithSplitsReconciled(T parent) {
-    if (parent == null) {
-      throw new IllegalArgumentException("parent must not be null");
-    }
-    JsonbEntityMetadata metadata =
-        registry
-            .forDomainType(parent.getClass())
-            .orElseThrow(
-                () ->
-                    new TmfFilteringException(
-                        NO_DOMAIN_REGISTERED
-                            + parent.getClass().getName()));
-    try {
-      ObjectNode parentTree = objectMapper.valueToTree(parent);
-      String parentId = parentTree.path("id").asText(null);
-      if (parentId == null || parentId.isEmpty()) {
-        throw new TmfFilteringException(
-            "Parent instance must have a non-empty 'id' field for split-write: "
-                + parent.getClass().getSimpleName());
-      }
-
-      Map<JsonbSplitCollectionMetadata, JsonNode> extracted =
-          new java.util.LinkedHashMap<>();
-      for (JsonbSplitCollectionMetadata split : metadata.splitCollections()) {
-        extracted.put(split, parentTree.remove(split.fieldName()));
-      }
-      upsertParent(metadata, parentId, objectMapper.writeValueAsString(parentTree));
-      for (Map.Entry<JsonbSplitCollectionMetadata, JsonNode> entry : extracted.entrySet()) {
-        reconcileSplitChildren(entry.getKey(), parentId, entry.getValue());
-      }
-      return parent;
-    } catch (IOException e) {
-      throw new UncheckedIOException(
-          "Failed to serialize parent " + parent.getClass().getName() + " for reconciled save",
-          e);
-    }
+    return persistWithSplits(parent, "reconciled save", this::reconcileSplitChildren);
   }
 
   private void reconcileSplitChildren(

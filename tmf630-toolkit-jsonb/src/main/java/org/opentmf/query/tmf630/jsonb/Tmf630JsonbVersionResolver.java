@@ -3,12 +3,12 @@ package org.opentmf.query.tmf630.jsonb;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.UncheckedIOException;
-import java.lang.reflect.Field;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import org.opentmf.query.tmf630.filtering.TmfFilteringException;
 import org.opentmf.query.tmf630.versioning.Tmf630VersionResolver;
+import org.opentmf.query.tmf630.versioning.Tmf630VersionResolverSupport;
 import org.opentmf.query.tmf630.versioning.Tmf630Versioned;
 import org.opentmf.query.tmf630.versioning.VersionComparators;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -42,17 +42,23 @@ public class Tmf630JsonbVersionResolver implements Tmf630VersionResolver {
     Context context = context(type);
     List<T> matches = fetchAllForLogicalId(type, context, logicalId);
     if (matches.isEmpty()) return Optional.empty();
-    Comparator<String> comparator = VersionComparators.forOrder(context.versioning.versionOrder());
+    Tmf630Versioned versioning = context.versioning;
+    Comparator<String> comparator = VersionComparators.forOrder(versioning.versionOrder());
     return matches.stream()
-        .max((a, b) -> comparator.compare(readVersion(a, context), readVersion(b, context)));
+        .max(
+            (a, b) ->
+                comparator.compare(
+                    Tmf630VersionResolverSupport.readVersion(a, versioning),
+                    Tmf630VersionResolverSupport.readVersion(b, versioning)));
   }
 
   @Override
   public <T> Optional<T> resolveSpecific(Class<T> type, String logicalId, String version) {
     if (version == null) return Optional.empty();
     Context context = context(type);
+    Tmf630Versioned versioning = context.versioning;
     return fetchAllForLogicalId(type, context, logicalId).stream()
-        .filter(entity -> version.equals(readVersion(entity, context)))
+        .filter(entity -> version.equals(Tmf630VersionResolverSupport.readVersion(entity, versioning)))
         .findFirst();
   }
 
@@ -101,35 +107,6 @@ public class Tmf630JsonbVersionResolver implements Tmf630VersionResolver {
                         "No @Tmf630JsonbBacked row entity registered for domain type: "
                             + type.getName()));
     return new Context(versioning, metadata);
-  }
-
-  @SuppressWarnings("java:S3011") // toolkit must read user-declared entity field regardless of visibility
-  private static String readVersion(Object entity, Context context) {
-    try {
-      Field field = findField(entity.getClass(), context.versioning.versionField());
-      field.setAccessible(true);
-      Object value = field.get(entity);
-      return value == null ? null : value.toString();
-    } catch (IllegalAccessException | NoSuchFieldException e) {
-      throw new IllegalStateException(
-          "Unable to read version field '"
-              + context.versioning.versionField()
-              + "' on "
-              + entity.getClass().getName(),
-          e);
-    }
-  }
-
-  private static Field findField(Class<?> type, String fieldName) throws NoSuchFieldException {
-    Class<?> cursor = type;
-    while (cursor != null && cursor != Object.class) {
-      try {
-        return cursor.getDeclaredField(fieldName);
-      } catch (NoSuchFieldException ignored) {
-        cursor = cursor.getSuperclass();
-      }
-    }
-    throw new NoSuchFieldException(fieldName);
   }
 
   private record Context(Tmf630Versioned versioning, JsonbEntityMetadata metadata) {}
