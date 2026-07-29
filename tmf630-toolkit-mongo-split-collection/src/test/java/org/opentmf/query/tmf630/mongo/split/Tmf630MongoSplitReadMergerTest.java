@@ -124,7 +124,8 @@ class Tmf630MongoSplitReadMergerTest {
     registry.registerIfBacked(FixtureParent.class);
     MongoSplitEntityMetadata realMetadata =
         registry.forParentType(FixtureParent.class).orElseThrow();
-    assertThatThrownBy(() -> realMetadata.readSplitField(new FixtureParent(), "ghost"))
+    FixtureParent parent = new FixtureParent();
+    assertThatThrownBy(() -> realMetadata.readSplitField(parent, "ghost"))
         .isInstanceOf(IllegalStateException.class);
     // touch the metadata to satisfy the unused-variable warning
     assertThat(splitWithBadFieldName.fieldName()).isEqualTo("ghostField");

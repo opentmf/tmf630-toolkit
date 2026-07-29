@@ -22,36 +22,40 @@ class Tmf630MongoSplitWriteExecutorValidationTest {
   @Test
   @DisplayName("saveWithSplits rejects null parent with IllegalStateException on metadata lookup")
   void saveWithSplitsRejectsUnregisteredType() {
-    assertThatThrownBy(() -> executor.saveWithSplits(new Object()))
+    Object unregistered = new Object();
+    assertThatThrownBy(() -> executor.saveWithSplits(unregistered))
         .isInstanceOf(IllegalStateException.class);
   }
 
   @Test
   @DisplayName("appendChild on an unregistered type rejects with IllegalStateException")
   void appendChildRejectsUnregisteredType() {
-    assertThatThrownBy(() -> executor.appendChild(Object.class, "p", new Object()))
+    Object child = new Object();
+    assertThatThrownBy(() -> executor.appendChild(Object.class, "p", child))
         .isInstanceOf(IllegalStateException.class);
   }
 
   @Test
   @DisplayName("updateChild rejects null parentId")
   void updateChildRejectsNullParentId() {
-    assertThatThrownBy(
-            () -> executor.updateChild(Object.class, null, "item", new Object()))
+    Object child = new Object();
+    assertThatThrownBy(() -> executor.updateChild(Object.class, null, "item", child))
         .isInstanceOf(IllegalArgumentException.class);
   }
 
   @Test
   @DisplayName("updateChild on an unregistered type rejects (metadata lookup fails)")
   void updateChildOnUnregisteredTypeRejects() {
-    assertThatThrownBy(() -> executor.updateChild(Object.class, "p", "i", new Object()))
+    Object child = new Object();
+    assertThatThrownBy(() -> executor.updateChild(Object.class, "p", "i", child))
         .isInstanceOf(IllegalStateException.class);
   }
 
   @Test
   @DisplayName("updateChild rejects null itemId")
   void updateChildRejectsNullItemId() {
-    assertThatThrownBy(() -> executor.updateChild(Object.class, "p", null, new Object()))
+    Object child = new Object();
+    assertThatThrownBy(() -> executor.updateChild(Object.class, "p", null, child))
         .isInstanceOf(IllegalArgumentException.class);
   }
 
@@ -86,7 +90,8 @@ class Tmf630MongoSplitWriteExecutorValidationTest {
   @Test
   @DisplayName("saveWithSplitsReconciled rejects unregistered type with IllegalStateException")
   void reconciledRejectsUnregisteredType() {
-    assertThatThrownBy(() -> executor.saveWithSplitsReconciled(new Object()))
+    Object unregistered = new Object();
+    assertThatThrownBy(() -> executor.saveWithSplitsReconciled(unregistered))
         .isInstanceOf(IllegalStateException.class);
   }
 }

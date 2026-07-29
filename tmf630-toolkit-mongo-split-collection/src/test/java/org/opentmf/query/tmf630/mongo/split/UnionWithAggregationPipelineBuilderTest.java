@@ -43,7 +43,9 @@ class UnionWithAggregationPipelineBuilderTest {
   @Test
   @DisplayName("no-split input throws IllegalArgumentException")
   void requiresAtLeastOneSplit() {
-    assertThatThrownBy(() -> builder.build("orders", Optional.empty(), List.of()))
+    Optional<String> noParentPredicate = Optional.empty();
+    List<SplitPiece> noPieces = List.of();
+    assertThatThrownBy(() -> builder.build("orders", noParentPredicate, noPieces))
         .isInstanceOf(IllegalArgumentException.class);
   }
 

@@ -74,8 +74,9 @@ class TmfVersionedIdTest {
   @Test
   @DisplayName("record constructor rejects blank id")
   void recordRejectsBlankId() {
-    assertThrows(IllegalArgumentException.class, () -> new TmfVersionedId("", Optional.empty()));
-    assertThrows(IllegalArgumentException.class, () -> new TmfVersionedId(null, Optional.empty()));
+    Optional<String> emptyVersion = Optional.empty();
+    assertThrows(IllegalArgumentException.class, () -> new TmfVersionedId("", emptyVersion));
+    assertThrows(IllegalArgumentException.class, () -> new TmfVersionedId(null, emptyVersion));
   }
 
   @Test

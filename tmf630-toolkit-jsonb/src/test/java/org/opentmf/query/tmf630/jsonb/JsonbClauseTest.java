@@ -15,7 +15,8 @@ class JsonbClauseTest {
     JsonbClause c = JsonbClause.of("x = ?", "v");
     assertThat(c.sql()).isEqualTo("x = ?");
     assertThat(c.params()).containsExactly("v");
-    assertThatThrownBy(() -> new JsonbClause(null, List.of()))
+    List<Object> emptyParams = List.of();
+    assertThatThrownBy(() -> new JsonbClause(null, emptyParams))
         .isInstanceOf(IllegalArgumentException.class);
   }
 

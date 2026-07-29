@@ -73,8 +73,9 @@ class JsonbPredicateFactoryTest {
   @Test
   @DisplayName("BETWEEN rejects wrong-arity value list")
   void betweenWrongArity() {
+    List<Object> tooFew = List.of(1);
     assertThatThrownBy(
-            () -> factory.buildMulti(TmfOperator.BETWEEN, "priority", Integer.class, List.of(1)))
+            () -> factory.buildMulti(TmfOperator.BETWEEN, "priority", Integer.class, tooFew))
         .isInstanceOf(TmfFilteringException.class);
   }
 
@@ -93,7 +94,8 @@ class JsonbPredicateFactoryTest {
   @Test
   @DisplayName("Multi-value operators reject empty value list")
   void multiRejectsEmpty() {
-    assertThatThrownBy(() -> factory.buildMulti(TmfOperator.IN, "x", String.class, List.of()))
+    List<Object> empty = List.of();
+    assertThatThrownBy(() -> factory.buildMulti(TmfOperator.IN, "x", String.class, empty))
         .isInstanceOf(TmfFilteringException.class);
   }
 
@@ -206,8 +208,8 @@ class JsonbPredicateFactoryTest {
   @Test
   @DisplayName("buildMulti() and buildNoValue() reject wrong operator kind")
   void multiAndNoValueRejectWrongOps() {
-    assertThatThrownBy(
-            () -> factory.buildMulti(TmfOperator.EQ, "x", String.class, List.of("v")))
+    List<Object> singleV = List.of("v");
+    assertThatThrownBy(() -> factory.buildMulti(TmfOperator.EQ, "x", String.class, singleV))
         .isInstanceOf(TmfFilteringException.class);
     assertThatThrownBy(() -> factory.buildNoValue(TmfOperator.EQ, "x"))
         .isInstanceOf(TmfFilteringException.class);
