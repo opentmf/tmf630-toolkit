@@ -436,7 +436,10 @@
           ${maven.multiModuleProjectDirectory}/tmf630-toolkit-paging-sorting-autoconfigure/target/site/jacoco/jacoco.xml,
           ${maven.multiModuleProjectDirectory}/tmf630-toolkit-attribute-filtering-core/target/site/jacoco/jacoco.xml,
           ${maven.multiModuleProjectDirectory}/tmf630-toolkit-attribute-filtering-autoconfigure/target/site/jacoco/jacoco.xml,
-          ${maven.multiModuleProjectDirectory}/tmf630-toolkit-mongo-aggregation/target/site/jacoco/jacoco.xml
+          ${maven.multiModuleProjectDirectory}/tmf630-toolkit-mongo-aggregation/target/site/jacoco/jacoco.xml,
+          ${maven.multiModuleProjectDirectory}/tmf630-toolkit-jpa-correlated-sort/target/site/jacoco/jacoco.xml,
+          ${maven.multiModuleProjectDirectory}/tmf630-toolkit-jsonb/target/site/jacoco/jacoco.xml,
+          ${maven.multiModuleProjectDirectory}/tmf630-toolkit-mongo-split-collection/target/site/jacoco/jacoco.xml
         </sonar.coverage.jacoco.xmlReportPaths>
       </properties>
       <build>
