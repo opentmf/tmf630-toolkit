@@ -82,7 +82,7 @@ public class JsonbSortBuilder {
                 "Unsupported sort term kind: " + term.kind() + " for " + term.expression());
       }
     }
-    return JsonbClause.of(String.join(", ", pieces), params.toArray());
+    return JsonbClause.of(String.join(", ", pieces), (Object[]) params.toArray());
   }
 
   private String plainTermFragment(

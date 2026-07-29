@@ -25,7 +25,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
-import org.testcontainers.containers.MongoDBContainer;
+import org.testcontainers.mongodb.MongoDBContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
@@ -655,8 +655,7 @@ class Tmf630MongoSplitCollectionIT {
             .sort(new org.bson.Document("itemOrder", 1))
             .into(new ArrayList<>());
     assertThat(after).hasSize(3);
-    assertThat(after.get(1).get("itemId")).isEqualTo("b");
-    assertThat(after.get(1).get("itemOrder")).isEqualTo(1);
+    assertThat(after.get(1)).containsEntry("itemId", "b").containsEntry("itemOrder", 1);
     org.bson.Document bPayload = (org.bson.Document) after.get(1).get("payload");
     assertThat(bPayload.getString("state")).isEqualTo("MODIFIED");
   }

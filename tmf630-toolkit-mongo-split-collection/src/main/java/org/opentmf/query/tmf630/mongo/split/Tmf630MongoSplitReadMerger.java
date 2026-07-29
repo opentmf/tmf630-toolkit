@@ -3,6 +3,7 @@ package org.opentmf.query.tmf630.mongo.split;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import org.bson.Document;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoOperations;
@@ -129,6 +130,7 @@ public class Tmf630MongoSplitReadMerger {
 
   @SuppressWarnings("java:S3011") // toolkit must write user-declared entity field regardless of visibility
   private static void setField(Object target, Class<?> targetType, String fieldName, Object value) {
+    Objects.requireNonNull(targetType, "targetType");
     Class<?> cursor = targetType;
     while (cursor != null && cursor != Object.class) {
       try {

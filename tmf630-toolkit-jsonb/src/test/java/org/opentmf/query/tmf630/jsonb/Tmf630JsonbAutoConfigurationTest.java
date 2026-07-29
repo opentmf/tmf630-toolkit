@@ -72,8 +72,7 @@ class Tmf630JsonbAutoConfigurationTest {
     RuntimeException cause = new RuntimeException("root");
     Tmf630JsonbConfigurationException ex =
         new Tmf630JsonbConfigurationException("wrapped", cause);
-    assertThat(ex).hasCause(cause);
-    assertThat(ex).hasMessage("wrapped");
+    assertThat(ex).hasCause(cause).hasMessage("wrapped");
   }
 
   static class AutoConfigTestDomain {}

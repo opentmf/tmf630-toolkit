@@ -1,6 +1,5 @@
 package org.opentmf.query.tmf630.jpa;
 
-import com.querydsl.core.QueryResults;
 import com.querydsl.core.types.CollectionExpression;
 import com.querydsl.core.types.Expression;
 import com.querydsl.core.types.Order;
@@ -11,6 +10,7 @@ import com.querydsl.core.types.dsl.ComparableExpressionBase;
 import com.querydsl.core.types.dsl.Expressions;
 import com.querydsl.core.types.dsl.ListPath;
 import com.querydsl.core.types.dsl.PathBuilder;
+import com.querydsl.core.types.dsl.Wildcard;
 import com.querydsl.jpa.JPAExpressions;
 import com.querydsl.jpa.JPQLQuery;
 import com.querydsl.jpa.impl.JPAQuery;
@@ -97,18 +97,21 @@ public class Tmf630JpaCorrelatedSortExecutor {
     PathBuilder<T> root =
         new PathBuilder<>(rootType, Introspector.decapitalize(rootType.getSimpleName()));
     List<OrderSpecifier<?>> orders = buildOrderSpecifiers(root, rootType, tmfSort);
-    JPAQuery<T> query = new JPAQuery<T>(entityManager).select(root).from(root);
+    JPAQuery<T> contentQuery = new JPAQuery<T>(entityManager).select(root).from(root);
+    JPAQuery<Long> countQuery = new JPAQuery<Long>(entityManager).select(Wildcard.count).from(root);
     if (predicate != null) {
-      query.where(predicate);
+      contentQuery.where(predicate);
+      countQuery.where(predicate);
     }
     if (!orders.isEmpty()) {
-      query.orderBy(orders.toArray(new OrderSpecifier[0]));
+      contentQuery.orderBy(orders.toArray(new OrderSpecifier[0]));
     }
     if (pageable.isPaged()) {
-      query.offset(pageable.getOffset()).limit(pageable.getPageSize());
+      contentQuery.offset(pageable.getOffset()).limit(pageable.getPageSize());
     }
-    QueryResults<T> results = query.fetchResults();
-    return new PageImpl<>(results.getResults(), pageable, results.getTotal());
+    List<T> content = contentQuery.fetch();
+    Long total = countQuery.fetchOne();
+    return new PageImpl<>(content, pageable, total == null ? 0L : total);
   }
 
   private <T> List<OrderSpecifier<?>> buildOrderSpecifiers(

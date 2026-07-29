@@ -128,26 +128,37 @@ public class JsonbJsonPathTranslator {
     int i = 0;
     while (i < input.length()) {
       char c = input.charAt(i);
+      int consumed;
       if (c == '\'' || c == '"') {
-        int end = findStringEnd(input, i);
-        out.append('"').append(escapeForDoubleQuoted(input.substring(i + 1, end))).append('"');
-        i = end + 1;
-        continue;
+        consumed = translateQuotedLiteral(input, i, out);
+      } else if (c == '[' && looksLikeFilterOpen(input, i)) {
+        consumed = translateFilterExpression(input, i, out);
+      } else {
+        out.append(c);
+        consumed = 1;
       }
-      if (c == '[' && looksLikeFilterOpen(input, i)) {
-        // findMatchingFilterClose returns the position of the closing ']'; the ')' is
-        // one character before. Inner-filter body is [i+3, filterEnd-1) — from just
-        // past '[?(' up to but not including ')'.
-        int filterEnd = findMatchingFilterClose(input, i);
-        String innerFilter = input.substring(i + 3, filterEnd - 1);
-        out.append("[*] ? (").append(translatePredicate(innerFilter)).append(")");
-        i = filterEnd + 1;
-        continue;
-      }
-      out.append(c);
-      i++;
+      i += consumed;
     }
     return out.toString();
+  }
+
+  private int translateQuotedLiteral(String input, int i, StringBuilder out) {
+    int end = findStringEnd(input, i);
+    out.append('"').append(escapeForDoubleQuoted(input.substring(i + 1, end))).append('"');
+    return end + 1 - i;
+  }
+
+  /**
+   * Consumes {@code [?(...)]} at position {@code i} and appends its SQL/JSON form. The
+   * inner-filter body is at {@code [i+3, filterEnd-1)} — from just past {@code [?(} up
+   * to but not including the closing {@code )}; {@code filterEnd} points at the closing
+   * {@code ]}, so the {@code )} sits one character before it.
+   */
+  private int translateFilterExpression(String input, int i, StringBuilder out) {
+    int filterEnd = findMatchingFilterClose(input, i);
+    String innerFilter = input.substring(i + 3, filterEnd - 1);
+    out.append("[*] ? (").append(translatePredicate(innerFilter)).append(")");
+    return filterEnd + 1 - i;
   }
 
   private static boolean looksLikeFilterOpen(String s, int i) {

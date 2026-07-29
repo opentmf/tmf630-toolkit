@@ -3,6 +3,7 @@ package org.opentmf.query.tmf630.mongo.split;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Immutable metadata for a {@link Tmf630MongoSplitBacked} parent document type.
@@ -20,6 +21,9 @@ public record MongoSplitEntityMetadata(
     List<MongoSplitCollectionMetadata> splits) {
 
   public MongoSplitEntityMetadata {
+    Objects.requireNonNull(parentType, "parentType");
+    Objects.requireNonNull(parentCollection, "parentCollection");
+    Objects.requireNonNull(idField, "idField");
     splits = List.copyOf(splits);
   }
 
@@ -87,14 +91,14 @@ public record MongoSplitEntityMetadata(
    * Returns {@code null} if the field is absent or unreadable — caller decides how to
    * interpret {@code null} (usually as an empty child list).
    */
-  @SuppressWarnings({"unchecked", "java:S3011", "java:S1168"}) // null intentionally distinguishes "field unset" from empty list per javadoc
+  @SuppressWarnings({"java:S3011", "java:S1168"}) // null intentionally distinguishes "field unset" from empty list per javadoc
   public List<Object> readSplitField(Object parent, String fieldName) {
     try {
       Field f = findField(parentType, fieldName);
       f.setAccessible(true);
       Object v = f.get(parent);
       if (v == null) return null;
-      if (v instanceof List<?> list) return new ArrayList<>((List<Object>) list);
+      if (v instanceof List<?> list) return new ArrayList<Object>(list);
       throw new IllegalStateException(
           "Split field '" + fieldName + "' must be a List; got " + v.getClass().getName());
     } catch (IllegalAccessException | NoSuchFieldException e) {

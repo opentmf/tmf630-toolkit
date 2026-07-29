@@ -374,9 +374,7 @@ class Tmf630JsonbSplitCollectionIT {
         executor.findAll(
             SplitOrderDomain.class, whereNoMatch, TmfSort.empty(),
             Pageable.unpaged(), field -> String.class);
-    assertThat(noMatchPage.getContent())
-        .extracting(SplitOrderDomain::getId)
-        .doesNotContain("F3");
+    assertThat(noMatchPage.getContent()).isEmpty();
   }
 
   @Test

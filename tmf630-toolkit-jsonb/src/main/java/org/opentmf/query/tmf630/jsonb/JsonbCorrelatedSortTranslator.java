@@ -46,6 +46,7 @@ public class JsonbCorrelatedSortTranslator {
    * quotes), 4=leaf. Deliberately narrow — supports only a single top-level equality
    * predicate. Compound predicates land later.
    */
+  @SuppressWarnings("java:S5843") // whitespace tolerance in [ ? ( @.k == 'v' ) ] is load-bearing; see JsonbCorrelatedSortTranslatorTest#jsonPathWithWhitespace
   private static final Pattern JSONPATH_TERM =
       Pattern.compile(
           "^\\$\\.?([A-Za-z_]\\w*)\\[\\s*\\?\\s*\\(\\s*@\\.([A-Za-z_]\\w*)\\s*==\\s*(['\"])([^'\"]*)\\3\\s*\\)\\s*]\\.([A-Za-z_][A-Za-z0-9_.]*)$");

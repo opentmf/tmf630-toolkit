@@ -172,14 +172,21 @@ public final class TmfSplitFilterDecomposer {
     List<String> parts = new ArrayList<>();
     int depth = 0;
     int start = 0;
-    for (int i = 0; i < body.length() - 1; i++) {
+    int i = 0;
+    while (i < body.length() - 1) {
       char c = body.charAt(i);
-      if (c == '(' || c == '[') depth++;
-      else if (c == ')' || c == ']') depth--;
-      else if (depth == 0 && c == opChar && body.charAt(i + 1) == opChar) {
+      if (c == '(' || c == '[') {
+        depth++;
+        i++;
+      } else if (c == ')' || c == ']') {
+        depth--;
+        i++;
+      } else if (depth == 0 && c == opChar && body.charAt(i + 1) == opChar) {
         parts.add(body.substring(start, i));
         start = i + 2;
-        i++; // skip the paired operator char
+        i += 2;
+      } else {
+        i++;
       }
     }
     parts.add(body.substring(start));

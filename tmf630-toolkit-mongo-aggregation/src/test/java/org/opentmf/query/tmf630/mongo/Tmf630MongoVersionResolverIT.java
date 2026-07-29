@@ -118,6 +118,7 @@ class Tmf630MongoVersionResolverIT {
 
   @Document("versionedOffering")
   @Tmf630Versioned(versionOrder = VersionOrder.NUMERIC_STRING)
+  @SuppressWarnings({"java:S116", "java:S117"}) // `_id` deliberately mirrors the Mongo document field name
   static class VersionedOfferingMongo {
     @Id String _id;
     String id;

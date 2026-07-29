@@ -6,6 +6,7 @@ import org.springframework.core.MethodParameter;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.support.WebDataBinderFactory;
 import org.springframework.web.context.request.NativeWebRequest;
+import org.springframework.web.context.request.RequestAttributes;
 import org.springframework.web.method.support.HandlerMethodArgumentResolver;
 import org.springframework.web.method.support.ModelAndViewContainer;
 import org.springframework.web.servlet.HandlerMapping;
@@ -47,7 +48,7 @@ public class TmfVersionedIdArgumentResolver implements HandlerMethodArgumentReso
         (Map<String, String>)
             webRequest.getAttribute(
                 HandlerMapping.URI_TEMPLATE_VARIABLES_ATTRIBUTE,
-                NativeWebRequest.SCOPE_REQUEST);
+                RequestAttributes.SCOPE_REQUEST);
     String raw = uriVars == null ? null : uriVars.get(pathVarName);
     TmfVersionedId parsed = TmfVersionedId.parse(raw);
     if (parsed.version().isPresent()) {

@@ -61,17 +61,20 @@ public class Tmf630JsonbAutoConfiguration {
       if (javaType.isAnnotationPresent(Tmf630JsonbBacked.class)) {
         JsonbEntityMetadata metadata = JsonbEntityMetadata.of(javaType);
         registry.register(metadata);
-        log.info(
-            "tmf630-jsonb: registered {} (domain={}, payload={}, audit=[createdDate={}, "
-                + "lastModifiedDate={}, createdBy={}, lastModifiedBy={}, version={}])",
-            javaType.getSimpleName(),
-            metadata.domainType().getSimpleName(),
-            metadata.payloadField(),
-            metadata.auditColumns().createdDateField().orElse("-"),
-            metadata.auditColumns().lastModifiedDateField().orElse("-"),
-            metadata.auditColumns().createdByField().orElse("-"),
-            metadata.auditColumns().lastModifiedByField().orElse("-"),
-            metadata.auditColumns().versionField().orElse("-"));
+        if (log.isInfoEnabled()) {
+          JsonbAuditColumns audit = metadata.auditColumns();
+          log.info(
+              "tmf630-jsonb: registered {} (domain={}, payload={}, audit=[createdDate={}, "
+                  + "lastModifiedDate={}, createdBy={}, lastModifiedBy={}, version={}])",
+              javaType.getSimpleName(),
+              metadata.domainType().getSimpleName(),
+              metadata.payloadField(),
+              audit.createdDateField().orElse("-"),
+              audit.lastModifiedDateField().orElse("-"),
+              audit.createdByField().orElse("-"),
+              audit.lastModifiedByField().orElse("-"),
+              audit.versionField().orElse("-"));
+        }
       }
     }
     if (registry.all().isEmpty()) {
@@ -117,8 +120,8 @@ public class Tmf630JsonbAutoConfiguration {
   @ConditionalOnMissingBean
   public JsonbSortBuilder tmf630JsonbSortBuilder(
       JsonbPathExtractor extractor, ObjectProvider<Tmf630PagingSettings> pagingSettings) {
-    boolean nullsLast =
-        pagingSettings.getIfAvailable() != null && pagingSettings.getIfAvailable().nullsLast();
+    Tmf630PagingSettings settings = pagingSettings.getIfAvailable();
+    boolean nullsLast = settings != null && settings.nullsLast();
     return new JsonbSortBuilder(extractor, nullsLast);
   }
 

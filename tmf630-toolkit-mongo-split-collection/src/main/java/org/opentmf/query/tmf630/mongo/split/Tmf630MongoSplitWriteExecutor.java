@@ -186,8 +186,7 @@ public class Tmf630MongoSplitWriteExecutor {
       Object child, Document payload, MongoSplitCollectionMetadata split) {
     Object fromField = firstNonNullFieldValue(child, "id", split.itemIdField());
     if (fromField != null) return fromField;
-    Object mappedId = payload.get("_id");
-    return mappedId;
+    return payload.get("_id");
   }
 
   @SuppressWarnings("java:S3011") // toolkit must read user-declared entity field regardless of visibility

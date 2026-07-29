@@ -38,7 +38,7 @@ public class SimpleMongoInnerPredicateTranslator implements MongoInnerPredicateT
 
   private static final Pattern LEAF_PATTERN =
       Pattern.compile(
-          "\\s*@\\.([A-Za-z_][\\w.]*)\\s*(==|!=|<=|>=|<|>)\\s*(?:'([^']*)'|(-?\\d+(?:\\.\\d+)?))\\s*");
+          "\\s*@\\.([A-Za-z_][\\w.]*)\\s*([<>]=?|[!=]=)\\s*(?:'([^']*)'|(-?\\d+(?:\\.\\d+)?))\\s*");
 
   private final String fieldPrefix;
 
@@ -108,11 +108,7 @@ public class SimpleMongoInnerPredicateTranslator implements MongoInnerPredicateT
     // Find the extent of this leaf — until we hit an unbalanced ) or a boolean joiner.
     int start = c.position;
     int end = c.position;
-    while (end < c.source.length()) {
-      char ch = c.source.charAt(end);
-      if (ch == ')') break;
-      if (ch == '&' && end + 1 < c.source.length() && c.source.charAt(end + 1) == '&') break;
-      if (ch == '|' && end + 1 < c.source.length() && c.source.charAt(end + 1) == '|') break;
+    while (end < c.source.length() && !isLeafBoundary(c.source, end)) {
       end++;
     }
     String leaf = c.source.substring(start, end);
@@ -129,6 +125,14 @@ public class SimpleMongoInnerPredicateTranslator implements MongoInnerPredicateT
     String op = m.group(2);
     Object value = m.group(3) != null ? m.group(3) : parseNumber(m.group(4));
     return buildCriteria(field, op, value);
+  }
+
+  private static boolean isLeafBoundary(String source, int pos) {
+    char ch = source.charAt(pos);
+    if (ch == ')') return true;
+    if (pos + 1 >= source.length()) return false;
+    char next = source.charAt(pos + 1);
+    return (ch == '&' && next == '&') || (ch == '|' && next == '|');
   }
 
   private Criteria buildCriteria(String field, String op, Object value) {

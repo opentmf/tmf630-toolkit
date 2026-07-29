@@ -427,7 +427,7 @@ public class JsonPathFilterPredicateBuilder {
       Object withFrom = fromCollection.invoke(selectOne, collectionPath, subroot);
       Method where =
           withFrom.getClass().getMethod("where", com.querydsl.core.types.Predicate[].class);
-      Object withWhere = where.invoke(withFrom, new Object[] {new Predicate[] {nested}});
+      Object withWhere = where.invoke(withFrom, (Object) new Predicate[] {nested});
       Method exists = withWhere.getClass().getMethod("exists");
       return (Predicate) exists.invoke(withWhere);
     } catch (ClassNotFoundException ex) {

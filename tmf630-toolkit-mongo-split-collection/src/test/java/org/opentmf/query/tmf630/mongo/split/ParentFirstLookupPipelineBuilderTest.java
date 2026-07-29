@@ -62,17 +62,17 @@ class ParentFirstLookupPipelineBuilderTest {
     @SuppressWarnings("unchecked")
     List<Document> innerStages = (List<Document>) lookup.get("pipeline");
     assertThat(innerStages).hasSize(3);
-    // stage 0: $match { $expr: { $eq: ["$parentId", "$$pId"] } }
+    // Stage 0 is the parent-join $match on the correlated variable.
     Document parentJoin = (Document) innerStages.get(0).get("$match");
     Document expr = (Document) parentJoin.get("$expr");
     @SuppressWarnings("unchecked")
     List<Object> eqOperands = (List<Object>) expr.get("$eq");
     assertThat(eqOperands).containsExactly("$parentId", "$$pId");
-    // stage 1: $match { <inner-criteria on payload.field> }
+    // Stage 1 is the inner-criteria $match on the payload field.
     Document innerMatch = (Document) innerStages.get(1).get("$match");
     assertThat(innerMatch).isEqualTo(new Document("payload.state", "PENDING"));
-    // stage 2: $limit 1
-    assertThat(innerStages.get(2).get("$limit")).isEqualTo(1);
+    // Stage 2 is the $limit 1 that short-circuits after the first hit.
+    assertThat(innerStages.get(2)).containsEntry("$limit", 1);
   }
 
   @Test
@@ -89,7 +89,7 @@ class ParentFirstLookupPipelineBuilderTest {
   void stripHelperArray()  {
     Document project =
         (Document) serialize(builder.build(split, "@.state == 'X'")).get(2).get("$project");
-    assertThat(project.get("__tmf630Match__")).isEqualTo(0);
+    assertThat(project).containsEntry("__tmf630Match__", 0);
   }
 
   @Test

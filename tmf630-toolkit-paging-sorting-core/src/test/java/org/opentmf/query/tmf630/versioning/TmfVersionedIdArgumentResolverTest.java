@@ -9,6 +9,8 @@ import java.lang.reflect.Method;
 import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.opentmf.query.tmf630.exception.TmfPagingException;
 import org.springframework.core.MethodParameter;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -68,42 +70,23 @@ class TmfVersionedIdArgumentResolverTest {
         () -> resolver.resolveArgument(parameter, null, request, null));
   }
 
-  @Test
-  @DisplayName("query-param ?version=N fills in when path is bare")
-  void queryParamFillsInWhenPathBare() throws Exception {
-    NativeWebRequest request = requestWithPathVariable("ref", "Prod", Map.of("version", "1.0"));
-    Method sample = Sample.class.getDeclaredMethod("handler", TmfVersionedId.class, String.class);
-    MethodParameter parameter = new MethodParameter(sample, 0);
-    TmfVersionedId parsed =
-        (TmfVersionedId) resolver.resolveArgument(parameter, null, request, null);
-    assertEquals("Prod", parsed.id());
-    assertEquals(java.util.Optional.of("1.0"), parsed.version());
-  }
-
-  @Test
-  @DisplayName("path :(version=…) wins over conflicting ?version=N")
-  void pathWinsOverConflictingQuery() throws Exception {
+  @ParameterizedTest(name = "{0}")
+  @CsvSource({
+      "'query fills in when path is bare',           Prod,                2.0, 2.0",
+      "'path wins over conflicting query',           Prod:(version=1.0),  2.0, 1.0",
+      "'path wins even when query agrees',           Prod:(version=1.0),  1.0, 1.0",
+  })
+  @DisplayName("path :(version=N) is authoritative; query ?version=N fills in only when path is bare")
+  void pathPrecedesOrFallsBackToQuery(String label, String pathValue,
+      String queryVersion, String expectedVersion) throws Exception {
     NativeWebRequest request =
-        requestWithPathVariable("ref", "Prod:(version=1.0)", Map.of("version", "2.0"));
+        requestWithPathVariable("ref", pathValue, Map.of("version", queryVersion));
     Method sample = Sample.class.getDeclaredMethod("handler", TmfVersionedId.class, String.class);
     MethodParameter parameter = new MethodParameter(sample, 0);
     TmfVersionedId parsed =
         (TmfVersionedId) resolver.resolveArgument(parameter, null, request, null);
     assertEquals("Prod", parsed.id());
-    assertEquals(java.util.Optional.of("1.0"), parsed.version());
-  }
-
-  @Test
-  @DisplayName("path :(version=…) wins even when query agrees (no double-set)")
-  void pathWinsWhenQueryAgrees() throws Exception {
-    NativeWebRequest request =
-        requestWithPathVariable("ref", "Prod:(version=1.0)", Map.of("version", "1.0"));
-    Method sample = Sample.class.getDeclaredMethod("handler", TmfVersionedId.class, String.class);
-    MethodParameter parameter = new MethodParameter(sample, 0);
-    TmfVersionedId parsed =
-        (TmfVersionedId) resolver.resolveArgument(parameter, null, request, null);
-    assertEquals("Prod", parsed.id());
-    assertEquals(java.util.Optional.of("1.0"), parsed.version());
+    assertEquals(java.util.Optional.of(expectedVersion), parsed.version());
   }
 
   @Test
@@ -143,6 +126,7 @@ class TmfVersionedIdArgumentResolverTest {
   }
 
   static class Sample {
+    @SuppressWarnings("java:S1186") // reflective MethodParameter fixture; body is intentionally empty
     void handler(@PathVariable("ref") TmfVersionedId versioned, @PathVariable String other) {}
   }
 }

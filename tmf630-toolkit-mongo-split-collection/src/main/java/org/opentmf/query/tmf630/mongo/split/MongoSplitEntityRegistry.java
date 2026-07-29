@@ -3,6 +3,7 @@ package org.opentmf.query.tmf630.mongo.split;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -129,9 +130,7 @@ public class MongoSplitEntityRegistry {
     List<Field> out = new ArrayList<>();
     Class<?> cursor = type;
     while (cursor != null && cursor != Object.class) {
-      for (Field f : cursor.getDeclaredFields()) {
-        out.add(f);
-      }
+      Collections.addAll(out, cursor.getDeclaredFields());
       cursor = cursor.getSuperclass();
     }
     return out;

@@ -153,8 +153,7 @@ class Tmf630JsonbSplitScaleIT {
       }
     }
     // All 500 items collected, no duplicates, in item_order order.
-    assertThat(collectedIds).hasSize(SCALE_CHILD_COUNT);
-    assertThat(collectedIds).doesNotHaveDuplicates();
+    assertThat(collectedIds).hasSize(SCALE_CHILD_COUNT).doesNotHaveDuplicates();
     assertThat(collectedIds.get(0)).isEqualTo("i-0");
     assertThat(collectedIds.get(SCALE_CHILD_COUNT - 1))
         .isEqualTo("i-" + (SCALE_CHILD_COUNT - 1));
