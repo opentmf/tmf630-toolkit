@@ -48,6 +48,15 @@ import org.springframework.transaction.annotation.Transactional;
  */
 public class Tmf630JsonbWriteExecutor {
 
+  private static final String NO_DOMAIN_REGISTERED =
+      "No @Tmf630JsonbBacked row entity registered for domain type: ";
+  private static final String INSERT_INTO = "INSERT INTO ";
+  private static final String DELETE_FROM = "DELETE FROM ";
+  private static final String UPDATE = "UPDATE ";
+  private static final String SET = " SET ";
+  private static final String WHERE = " WHERE ";
+  private static final String AND_EQ_PARAM = " = ? AND ";
+
   private final JdbcClient jdbcClient;
   private final ObjectMapper objectMapper;
   private final JsonbEntityRegistry registry;
@@ -75,7 +84,7 @@ public class Tmf630JsonbWriteExecutor {
             .orElseThrow(
                 () ->
                     new TmfFilteringException(
-                        "No @Tmf630JsonbBacked row entity registered for domain type: "
+                        NO_DOMAIN_REGISTERED
                             + parent.getClass().getName()));
     try {
       // Serialize the parent to a mutable tree — split fields will be removed from it
@@ -114,7 +123,7 @@ public class Tmf630JsonbWriteExecutor {
   private void upsertParent(JsonbEntityMetadata metadata, String parentId, String payloadJson) {
     jdbcClient
         .sql(
-            "INSERT INTO "
+            INSERT_INTO
                 + metadata.tableName()
                 + " (id, "
                 + metadata.payloadField()
@@ -133,9 +142,9 @@ public class Tmf630JsonbWriteExecutor {
     // Full-replace: delete existing children for this parent first.
     jdbcClient
         .sql(
-            "DELETE FROM "
+            DELETE_FROM
                 + split.childTable()
-                + " WHERE "
+                + WHERE
                 + split.parentIdColumn()
                 + " = ?")
         .param(1, parentId)
@@ -146,7 +155,7 @@ public class Tmf630JsonbWriteExecutor {
     }
 
     String insertSql =
-        "INSERT INTO "
+        INSERT_INTO
             + split.childTable()
             + " ("
             + split.parentIdColumn()
@@ -208,7 +217,7 @@ public class Tmf630JsonbWriteExecutor {
             .orElseThrow(
                 () ->
                     new TmfFilteringException(
-                        "No @Tmf630JsonbBacked row entity registered for domain type: "
+                        NO_DOMAIN_REGISTERED
                             + parentType.getName()));
     JsonbSplitCollectionMetadata split = findSplitForChildType(metadata, child.getClass());
     try {
@@ -220,7 +229,7 @@ public class Tmf630JsonbWriteExecutor {
             "appendChild requires the child instance to carry an 'id' field.");
       }
       String insertSql =
-          "INSERT INTO "
+          INSERT_INTO
               + split.childTable()
               + " ("
               + split.parentIdColumn()
@@ -235,7 +244,7 @@ public class Tmf630JsonbWriteExecutor {
               + split.itemOrderColumn()
               + ") + 1 FROM "
               + split.childTable()
-              + " WHERE "
+              + WHERE
               + split.parentIdColumn()
               + " = ?), 0), "
               + " ?::jsonb)";
@@ -296,13 +305,13 @@ public class Tmf630JsonbWriteExecutor {
     String payload = objectMapper.valueToTree(updatedChild).toString();
     return jdbcClient
         .sql(
-            "UPDATE "
+            UPDATE
                 + split.childTable()
-                + " SET "
+                + SET
                 + split.payloadColumn()
                 + " = ?::jsonb WHERE "
                 + split.parentIdColumn()
-                + " = ? AND "
+                + AND_EQ_PARAM
                 + split.itemIdColumn()
                 + " = ?")
         .param(1, payload)
@@ -332,11 +341,11 @@ public class Tmf630JsonbWriteExecutor {
     JsonbSplitCollectionMetadata split = resolveSplitForChild(parentType, childType);
     return jdbcClient
         .sql(
-            "DELETE FROM "
+            DELETE_FROM
                 + split.childTable()
-                + " WHERE "
+                + WHERE
                 + split.parentIdColumn()
-                + " = ? AND "
+                + AND_EQ_PARAM
                 + split.itemIdColumn()
                 + " = ?")
         .param(1, parentId)
@@ -373,7 +382,7 @@ public class Tmf630JsonbWriteExecutor {
             .orElseThrow(
                 () ->
                     new TmfFilteringException(
-                        "No @Tmf630JsonbBacked row entity registered for domain type: "
+                        NO_DOMAIN_REGISTERED
                             + parent.getClass().getName()));
     try {
       ObjectNode parentTree = objectMapper.valueToTree(parent);
@@ -413,7 +422,7 @@ public class Tmf630JsonbWriteExecutor {
                 + split.payloadColumn()
                 + "::text FROM "
                 + split.childTable()
-                + " WHERE "
+                + WHERE
                 + split.parentIdColumn()
                 + " = ?")
         .param(1, parentId)
@@ -448,11 +457,11 @@ public class Tmf630JsonbWriteExecutor {
       if (!seen.contains(stale)) {
         jdbcClient
             .sql(
-                "DELETE FROM "
+                DELETE_FROM
                     + split.childTable()
-                    + " WHERE "
+                    + WHERE
                     + split.parentIdColumn()
-                    + " = ? AND "
+                    + AND_EQ_PARAM
                     + split.itemIdColumn()
                     + " = ?")
             .param(1, parentId)
@@ -470,7 +479,7 @@ public class Tmf630JsonbWriteExecutor {
       String payload) {
     jdbcClient
         .sql(
-            "INSERT INTO "
+            INSERT_INTO
                 + split.childTable()
                 + " ("
                 + split.parentIdColumn()
@@ -496,15 +505,15 @@ public class Tmf630JsonbWriteExecutor {
       String payload) {
     jdbcClient
         .sql(
-            "UPDATE "
+            UPDATE
                 + split.childTable()
-                + " SET "
+                + SET
                 + split.payloadColumn()
                 + " = ?::jsonb, "
                 + split.itemOrderColumn()
                 + " = ? WHERE "
                 + split.parentIdColumn()
-                + " = ? AND "
+                + AND_EQ_PARAM
                 + split.itemIdColumn()
                 + " = ?")
         .param(1, payload)
@@ -518,13 +527,13 @@ public class Tmf630JsonbWriteExecutor {
       JsonbSplitCollectionMetadata split, String parentId, String childId, int order) {
     jdbcClient
         .sql(
-            "UPDATE "
+            UPDATE
                 + split.childTable()
-                + " SET "
+                + SET
                 + split.itemOrderColumn()
                 + " = ? WHERE "
                 + split.parentIdColumn()
-                + " = ? AND "
+                + AND_EQ_PARAM
                 + split.itemIdColumn()
                 + " = ?")
         .param(1, order)
@@ -551,7 +560,7 @@ public class Tmf630JsonbWriteExecutor {
                     + split.itemIdColumn()
                     + " FROM "
                     + split.childTable()
-                    + " WHERE "
+                    + WHERE
                     + split.parentIdColumn()
                     + " = ? ORDER BY "
                     + split.itemOrderColumn()
@@ -572,7 +581,7 @@ public class Tmf630JsonbWriteExecutor {
             .orElseThrow(
                 () ->
                     new TmfFilteringException(
-                        "No @Tmf630JsonbBacked row entity registered for domain type: "
+                        NO_DOMAIN_REGISTERED
                             + parentType.getName()));
     return findSplitForChildType(metadata, childType);
   }

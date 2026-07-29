@@ -16,6 +16,9 @@ import java.util.List;
  */
 public record JsonbClause(String sql, List<Object> params) {
 
+  private static final String TRUE_SQL = "TRUE";
+  private static final String FALSE_SQL = "FALSE";
+
   public JsonbClause {
     if (sql == null) {
       throw new IllegalArgumentException("sql must not be null");
@@ -28,21 +31,21 @@ public record JsonbClause(String sql, List<Object> params) {
   }
 
   public static JsonbClause alwaysTrue() {
-    return new JsonbClause("TRUE", List.of());
+    return new JsonbClause(TRUE_SQL, List.of());
   }
 
   public static JsonbClause alwaysFalse() {
-    return new JsonbClause("FALSE", List.of());
+    return new JsonbClause(FALSE_SQL, List.of());
   }
 
   public JsonbClause and(JsonbClause other) {
-    if (other == null || "TRUE".equals(other.sql)) {
+    if (other == null || TRUE_SQL.equals(other.sql)) {
       return this;
     }
-    if ("TRUE".equals(this.sql)) {
+    if (TRUE_SQL.equals(this.sql)) {
       return other;
     }
-    if ("FALSE".equals(this.sql) || "FALSE".equals(other.sql)) {
+    if (FALSE_SQL.equals(this.sql) || FALSE_SQL.equals(other.sql)) {
       return alwaysFalse();
     }
     List<Object> merged = new ArrayList<>(this.params.size() + other.params.size());
@@ -52,13 +55,13 @@ public record JsonbClause(String sql, List<Object> params) {
   }
 
   public JsonbClause or(JsonbClause other) {
-    if (other == null || "FALSE".equals(other.sql)) {
+    if (other == null || FALSE_SQL.equals(other.sql)) {
       return this;
     }
-    if ("FALSE".equals(this.sql)) {
+    if (FALSE_SQL.equals(this.sql)) {
       return other;
     }
-    if ("TRUE".equals(this.sql) || "TRUE".equals(other.sql)) {
+    if (TRUE_SQL.equals(this.sql) || TRUE_SQL.equals(other.sql)) {
       return alwaysTrue();
     }
     List<Object> merged = new ArrayList<>(this.params.size() + other.params.size());
@@ -68,10 +71,10 @@ public record JsonbClause(String sql, List<Object> params) {
   }
 
   public JsonbClause not() {
-    if ("TRUE".equals(this.sql)) {
+    if (TRUE_SQL.equals(this.sql)) {
       return alwaysFalse();
     }
-    if ("FALSE".equals(this.sql)) {
+    if (FALSE_SQL.equals(this.sql)) {
       return alwaysTrue();
     }
     return new JsonbClause("(NOT " + this.sql + ")", this.params);

@@ -41,6 +41,7 @@ import org.springframework.data.mongodb.core.aggregation.AggregationOperation;
 public class ParentFirstLookupPipelineBuilder implements MongoSplitPipelineBuilder {
 
   private static final String MATCH_ARRAY_FIELD = "__tmf630Match__";
+  private static final String MATCH = "$match";
 
   private final MongoInnerPredicateTranslator innerTranslator;
 
@@ -62,19 +63,19 @@ public class ParentFirstLookupPipelineBuilder implements MongoSplitPipelineBuild
                         "pipeline",
                         List.of(
                             new Document(
-                                "$match",
+                                MATCH,
                                 new Document(
                                     "$expr",
                                     new Document(
                                         "$eq",
                                         List.of(
                                             "$" + split.parentIdField(), "$$pId")))),
-                            new Document("$match", innerCriteria),
+                            new Document(MATCH, innerCriteria),
                             new Document("$limit", 1)))
                     .append("as", MATCH_ARRAY_FIELD));
 
     AggregationOperation retainMatching =
-        ctx -> new Document("$match", new Document(MATCH_ARRAY_FIELD, new Document("$ne", List.of())));
+        ctx -> new Document(MATCH, new Document(MATCH_ARRAY_FIELD, new Document("$ne", List.of())));
 
     AggregationOperation stripHelper =
         ctx -> new Document("$project", new Document(MATCH_ARRAY_FIELD, 0));

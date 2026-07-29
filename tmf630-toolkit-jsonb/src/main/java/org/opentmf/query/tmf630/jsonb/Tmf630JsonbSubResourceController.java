@@ -43,6 +43,8 @@ import org.springframework.web.bind.annotation.PathVariable;
  */
 public abstract class Tmf630JsonbSubResourceController<C, P> {
 
+  private static final String WHERE = " WHERE ";
+
   protected final JdbcClient jdbcClient;
   protected final ObjectMapper objectMapper;
   protected final JsonbEntityRegistry registry;
@@ -105,7 +107,7 @@ public abstract class Tmf630JsonbSubResourceController<C, P> {
                     + split.payloadColumn()
                     + " FROM "
                     + split.childTable()
-                    + " WHERE "
+                    + WHERE
                     + split.parentIdColumn()
                     + " = ? AND "
                     + split.itemIdColumn()
@@ -147,7 +149,7 @@ public abstract class Tmf630JsonbSubResourceController<C, P> {
             .sql(
                 "SELECT COUNT(*) FROM "
                     + split.childTable()
-                    + " WHERE "
+                    + WHERE
                     + split.parentIdColumn()
                     + " = ?")
             .param(1, parentId)
@@ -163,7 +165,7 @@ public abstract class Tmf630JsonbSubResourceController<C, P> {
             .append(split.payloadColumn())
             .append(" FROM ")
             .append(split.childTable())
-            .append(" WHERE ")
+            .append(WHERE)
             .append(split.parentIdColumn())
             .append(" = ? ORDER BY ")
             .append(split.itemOrderColumn());

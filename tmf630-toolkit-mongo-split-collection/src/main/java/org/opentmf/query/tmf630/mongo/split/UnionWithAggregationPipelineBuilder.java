@@ -68,6 +68,10 @@ public class UnionWithAggregationPipelineBuilder {
 
   private static final String PARENT_STAGE_FIELD = "__tmf630Parent__";
   private static final String DEDUP_TEMP_FIELD = "__tmf630Root__";
+  private static final String MATCH = "$match";
+  private static final String GROUP = "$group";
+  private static final String REPLACE_ROOT = "$replaceRoot";
+  private static final String NEW_ROOT = "newRoot";
 
   private final MongoInnerPredicateTranslator childInnerTranslator;
   private final MongoInnerPredicateTranslator parentInnerTranslator;
@@ -109,7 +113,7 @@ public class UnionWithAggregationPipelineBuilder {
       // each split-side result set.
       Document parentBson =
           parentInnerTranslator.translate(parentOnlyInnerPredicate.get()).getCriteriaObject();
-      stages.add(ctx -> new Document("$match", parentBson));
+      stages.add(ctx -> new Document(MATCH, parentBson));
       targetCollection = parentCollection;
       firstSplitIndex = 0;
     } else {
@@ -131,10 +135,10 @@ public class UnionWithAggregationPipelineBuilder {
     stages.add(
         ctx ->
             new Document(
-                "$group",
+                GROUP,
                 new Document("_id", "$_id").append(DEDUP_TEMP_FIELD, new Document("$first", "$$ROOT"))));
     stages.add(
-        ctx -> new Document("$replaceRoot", new Document("newRoot", "$" + DEDUP_TEMP_FIELD)));
+        ctx -> new Document(REPLACE_ROOT, new Document(NEW_ROOT, "$" + DEDUP_TEMP_FIELD)));
 
     return new SplitAwareAggregation(Aggregation.newAggregation(stages), targetCollection);
   }
@@ -144,9 +148,9 @@ public class UnionWithAggregationPipelineBuilder {
     Document childCriteria =
         childInnerTranslator.translate(piece.innerPredicate()).getCriteriaObject();
     MongoSplitCollectionMetadata split = piece.split();
-    stages.add(ctx -> new Document("$match", childCriteria));
+    stages.add(ctx -> new Document(MATCH, childCriteria));
     stages.add(
-        ctx -> new Document("$group", new Document("_id", "$" + split.parentIdField())));
+        ctx -> new Document(GROUP, new Document("_id", "$" + split.parentIdField())));
     stages.add(
         ctx ->
             new Document(
@@ -157,7 +161,7 @@ public class UnionWithAggregationPipelineBuilder {
                     .append("as", PARENT_STAGE_FIELD)));
     stages.add(ctx -> new Document("$unwind", "$" + PARENT_STAGE_FIELD));
     stages.add(
-        ctx -> new Document("$replaceRoot", new Document("newRoot", "$" + PARENT_STAGE_FIELD)));
+        ctx -> new Document(REPLACE_ROOT, new Document(NEW_ROOT, "$" + PARENT_STAGE_FIELD)));
   }
 
   private Document buildUnionWithFor(String parentCollection, SplitPiece piece) {
@@ -166,8 +170,8 @@ public class UnionWithAggregationPipelineBuilder {
     MongoSplitCollectionMetadata split = piece.split();
     List<Document> innerStages =
         List.of(
-            new Document("$match", childCriteria),
-            new Document("$group", new Document("_id", "$" + split.parentIdField())),
+            new Document(MATCH, childCriteria),
+            new Document(GROUP, new Document("_id", "$" + split.parentIdField())),
             new Document(
                 "$lookup",
                 new Document("from", parentCollection)
@@ -175,7 +179,7 @@ public class UnionWithAggregationPipelineBuilder {
                     .append("foreignField", "_id")
                     .append("as", PARENT_STAGE_FIELD)),
             new Document("$unwind", "$" + PARENT_STAGE_FIELD),
-            new Document("$replaceRoot", new Document("newRoot", "$" + PARENT_STAGE_FIELD)));
+            new Document(REPLACE_ROOT, new Document(NEW_ROOT, "$" + PARENT_STAGE_FIELD)));
     return new Document("coll", split.childCollection()).append("pipeline", innerStages);
   }
 

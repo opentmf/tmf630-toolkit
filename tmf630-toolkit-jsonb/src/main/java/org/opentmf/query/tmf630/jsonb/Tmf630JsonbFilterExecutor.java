@@ -36,6 +36,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  */
 public class Tmf630JsonbFilterExecutor {
 
+  private static final String WHERE = " WHERE ";
+
   private final JdbcClient jdbcClient;
   private final ObjectMapper objectMapper;
   private final JsonbEntityRegistry registry;
@@ -87,7 +89,7 @@ public class Tmf630JsonbFilterExecutor {
     StringBuilder sql = new StringBuilder();
     sql.append("SELECT ").append(payloadColumn).append(" FROM ").append(tableName);
     if (hasWhere) {
-      sql.append(" WHERE ").append(effectiveWhere.sql());
+      sql.append(WHERE).append(effectiveWhere.sql());
     }
     if (!orderBy.sql().isEmpty()) {
       sql.append(" ORDER BY ").append(orderBy.sql());
@@ -125,7 +127,7 @@ public class Tmf630JsonbFilterExecutor {
     StringBuilder countSql =
         new StringBuilder("SELECT COUNT(*) FROM ").append(tableName);
     if (hasWhere) {
-      countSql.append(" WHERE ").append(where.sql());
+      countSql.append(WHERE).append(where.sql());
     }
     JdbcClient.StatementSpec countStmt = jdbcClient.sql(countSql.toString());
     int paramIndex = 1;
@@ -182,7 +184,7 @@ public class Tmf630JsonbFilterExecutor {
             + split.payloadColumn()
             + " FROM "
             + split.childTable()
-            + " WHERE "
+            + WHERE
             + split.parentIdColumn()
             + " = ? ORDER BY "
             + split.itemOrderColumn()
