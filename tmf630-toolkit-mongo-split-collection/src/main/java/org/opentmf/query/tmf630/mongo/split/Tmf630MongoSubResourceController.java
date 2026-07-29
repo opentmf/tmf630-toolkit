@@ -75,6 +75,7 @@ public abstract class Tmf630MongoSubResourceController<C, P> {
    */
   @GetMapping
   @Tmf630Response
+  @SuppressWarnings("java:S6856") // {parentId} is declared on the concrete subclass @RequestMapping, not visible here
   public Page<C> listChildren(@PathVariable("parentId") String parentId, Pageable pageable) {
     MongoSplitCollectionMetadata split = resolveSplit();
     Query base = new Query(Criteria.where(split.parentIdField()).is(parentId));
@@ -103,6 +104,7 @@ public abstract class Tmf630MongoSubResourceController<C, P> {
    */
   @GetMapping("/{itemId}")
   @Tmf630Response
+  @SuppressWarnings("java:S6856") // {parentId} is declared on the concrete subclass @RequestMapping, not visible here
   public ResponseEntity<C> getChild(
       @PathVariable("parentId") String parentId, @PathVariable("itemId") String itemId) {
     MongoSplitCollectionMetadata split = resolveSplit();

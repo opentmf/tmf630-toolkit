@@ -742,7 +742,7 @@ class Tmf630JsonbSplitCollectionIT {
         .single();
   }
 
-  private void seedParent(String id, String status) throws Exception {
+  private void seedParent(String id, String status) {
     // Parent's payload holds id + status only — no items.
     String payload =
         "{\"id\":\"" + id + "\",\"status\":\"" + status + "\"}";

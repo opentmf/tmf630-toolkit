@@ -79,6 +79,7 @@ public abstract class Tmf630JsonbSubResourceController<C, P> {
    */
   @GetMapping
   @Tmf630Response
+  @SuppressWarnings("java:S6856") // {parentId} is declared on the concrete subclass @RequestMapping, not visible here
   public Page<C> listChildren(@PathVariable("parentId") String parentId, Pageable pageable) {
     JsonbSplitCollectionMetadata split = requireSplitMetadata();
     long total = countChildren(split, parentId);
@@ -97,6 +98,7 @@ public abstract class Tmf630JsonbSubResourceController<C, P> {
    */
   @GetMapping("/{itemId}")
   @Tmf630Response
+  @SuppressWarnings("java:S6856") // {parentId} is declared on the concrete subclass @RequestMapping, not visible here
   public ResponseEntity<C> getChild(
       @PathVariable("parentId") String parentId, @PathVariable("itemId") String itemId) {
     JsonbSplitCollectionMetadata split = requireSplitMetadata();

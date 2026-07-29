@@ -39,7 +39,7 @@ public class JsonbCorrelatedSortTranslator {
   /** {@code hop[key=value].leaf} — group 1=hop, 2=key, 3=value, 4=leaf. */
   private static final Pattern SIMPLE_RICH =
       Pattern.compile(
-          "^([A-Za-z_][A-Za-z0-9_]*)\\[([A-Za-z_][A-Za-z0-9_]*)=([^\\]\\[]+)\\]\\.([A-Za-z_][A-Za-z0-9_.]*)$");
+          "^([A-Za-z_]\\w*)\\[([A-Za-z_]\\w*)=([^\\]\\[]+)\\]\\.([A-Za-z_][A-Za-z0-9_.]*)$");
 
   /**
    * {@code $.hop[?(@.key == 'value')].leaf} — group 1=hop, 2=key, 3=value (with
@@ -48,7 +48,7 @@ public class JsonbCorrelatedSortTranslator {
    */
   private static final Pattern JSONPATH_TERM =
       Pattern.compile(
-          "^\\$\\.?([A-Za-z_][A-Za-z0-9_]*)\\[\\s*\\?\\s*\\(\\s*@\\.([A-Za-z_][A-Za-z0-9_]*)\\s*==\\s*(['\"])([^'\"]*)\\3\\s*\\)\\s*]\\.([A-Za-z_][A-Za-z0-9_.]*)$");
+          "^\\$\\.?([A-Za-z_]\\w*)\\[\\s*\\?\\s*\\(\\s*@\\.([A-Za-z_]\\w*)\\s*==\\s*(['\"])([^'\"]*)\\3\\s*\\)\\s*]\\.([A-Za-z_][A-Za-z0-9_.]*)$");
 
   /**
    * {@code hop[*].leaf} wildcard-projection form — group 1=hop, 2=leaf. Only meaningful
@@ -59,7 +59,7 @@ public class JsonbCorrelatedSortTranslator {
    */
   private static final Pattern WILDCARD_TERM =
       Pattern.compile(
-          "^([A-Za-z_][A-Za-z0-9_]*)\\[\\*]\\.([A-Za-z_][A-Za-z0-9_.]*)$");
+          "^([A-Za-z_]\\w*)\\[\\*]\\.([A-Za-z_][A-Za-z0-9_.]*)$");
 
   /**
    * Translates a correlated sort term to a {@link JsonbSortExpression}, peeling off

@@ -3,6 +3,7 @@ package org.opentmf.query.tmf630.mongo.split;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.bson.Document;
@@ -160,10 +161,11 @@ public class MongoSplitAwareFilterTranslator {
     }
 
     List<AggregationOperation> stages = new ArrayList<>();
-    if (decomposition.parentOnlyFilter().isPresent()) {
+    Optional<String> parentOnlyFilter = decomposition.parentOnlyFilter();
+    if (parentOnlyFilter.isPresent()) {
       Document parentBson =
           parentTranslator
-              .translate(unwrapForParent(decomposition.parentOnlyFilter().get()))
+              .translate(unwrapForParent(parentOnlyFilter.get()))
               .getCriteriaObject();
       stages.add(ctx -> new Document("$match", parentBson));
     }

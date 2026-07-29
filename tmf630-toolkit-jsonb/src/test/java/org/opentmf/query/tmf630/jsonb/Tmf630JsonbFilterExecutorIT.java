@@ -231,7 +231,7 @@ class Tmf630JsonbFilterExecutorIT {
     assertThat(page.getContent()).extracting(JsonbTestDomain::getId).containsExactly("Q1", "Q3", "Q2");
   }
 
-  private void seedWithCharacteristic(String id, int priceValue) throws Exception {
+  private void seedWithCharacteristic(String id, int priceValue) {
     String json =
         "{\"id\":\""
             + id
@@ -298,7 +298,7 @@ class Tmf630JsonbFilterExecutorIT {
         .containsExactly("B", "A", "C");
   }
 
-  private void seedWithPrices(String id, int... prices) throws Exception {
+  private void seedWithPrices(String id, int... prices) {
     StringBuilder json = new StringBuilder();
     json.append("{\"id\":\"").append(id).append("\",\"prices\":[");
     for (int i = 0; i < prices.length; i++) {

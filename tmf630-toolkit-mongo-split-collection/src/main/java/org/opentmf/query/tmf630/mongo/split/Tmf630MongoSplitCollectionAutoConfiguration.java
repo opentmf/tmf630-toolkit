@@ -9,7 +9,6 @@ import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
-import org.springframework.data.mapping.PersistentEntity;
 import org.springframework.data.mongodb.core.MongoOperations;
 import org.springframework.data.mongodb.core.mapping.MongoMappingContext;
 import org.springframework.data.mongodb.core.mapping.MongoPersistentEntity;
@@ -55,8 +54,7 @@ public class Tmf630MongoSplitCollectionAutoConfiguration {
       candidates.add(entity.getType());
       // Also crawl properties for split candidates whose parent type didn't map yet.
       for (MongoPersistentProperty prop : (Iterable<MongoPersistentProperty>) entity) {
-        PersistentEntity<?, ?> owning = prop.getOwner();
-        if (owning != null) candidates.add(owning.getType());
+        candidates.add(prop.getOwner().getType());
       }
     }
     registry.registerAll(candidates);

@@ -25,6 +25,7 @@ import java.util.Optional;
 public record JsonbSortExpression(
     Optional<Aggregator> aggregator, Optional<JsonbCast> coercion, String jsonPath) {
 
+  @SuppressWarnings("java:S2789") // record accepts null for the Optional fields and normalises them — public API safety net
   public JsonbSortExpression {
     if (jsonPath == null || jsonPath.isBlank()) {
       throw new IllegalArgumentException("jsonPath must not be blank");

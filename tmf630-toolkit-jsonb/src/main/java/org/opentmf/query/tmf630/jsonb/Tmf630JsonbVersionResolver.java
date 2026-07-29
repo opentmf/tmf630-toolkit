@@ -103,6 +103,7 @@ public class Tmf630JsonbVersionResolver implements Tmf630VersionResolver {
     return new Context(versioning, metadata);
   }
 
+  @SuppressWarnings("java:S3011") // toolkit must read user-declared entity field regardless of visibility
   private static String readVersion(Object entity, Context context) {
     try {
       Field field = findField(entity.getClass(), context.versioning.versionField());

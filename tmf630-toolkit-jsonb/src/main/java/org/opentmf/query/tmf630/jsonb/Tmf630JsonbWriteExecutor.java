@@ -445,9 +445,11 @@ public class Tmf630JsonbWriteExecutor {
           insertChildRow(split, parentId, childId, i, desiredPayload);
         } else if (!payloadEquals(currentPayload, desiredPayload)) {
           updateChildRow(split, parentId, childId, i, desiredPayload);
-        } else if (positionalOrderDiffers(existing.keySet(), childArray, childId, i)) {
-          // Payload same but position moved — update item_order without rewriting
-          // payload. Cheap; keeps the read merge's ORDER BY stable.
+        } else {
+          // Payload same but position may have moved — update item_order without
+          // rewriting payload. Cheap; keeps the read merge's ORDER BY stable. A
+          // follow-up cut that also SELECTs item_order in the initial fetch could
+          // skip this when the position is unchanged.
           updateChildOrder(split, parentId, childId, i);
         }
       }
@@ -601,13 +603,4 @@ public class Tmf630JsonbWriteExecutor {
     }
   }
 
-  private static boolean positionalOrderDiffers(
-      Set<String> currentIdsIgnored, JsonNode inboundArray, String childId, int inboundIndex) {
-    // The current SELECT in reconcileSplitChildren only caches payload, not
-    // item_order — so we can't tell whether the DB's item_order for this childId
-    // matches inboundIndex. Conservative: treat "payload same, position possibly
-    // moved" as needing a single-column item_order UPDATE. A follow-up cut that
-    // caches item_order in the SELECT can skip more of these updates.
-    return true;
-  }
 }

@@ -79,6 +79,7 @@ public class Tmf630MongoSplitReadMerger {
    * Convenience: apply {@link #merge(Object)} to each element of a list, in place.
    * Returns the same list for fluent use.
    */
+  @SuppressWarnings("java:S1168") // pass-through: return the caller's own list reference verbatim, including null
   public <T> List<T> mergeAll(List<T> parents) {
     if (parents == null) return null;
     for (T parent : parents) {
@@ -109,6 +110,7 @@ public class Tmf630MongoSplitReadMerger {
     return child;
   }
 
+  @SuppressWarnings("java:S3011") // toolkit must write user-declared entity field regardless of visibility
   private static void setChildIdIfPresent(Object child, Object idValue) {
     Class<?> cursor = child.getClass();
     while (cursor != null && cursor != Object.class) {
@@ -125,6 +127,7 @@ public class Tmf630MongoSplitReadMerger {
     }
   }
 
+  @SuppressWarnings("java:S3011") // toolkit must write user-declared entity field regardless of visibility
   private static void setField(Object target, Class<?> targetType, String fieldName, Object value) {
     Class<?> cursor = targetType;
     while (cursor != null && cursor != Object.class) {

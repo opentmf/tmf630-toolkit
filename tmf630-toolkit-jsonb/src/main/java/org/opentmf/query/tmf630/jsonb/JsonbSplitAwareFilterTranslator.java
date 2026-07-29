@@ -1,5 +1,6 @@
 package org.opentmf.query.tmf630.jsonb;
 
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.opentmf.query.tmf630.filtering.TmfFilteringException;
@@ -96,8 +97,9 @@ public class JsonbSplitAwareFilterTranslator {
     boolean isOr = decomposition.combinator() == Combinator.OR;
     // AND-identity is TRUE (any conjunct suppressed), OR-identity is FALSE.
     JsonbClause combined = isOr ? JsonbClause.alwaysFalse() : JsonbClause.alwaysTrue();
-    if (decomposition.parentOnlyFilter().isPresent()) {
-      JsonbClause parentClause = delegate.translate(decomposition.parentOnlyFilter().get());
+    Optional<String> parentOnlyFilter = decomposition.parentOnlyFilter();
+    if (parentOnlyFilter.isPresent()) {
+      JsonbClause parentClause = delegate.translate(parentOnlyFilter.get());
       combined = isOr ? combined.or(parentClause) : combined.and(parentClause);
     }
     for (SplitClauseRef ref : decomposition.splitClauses()) {

@@ -30,6 +30,7 @@ public record TmfVersionedId(String id, Optional<String> version) {
   private static final Pattern PATTERN =
       Pattern.compile("^([^:()\\s]+)(?::\\(version=([^)\\s]+)\\))?$");
 
+  @SuppressWarnings("java:S2789") // record accepts null for the Optional and normalises it — public API safety net
   public TmfVersionedId {
     if (id == null || id.isBlank()) {
       throw new IllegalArgumentException("id must not be blank");

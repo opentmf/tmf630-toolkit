@@ -2,6 +2,7 @@ package org.opentmf.query.tmf630.jsonb;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Function;
 import org.opentmf.query.tmf630.exception.TmfPagingException;
 import org.opentmf.query.tmf630.paging.TmfSort;
@@ -99,9 +100,10 @@ public class JsonbSortBuilder {
     JsonbSortExpression expr = correlatedTranslator.translate(term.expression());
     JsonbCast cast = resolveCast(expr, term, fieldTypeResolver);
     params.add(expr.jsonPath());
+    Optional<JsonbSortExpression.Aggregator> aggregator = expr.aggregator();
     String fragment =
-        expr.aggregator().isPresent()
-            ? aggregateSubqueryFragment(expr.aggregator().get(), cast)
+        aggregator.isPresent()
+            ? aggregateSubqueryFragment(aggregator.get(), cast)
             : firstMatchFragment(cast);
     return fragment + " " + directionKeyword(term) + nullsTail();
   }
@@ -116,8 +118,9 @@ public class JsonbSortBuilder {
       JsonbSortExpression expr,
       TmfSortTerm term,
       Function<String, Class<?>> fieldTypeResolver) {
-    if (expr.coercion().isPresent()) {
-      return expr.coercion().get();
+    Optional<JsonbCast> coercion = expr.coercion();
+    if (coercion.isPresent()) {
+      return coercion.get();
     }
     Class<?> fieldType = fieldTypeResolver.apply(term.expression());
     if (fieldType == null) {

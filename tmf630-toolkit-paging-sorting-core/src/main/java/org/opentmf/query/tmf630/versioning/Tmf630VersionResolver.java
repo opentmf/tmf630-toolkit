@@ -45,8 +45,9 @@ public interface Tmf630VersionResolver {
    * is present, {@link #resolveLatest} otherwise.
    */
   default <T> Optional<T> resolveOrLatest(Class<T> type, TmfVersionedId ref) {
-    return ref.version().isPresent()
-        ? resolveSpecific(type, ref.id(), ref.version().get())
+    Optional<String> version = ref.version();
+    return version.isPresent()
+        ? resolveSpecific(type, ref.id(), version.get())
         : resolveLatest(type, ref.id());
   }
 }

@@ -50,6 +50,7 @@ public record MongoSplitEntityMetadata(
   }
 
   /** Convenience: returns the {@code _id} value of the given parent instance. */
+  @SuppressWarnings("java:S3011") // toolkit must read user-declared entity field regardless of visibility
   public Object idOf(Object parent) {
     try {
       idField.setAccessible(true);
@@ -64,6 +65,7 @@ public record MongoSplitEntityMetadata(
    * Convenience: sets the split field on the parent to the given value (used to strip
    * split content from the parent before persisting).
    */
+  @SuppressWarnings("java:S3011") // toolkit must write user-declared entity field regardless of visibility
   public void setSplitField(Object parent, String fieldName, Object value) {
     for (MongoSplitCollectionMetadata split : splits) {
       if (split.fieldName().equals(fieldName)) {
@@ -85,7 +87,7 @@ public record MongoSplitEntityMetadata(
    * Returns {@code null} if the field is absent or unreadable — caller decides how to
    * interpret {@code null} (usually as an empty child list).
    */
-  @SuppressWarnings("unchecked")
+  @SuppressWarnings({"unchecked", "java:S3011", "java:S1168"}) // null intentionally distinguishes "field unset" from empty list per javadoc
   public List<Object> readSplitField(Object parent, String fieldName) {
     try {
       Field f = findField(parentType, fieldName);

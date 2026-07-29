@@ -69,6 +69,7 @@ public class Tmf630MongoVersionResolver implements Tmf630VersionResolver {
     return versioning;
   }
 
+  @SuppressWarnings("java:S3011") // toolkit must read user-declared entity field regardless of visibility
   private static String readVersion(Object entity, Tmf630Versioned versioning) {
     try {
       Field field = findField(entity.getClass(), versioning.versionField());

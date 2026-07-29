@@ -190,6 +190,7 @@ public class Tmf630MongoSplitWriteExecutor {
     return mappedId;
   }
 
+  @SuppressWarnings("java:S3011") // toolkit must read user-declared entity field regardless of visibility
   private static Object firstNonNullFieldValue(Object obj, String... fieldNames) {
     for (String fieldName : fieldNames) {
       Optional<Field> maybe = findField(obj.getClass(), fieldName);

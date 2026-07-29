@@ -511,8 +511,7 @@ public class JsonPathFilterPredicateBuilder {
       boolean allowNestedPaths) {
     if (isJpaEntity(rootEntity) && containsPositionalIndex(comparison.fieldPath())) {
       return Optional.of(
-          buildJpaPositionalPredicate(
-              rootEntity, rootPath, comparison, settings, allowNestedPaths));
+          buildJpaPositionalPredicate(rootEntity, rootPath, comparison, allowNestedPaths));
     }
     // The allowlist is authored by JavaBean field name; positional index [N] narrows
     // which element, not which field, so it is stripped before the allowlist check.
@@ -547,7 +546,6 @@ public class JsonPathFilterPredicateBuilder {
       Class<?> rootEntity,
       PathBuilder<?> rootPath,
       ComparisonNode comparison,
-      Tmf630FilterSettings settings,
       boolean allowNestedPaths) {
     PositionalPath positional = parseSimplePositional(comparison.fieldPath());
     if (positional == null) {
@@ -628,7 +626,7 @@ public class JsonPathFilterPredicateBuilder {
   }
 
   private static final Pattern SIMPLE_POSITIONAL =
-      Pattern.compile("^([A-Za-z_][A-Za-z0-9_]*)\\[(\\d+)\\]\\.(.+)$");
+      Pattern.compile("^([A-Za-z_]\\w*)\\[(\\d+)\\]\\.(.+)$");
 
   record PositionalPath(String hopField, int index, String leafPath) {}
 
