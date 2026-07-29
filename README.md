@@ -2072,12 +2072,40 @@ against it via Postgres SQL/JSON path — no ORM object graph, no lazy-load surf
    @Tmf630JsonbBacked(domainType = ProductOrder.class)
    public class ProductOrderRow {
      @Id String id;
-     @JdbcTypeCode(SqlTypes.JSON) String payload;   // stores the full ProductOrder JSON
+     @JdbcTypeCode(SqlTypes.JSON) ProductOrder payload;   // typed POJO — see mapping choices below
      // ...
    }
    ```
 3. Bootstrap discovers `@Tmf630JsonbBacked` via the JPA metamodel. Reads and writes go
    through auto-configured beans; you don't wire anything else.
+
+#### Payload column mapping — pick your ergonomic
+
+The Java type on the `payload` field is entirely the caller's choice — the toolkit's
+filter/sort executors query via native SQL against `payload->>'field'` /
+`jsonb_path_query(payload, ...)` and never touch the Java field via JPA. So all three
+common mappings below interoperate with `@Tmf630JsonbBacked` unchanged; pick by what's
+easiest to work with in your domain code.
+
+| Shape | Field declaration | Best for |
+|---|---|---|
+| **Typed POJO** *(recommended default)* | `@JdbcTypeCode(SqlTypes.JSON) ProductOrder payload;` | Stable, Jackson-mappable domain. Zero-boilerplate access (`row.getPayload().getPrice()`). Hibernate does the (de)serialization at the boundary. |
+| **`JsonNode`** | `@JdbcTypeCode(SqlTypes.JSON) JsonNode payload;` | Polymorphic payloads whose runtime shape isn't fixed; partial-read hot paths where you only need one field 90% of the time; audit / pass-through paths that log or reshape raw JSON. Typed access via `mapper.treeToValue(node, ProductOrder.class)` when needed. |
+| **`String`** | `@JdbcTypeCode(SqlTypes.JSON) String payload;` | Escape hatch — proxy/webhook flows where the payload passes through as-is, or migrating legacy code that already handles String↔JSON manually. Every touch of the field is a `JacksonUtil` call; weakest type signal. |
+
+Trade-offs to weigh:
+- **Type safety** — Typed POJO wins; `JsonNode` and `String` push checks to runtime.
+- **Read cost** — Typed POJO deserializes the whole payload on every read even when
+  only one field is needed. `JsonNode` defers to on-demand traversal. `String` defers
+  to the caller.
+- **Schema drift tolerance** — `JsonNode` and `String` tolerate unknown/new fields
+  transparently; Typed POJO's tolerance depends on your Jackson configuration
+  (`FAIL_ON_UNKNOWN_PROPERTIES`).
+- **Query side is unaffected** either way — `filter=` / `sort=` / `fields=` behave
+  identically across all three because the toolkit reads via SQL, not JPA.
+
+The examples further down use the typed-POJO shape for readability, but everything
+applies to `JsonNode` / `String` mappings unchanged.
 
 #### Level 1 (easiest) — list endpoint via the read executor
 
