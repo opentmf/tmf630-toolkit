@@ -78,9 +78,9 @@ public record JsonbAuditColumns(
       return new JsonbAuditColumns(
           createdDate, lastModifiedDate, createdBy, lastModifiedBy, version);
     }
-  }
 
-  private static Optional<String> firstNonEmpty(Optional<String> current, String fieldName) {
-    return current.isPresent() ? current : Optional.of(fieldName);
+    private static Optional<String> firstNonEmpty(Optional<String> current, String fieldName) {
+      return current.isPresent() ? current : Optional.of(fieldName);
+    }
   }
 }

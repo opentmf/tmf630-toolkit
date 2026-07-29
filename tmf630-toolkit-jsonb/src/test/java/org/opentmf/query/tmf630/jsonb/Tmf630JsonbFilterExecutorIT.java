@@ -184,7 +184,7 @@ class Tmf630JsonbFilterExecutorIT {
   @DisplayName(
       "Phase (b.6): SIMPLE_RICH correlated sort orders rows by a value inside a "
           + "correlated child element of the payload")
-  void correlatedSortSimpleRich() throws Exception {
+  void correlatedSortSimpleRich() {
     // Seed a fresh dataset where each parent has an item array with a price
     // characteristic. Sort should order parents by that characteristic's value.
     repository.deleteAll();
@@ -210,7 +210,7 @@ class Tmf630JsonbFilterExecutorIT {
   @Test
   @DisplayName(
       "Phase (b.6): JSONPATH correlated sort produces the same ordering as SIMPLE_RICH")
-  void correlatedSortJsonPath() throws Exception {
+  void correlatedSortJsonPath() {
     repository.deleteAll();
     seedWithCharacteristic("Q1", 500);
     seedWithCharacteristic("Q2", 50);
@@ -248,7 +248,7 @@ class Tmf630JsonbFilterExecutorIT {
   @Test
   @DisplayName(
       "Phase (b.7): num(min(prices[*].value)) — coercion around aggregator over wildcard array")
-  void aggregatorWithCoercionOverWildcardArray() throws Exception {
+  void aggregatorWithCoercionOverWildcardArray() {
     repository.deleteAll();
     seedWithPrices("W1", 100, 200, 300); // min = 100
     seedWithPrices("W2", 50, 999);       // min = 50
@@ -274,7 +274,7 @@ class Tmf630JsonbFilterExecutorIT {
   @DisplayName(
       "Phase (b.7): max(prices[*].value) DESC — aggregator without coercion, "
           + "text sort would break lexicographically for these numbers")
-  void aggregatorMaxOverWildcard() throws Exception {
+  void aggregatorMaxOverWildcard() {
     repository.deleteAll();
     // These values chosen so lex ordering differs from numeric ordering:
     // "500" > "1000" lexicographically, but 1000 > 500 numerically.

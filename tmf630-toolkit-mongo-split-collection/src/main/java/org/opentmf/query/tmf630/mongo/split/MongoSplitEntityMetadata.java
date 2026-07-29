@@ -69,7 +69,7 @@ public record MongoSplitEntityMetadata(
    * Convenience: sets the split field on the parent to the given value (used to strip
    * split content from the parent before persisting).
    */
-  @SuppressWarnings("java:S3011") // toolkit must write user-declared entity field regardless of visibility
+  @SuppressWarnings({"java:S3011", "java:S2259"}) // reflection: setAccessible required to write user-declared fields; parentType is null-checked in the compact constructor
   public void setSplitField(Object parent, String fieldName, Object value) {
     for (MongoSplitCollectionMetadata split : splits) {
       if (split.fieldName().equals(fieldName)) {
@@ -91,14 +91,14 @@ public record MongoSplitEntityMetadata(
    * Returns {@code null} if the field is absent or unreadable — caller decides how to
    * interpret {@code null} (usually as an empty child list).
    */
-  @SuppressWarnings({"java:S3011", "java:S1168"}) // null intentionally distinguishes "field unset" from empty list per javadoc
+  @SuppressWarnings({"java:S3011", "java:S1168", "java:S2259"}) // null intentionally distinguishes "field unset" from empty list per javadoc; parentType is null-checked in the compact constructor
   public List<Object> readSplitField(Object parent, String fieldName) {
     try {
       Field f = findField(parentType, fieldName);
       f.setAccessible(true);
       Object v = f.get(parent);
       if (v == null) return null;
-      if (v instanceof List<?> list) return new ArrayList<Object>(list);
+      if (v instanceof List<?> list) return new ArrayList<>(list);
       throw new IllegalStateException(
           "Split field '" + fieldName + "' must be a List; got " + v.getClass().getName());
     } catch (IllegalAccessException | NoSuchFieldException e) {

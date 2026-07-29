@@ -82,7 +82,7 @@ public class JsonbSortBuilder {
                 "Unsupported sort term kind: " + term.kind() + " for " + term.expression());
       }
     }
-    return JsonbClause.of(String.join(", ", pieces), (Object[]) params.toArray());
+    return JsonbClause.of(String.join(", ", pieces), params.toArray(new Object[0]));
   }
 
   private String plainTermFragment(
@@ -176,7 +176,7 @@ public class JsonbSortBuilder {
    */
   public JsonbClause buildPagingClause(Pageable pageable) {
     if (pageable == null || pageable.isUnpaged()) {
-      return JsonbClause.of("", new Object[0]);
+      return JsonbClause.of("");
     }
     return JsonbClause.of(
         "LIMIT ? OFFSET ?", pageable.getPageSize(), pageable.getOffset());

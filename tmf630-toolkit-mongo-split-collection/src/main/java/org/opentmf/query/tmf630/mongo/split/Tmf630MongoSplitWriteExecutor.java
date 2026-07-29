@@ -56,7 +56,7 @@ public class Tmf630MongoSplitWriteExecutor {
 
   private static final Logger log = LoggerFactory.getLogger(Tmf630MongoSplitWriteExecutor.class);
 
-  private static final String TYPE_ = "Type ";
+  private static final String TYPE_PREFIX = "Type ";
   private static final String NOT_SPLIT_BACKED = " is not @Tmf630MongoSplitBacked";
 
   private final MongoOperations mongoOperations;
@@ -81,7 +81,7 @@ public class Tmf630MongoSplitWriteExecutor {
             .orElseThrow(
                 () ->
                     new IllegalStateException(
-                        TYPE_
+                        TYPE_PREFIX
                             + parent.getClass().getName()
                             + NOT_SPLIT_BACKED
                             + " — cannot saveWithSplits"));
@@ -154,7 +154,7 @@ public class Tmf630MongoSplitWriteExecutor {
             .forParentType(parentType)
             .orElseThrow(
                 () ->
-                    new IllegalStateException(TYPE_ + parentType.getName() + NOT_SPLIT_BACKED));
+                    new IllegalStateException(TYPE_PREFIX + parentType.getName() + NOT_SPLIT_BACKED));
     MongoSplitCollectionMetadata split = metadata.splitByChildType(child.getClass());
     if (split == null) {
       throw new IllegalStateException(
@@ -327,7 +327,7 @@ public class Tmf630MongoSplitWriteExecutor {
             .orElseThrow(
                 () ->
                     new IllegalStateException(
-                        TYPE_ + parent.getClass().getName() + NOT_SPLIT_BACKED));
+                        TYPE_PREFIX + parent.getClass().getName() + NOT_SPLIT_BACKED));
     Object parentId = metadata.idOf(parent);
     if (parentId == null) {
       throw new IllegalStateException("Parent instance has null id");
@@ -474,7 +474,7 @@ public class Tmf630MongoSplitWriteExecutor {
             .forParentType(parentType)
             .orElseThrow(
                 () ->
-                    new IllegalStateException(TYPE_ + parentType.getName() + NOT_SPLIT_BACKED));
+                    new IllegalStateException(TYPE_PREFIX + parentType.getName() + NOT_SPLIT_BACKED));
     MongoSplitCollectionMetadata split = metadata.splitByChildType(childType);
     if (split == null) {
       throw new IllegalStateException(

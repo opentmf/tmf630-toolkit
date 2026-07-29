@@ -130,7 +130,7 @@ class Tmf630JsonbSplitCollectionIT {
 
   @Test
   @DisplayName("c.4 read merge: parent with zero children yields empty items list, not null")
-  void readMergeParentWithoutChildren() throws Exception {
+  void readMergeParentWithoutChildren() {
     seedParent("O3", "CLOSED");
     Page<SplitOrderDomain> page =
         executor.findAll(

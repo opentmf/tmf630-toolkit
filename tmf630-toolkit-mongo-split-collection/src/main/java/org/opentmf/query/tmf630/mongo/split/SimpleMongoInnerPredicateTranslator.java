@@ -36,6 +36,7 @@ public class SimpleMongoInnerPredicateTranslator implements MongoInnerPredicateT
   /** Empty prefix for parent-side use — parent docs have fields at the top level. */
   public static final String PARENT_TOP_LEVEL_PREFIX = "";
 
+  @SuppressWarnings("java:S5843") // leaf grammar covers three orthogonal parts (dotted field path + comparison operator + typed literal); each contributes; further split would only distribute complexity across constants
   private static final Pattern LEAF_PATTERN =
       Pattern.compile(
           "\\s*@\\.([A-Za-z_][\\w.]*)\\s*([<>]=?|[!=]=)\\s*(?:'([^']*)'|(-?\\d+(?:\\.\\d+)?))\\s*");
