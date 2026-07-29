@@ -3,6 +3,7 @@ package org.opentmf.query.tmf630.jsonb;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Field;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Reflection-discovered audit / optimistic-lock column descriptor for a JSONB-backed
@@ -34,34 +35,52 @@ public record JsonbAuditColumns(
   private static final String VERSION_JAKARTA = "jakarta.persistence.Version";
   private static final String VERSION_JAVAX = "javax.persistence.Version";
 
+  private static final Set<String> VERSION_ANNOTATIONS = Set.of(VERSION_JAKARTA, VERSION_JAVAX);
+
   static JsonbAuditColumns discover(Class<?> rowType) {
+    Accumulator acc = new Accumulator();
+    for (Class<?> cursor = rowType; cursor != null && cursor != Object.class; cursor = cursor.getSuperclass()) {
+      for (Field field : cursor.getDeclaredFields()) {
+        acc.absorb(field);
+      }
+    }
+    return acc.toRecord();
+  }
+
+  private static final class Accumulator {
     Optional<String> createdDate = Optional.empty();
     Optional<String> lastModifiedDate = Optional.empty();
     Optional<String> createdBy = Optional.empty();
     Optional<String> lastModifiedBy = Optional.empty();
     Optional<String> version = Optional.empty();
-    Class<?> cursor = rowType;
-    while (cursor != null && cursor != Object.class) {
-      for (Field field : cursor.getDeclaredFields()) {
-        for (Annotation annotation : field.getAnnotations()) {
-          String name = annotation.annotationType().getName();
-          if (CREATED_DATE.equals(name) && createdDate.isEmpty()) {
-            createdDate = Optional.of(field.getName());
-          } else if (LAST_MODIFIED_DATE.equals(name) && lastModifiedDate.isEmpty()) {
-            lastModifiedDate = Optional.of(field.getName());
-          } else if (CREATED_BY.equals(name) && createdBy.isEmpty()) {
-            createdBy = Optional.of(field.getName());
-          } else if (LAST_MODIFIED_BY.equals(name) && lastModifiedBy.isEmpty()) {
-            lastModifiedBy = Optional.of(field.getName());
-          } else if ((VERSION_JAKARTA.equals(name) || VERSION_JAVAX.equals(name))
-              && version.isEmpty()) {
-            version = Optional.of(field.getName());
-          }
-        }
+
+    void absorb(Field field) {
+      for (Annotation annotation : field.getAnnotations()) {
+        assignForAnnotation(annotation.annotationType().getName(), field.getName());
       }
-      cursor = cursor.getSuperclass();
     }
-    return new JsonbAuditColumns(
-        createdDate, lastModifiedDate, createdBy, lastModifiedBy, version);
+
+    private void assignForAnnotation(String annotationName, String fieldName) {
+      if (CREATED_DATE.equals(annotationName)) {
+        createdDate = firstNonEmpty(createdDate, fieldName);
+      } else if (LAST_MODIFIED_DATE.equals(annotationName)) {
+        lastModifiedDate = firstNonEmpty(lastModifiedDate, fieldName);
+      } else if (CREATED_BY.equals(annotationName)) {
+        createdBy = firstNonEmpty(createdBy, fieldName);
+      } else if (LAST_MODIFIED_BY.equals(annotationName)) {
+        lastModifiedBy = firstNonEmpty(lastModifiedBy, fieldName);
+      } else if (VERSION_ANNOTATIONS.contains(annotationName)) {
+        version = firstNonEmpty(version, fieldName);
+      }
+    }
+
+    JsonbAuditColumns toRecord() {
+      return new JsonbAuditColumns(
+          createdDate, lastModifiedDate, createdBy, lastModifiedBy, version);
+    }
+  }
+
+  private static Optional<String> firstNonEmpty(Optional<String> current, String fieldName) {
+    return current.isPresent() ? current : Optional.of(fieldName);
   }
 }

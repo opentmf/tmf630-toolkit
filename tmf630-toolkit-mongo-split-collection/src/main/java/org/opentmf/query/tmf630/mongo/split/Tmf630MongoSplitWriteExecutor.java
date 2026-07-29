@@ -353,67 +353,105 @@ public class Tmf630MongoSplitWriteExecutor {
 
   private void reconcileSplitChildren(
       MongoSplitCollectionMetadata split, Object parentId, List<Object> inbound) {
-    // Load existing (itemId → payload) for this parent.
+    Map<Object, Document> existingByItemId = loadExistingByItemId(split, parentId);
+    Set<Object> seenItemIds = reconcileInbound(split, parentId, inbound, existingByItemId);
+    deleteStaleChildren(split, parentId, existingByItemId, seenItemIds);
+  }
+
+  private Map<Object, Document> loadExistingByItemId(
+      MongoSplitCollectionMetadata split, Object parentId) {
     Query all = new Query(Criteria.where(split.parentIdField()).is(parentId));
     List<Document> existingDocs =
         mongoOperations.find(all, Document.class, split.childCollection());
-    Map<Object, Document> existingByItemId = new HashMap<>();
+    Map<Object, Document> byItemId = new HashMap<>();
     for (Document doc : existingDocs) {
-      existingByItemId.put(doc.get(split.itemIdField()), doc);
+      byItemId.put(doc.get(split.itemIdField()), doc);
     }
-    MongoConverter converter = mongoOperations.getConverter();
+    return byItemId;
+  }
 
+  private Set<Object> reconcileInbound(
+      MongoSplitCollectionMetadata split,
+      Object parentId,
+      List<Object> inbound,
+      Map<Object, Document> existingByItemId) {
     Set<Object> seen = new HashSet<>();
+    if (inbound == null) return seen;
+    MongoConverter converter = mongoOperations.getConverter();
     int order = 0;
-    if (inbound != null) {
-      for (Object child : inbound) {
-        Document payload = new Document();
-        converter.write(child, payload);
-        Object itemId = extractChildId(child, payload, split);
-        if (itemId == null) itemId = "i-" + order;
-        seen.add(itemId);
-        Document existing = existingByItemId.get(itemId);
-        if (existing == null) {
-          insertChildWrapper(split, parentId, itemId, order, payload);
-        } else {
-          Document existingPayload = existing.get(split.payloadField(), Document.class);
-          if (existingPayload == null || !existingPayload.equals(payload)) {
-            Query one =
-                new Query(
-                    Criteria.where(split.parentIdField())
-                        .is(parentId)
-                        .and(split.itemIdField())
-                        .is(itemId));
-            mongoOperations.updateFirst(
-                one,
-                new Update().set(split.payloadField(), payload).set(split.itemOrderField(), order),
-                split.childCollection());
-          } else if (!Integer.valueOf(order).equals(existing.get(split.itemOrderField()))) {
-            Query one =
-                new Query(
-                    Criteria.where(split.parentIdField())
-                        .is(parentId)
-                        .and(split.itemIdField())
-                        .is(itemId));
-            mongoOperations.updateFirst(
-                one, new Update().set(split.itemOrderField(), order), split.childCollection());
-          }
-        }
-        order++;
-      }
+    for (Object child : inbound) {
+      reconcileOneChild(split, parentId, child, order, existingByItemId, seen, converter);
+      order++;
     }
-    // DELETE anything in DB but not in the inbound set.
+    return seen;
+  }
+
+  private void reconcileOneChild(
+      MongoSplitCollectionMetadata split,
+      Object parentId,
+      Object child,
+      int order,
+      Map<Object, Document> existingByItemId,
+      Set<Object> seen,
+      MongoConverter converter) {
+    Document payload = new Document();
+    converter.write(child, payload);
+    Object itemId = extractChildId(child, payload, split);
+    if (itemId == null) itemId = "i-" + order;
+    seen.add(itemId);
+    Document existing = existingByItemId.get(itemId);
+    if (existing == null) {
+      insertChildWrapper(split, parentId, itemId, order, payload);
+      return;
+    }
+    Document existingPayload = existing.get(split.payloadField(), Document.class);
+    if (existingPayload == null || !existingPayload.equals(payload)) {
+      updateChildPayloadAndOrder(split, parentId, itemId, order, payload);
+    } else if (!Integer.valueOf(order).equals(existing.get(split.itemOrderField()))) {
+      updateChildOrderOnly(split, parentId, itemId, order);
+    }
+  }
+
+  private void updateChildPayloadAndOrder(
+      MongoSplitCollectionMetadata split,
+      Object parentId,
+      Object itemId,
+      int order,
+      Document payload) {
+    mongoOperations.updateFirst(
+        singleChildQuery(split, parentId, itemId),
+        new Update().set(split.payloadField(), payload).set(split.itemOrderField(), order),
+        split.childCollection());
+  }
+
+  private void updateChildOrderOnly(
+      MongoSplitCollectionMetadata split, Object parentId, Object itemId, int order) {
+    mongoOperations.updateFirst(
+        singleChildQuery(split, parentId, itemId),
+        new Update().set(split.itemOrderField(), order),
+        split.childCollection());
+  }
+
+  private void deleteStaleChildren(
+      MongoSplitCollectionMetadata split,
+      Object parentId,
+      Map<Object, Document> existingByItemId,
+      Set<Object> seenItemIds) {
     for (Object stale : existingByItemId.keySet()) {
-      if (!seen.contains(stale)) {
-        Query one =
-            new Query(
-                Criteria.where(split.parentIdField())
-                    .is(parentId)
-                    .and(split.itemIdField())
-                    .is(stale));
-        mongoOperations.remove(one, split.childCollection());
+      if (!seenItemIds.contains(stale)) {
+        mongoOperations.remove(
+            singleChildQuery(split, parentId, stale), split.childCollection());
       }
     }
+  }
+
+  private static Query singleChildQuery(
+      MongoSplitCollectionMetadata split, Object parentId, Object itemId) {
+    return new Query(
+        Criteria.where(split.parentIdField())
+            .is(parentId)
+            .and(split.itemIdField())
+            .is(itemId));
   }
 
   private void insertChildWrapper(

@@ -44,69 +44,98 @@ final class SimpleRichSortTermParser {
     String trimmed = expression.trim();
     rejectDisallowedGrammar(trimmed);
 
-    Aggregator aggregator = Aggregator.NONE;
-    String inner = trimmed;
-    if (trimmed.startsWith("min(") && trimmed.endsWith(")")) {
-      aggregator = Aggregator.MIN;
-      inner = stripAggregatorCall(trimmed, "min", expression);
-    } else if (trimmed.startsWith("max(") && trimmed.endsWith(")")) {
-      aggregator = Aggregator.MAX;
-      inner = stripAggregatorCall(trimmed, "max", expression);
-    }
+    AggregatorPart aggPart = extractAggregatorPart(trimmed, expression);
+    HopChain hopChain = parseHopChain(aggPart.inner(), expression);
+    return new ParsedTerm(hopChain.hops(), hopChain.leaf(), aggPart.aggregator());
+  }
 
+  private static AggregatorPart extractAggregatorPart(String trimmed, String original) {
+    if (trimmed.startsWith("min(") && trimmed.endsWith(")")) {
+      return new AggregatorPart(Aggregator.MIN, stripAggregatorCall(trimmed, "min", original));
+    }
+    if (trimmed.startsWith("max(") && trimmed.endsWith(")")) {
+      return new AggregatorPart(Aggregator.MAX, stripAggregatorCall(trimmed, "max", original));
+    }
+    return new AggregatorPart(Aggregator.NONE, trimmed);
+  }
+
+  private static HopChain parseHopChain(String inner, String expression) {
     List<Hop> hops = new ArrayList<>();
     int pos = 0;
     String leaf = null;
     while (pos < inner.length()) {
-      int identStart = pos;
-      while (pos < inner.length() && isIdentChar(inner.charAt(pos))) {
-        pos++;
-      }
-      if (identStart == pos) {
-        throw new TmfPagingException(
-            "Expected identifier at position " + pos + " in: " + expression);
-      }
-      String ident = inner.substring(identStart, pos);
-
+      IdentRead read = readIdent(inner, pos, expression);
+      pos = read.newPos();
       if (pos < inner.length() && inner.charAt(pos) == '[') {
-        pos++;
-        int eqPos = inner.indexOf('=', pos);
-        int closePos = inner.indexOf(']', pos);
-        if (eqPos < 0 || closePos < 0 || eqPos > closePos) {
-          throw new TmfPagingException(
-              "Malformed hop; expected '[key=value]' in: " + expression);
-        }
-        String key = validateBareIdent(inner.substring(pos, eqPos).trim(), expression);
-        String value = stripOuterQuotes(inner.substring(eqPos + 1, closePos).trim());
-        if (value.isEmpty()) {
-          throw new TmfPagingException(
-              "Correlated sort hop match value must not be empty: " + expression);
-        }
-        pos = closePos + 1;
-        if (pos >= inner.length() || inner.charAt(pos) != '.') {
-          throw new TmfPagingException(
-              "Hop '[key=value]' must be followed by '.<field>' in: " + expression);
-        }
-        pos++;
-        hops.add(new Hop(ident, key, value));
+        HopRead hop = readHopBracket(inner, pos, read.ident(), expression);
+        hops.add(hop.hop());
+        pos = hop.newPos();
       } else {
-        if (pos != inner.length()) {
-          throw new TmfPagingException(
-              "Unexpected trailing input '" + inner.substring(pos) + "' in: " + expression);
-        }
-        leaf = ident;
+        leaf = read.ident();
+        requireEndOfInput(inner, pos, expression);
       }
     }
+    requireNonEmptyChain(hops, leaf, expression);
+    return new HopChain(List.copyOf(hops), leaf);
+  }
 
+  private static IdentRead readIdent(String inner, int start, String expression) {
+    int pos = start;
+    while (pos < inner.length() && isIdentChar(inner.charAt(pos))) {
+      pos++;
+    }
+    if (pos == start) {
+      throw new TmfPagingException(
+          "Expected identifier at position " + pos + " in: " + expression);
+    }
+    return new IdentRead(inner.substring(start, pos), pos);
+  }
+
+  private static HopRead readHopBracket(String inner, int startBracket, String ident, String expression) {
+    int pos = startBracket + 1;
+    int eqPos = inner.indexOf('=', pos);
+    int closePos = inner.indexOf(']', pos);
+    if (eqPos < 0 || closePos < 0 || eqPos > closePos) {
+      throw new TmfPagingException(
+          "Malformed hop; expected '[key=value]' in: " + expression);
+    }
+    String key = validateBareIdent(inner.substring(pos, eqPos).trim(), expression);
+    String value = stripOuterQuotes(inner.substring(eqPos + 1, closePos).trim());
+    if (value.isEmpty()) {
+      throw new TmfPagingException(
+          "Correlated sort hop match value must not be empty: " + expression);
+    }
+    int afterBracket = closePos + 1;
+    if (afterBracket >= inner.length() || inner.charAt(afterBracket) != '.') {
+      throw new TmfPagingException(
+          "Hop '[key=value]' must be followed by '.<field>' in: " + expression);
+    }
+    return new HopRead(new Hop(ident, key, value), afterBracket + 1);
+  }
+
+  private static void requireEndOfInput(String inner, int pos, String expression) {
+    if (pos != inner.length()) {
+      throw new TmfPagingException(
+          "Unexpected trailing input '" + inner.substring(pos) + "' in: " + expression);
+    }
+  }
+
+  private static void requireNonEmptyChain(List<Hop> hops, String leaf, String expression) {
     if (hops.isEmpty() || leaf == null) {
       throw new TmfPagingException(
           "Correlated sort term must be 'hop[key=value].leaf' or a chain 'a[k=v].b[k=v].leaf'"
               + " (optionally wrapped in min()/max()): "
               + expression);
     }
-
-    return new ParsedTerm(List.copyOf(hops), leaf, aggregator);
   }
+
+  private record AggregatorPart(Aggregator aggregator, String inner) {}
+
+  private record HopChain(List<Hop> hops, String leaf) {}
+
+  private record IdentRead(String ident, int newPos) {}
+
+  private record HopRead(Hop hop, int newPos) {}
 
   private static String stripAggregatorCall(String expression, String name, String original) {
     String inner = expression.substring(name.length() + 1, expression.length() - 1).trim();
