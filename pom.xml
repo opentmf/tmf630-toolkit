@@ -255,7 +255,23 @@
           </execution>
           <execution>
             <id>jacoco-report</id>
-            <phase>verify</phase>
+            <!--
+              Bound to `post-integration-test` (not the default `verify`, and not
+              `prepare-package` either) so each module's jacoco.xml exists BEFORE the
+              sonar-maven-plugin's delay-to-end callback fires from the last module's
+              `verify` phase, WITHOUT dropping IT coverage. Rationale:
+                * On `verify`: Maven's within-phase plugin order could run sonar's
+                  delayed callback before that module's jacoco:report — Sonar would
+                  undercount by ~10 pp on the last module.
+                * On `prepare-package`: report runs before `integration-test`, so
+                  failsafe (*IT) coverage never lands in the XML — a much larger
+                  undercount for the IT-heavy modules here.
+                * `post-integration-test` runs after failsafe and still precedes
+                  every module's `verify`, so ordering is safe both ways.
+              See global rule "Multi-module coverage rules must be per-module" for
+              context.
+            -->
+            <phase>post-integration-test</phase>
             <goals>
               <goal>report</goal>
             </goals>
@@ -421,26 +437,14 @@
         <sonar.projectKey>org.opentmf.query:tmf630-toolkit</sonar.projectKey>
         <sonar.qualitygate.wait>true</sonar.qualitygate.wait>
         <!--
-          Multi-module Jacoco coverage merge: `sonar.coverage.jacoco.xmlReportPaths`
-          takes a comma-separated list of report files, and Sonar unions their
-          coverage before attributing to source classes. Without this, each
-          module's report only credits its OWN tests — so a class in `filter-core`
-          exercised only by an IT in `filtering-autoconfigure` (typical for
-          isMongoRoot-style backend probes) shows as uncovered in `filter-core`'s
-          per-module report, dragging new_coverage below the Quality Gate
-          threshold on downstream scans. The path list below covers every module
-          that generates a report.
+          `sonar.coverage.jacoco.xmlReportPaths` is deliberately NOT set. Per the
+          global "Multi-module coverage rules must be per-module" rule, each module's
+          coverage is attributed to its own sources only — a cross-module IT living
+          in one module and exercising code in another must NOT lift the other
+          module's Sonar coverage. Sonar's auto-discovery picks up each module's own
+          `target/site/jacoco/jacoco.xml` during that module's analysis and keeps
+          attribution local, which is what the gate is meant to enforce.
         -->
-        <sonar.coverage.jacoco.xmlReportPaths>
-          ${maven.multiModuleProjectDirectory}/tmf630-toolkit-paging-sorting-core/target/site/jacoco/jacoco.xml,
-          ${maven.multiModuleProjectDirectory}/tmf630-toolkit-paging-sorting-autoconfigure/target/site/jacoco/jacoco.xml,
-          ${maven.multiModuleProjectDirectory}/tmf630-toolkit-attribute-filtering-core/target/site/jacoco/jacoco.xml,
-          ${maven.multiModuleProjectDirectory}/tmf630-toolkit-attribute-filtering-autoconfigure/target/site/jacoco/jacoco.xml,
-          ${maven.multiModuleProjectDirectory}/tmf630-toolkit-mongo-aggregation/target/site/jacoco/jacoco.xml,
-          ${maven.multiModuleProjectDirectory}/tmf630-toolkit-jpa-correlated-sort/target/site/jacoco/jacoco.xml,
-          ${maven.multiModuleProjectDirectory}/tmf630-toolkit-jsonb/target/site/jacoco/jacoco.xml,
-          ${maven.multiModuleProjectDirectory}/tmf630-toolkit-mongo-split-collection/target/site/jacoco/jacoco.xml
-        </sonar.coverage.jacoco.xmlReportPaths>
       </properties>
       <build>
         <plugins>
