@@ -2,6 +2,42 @@
 
 All notable changes to `tmf630-toolkit` are documented in this file.
 
+## [3.0.1] - 2026-08-05
+
+### Fixed (regex / LIKE-family on polymorphic value fields — v3.0.1)
+
+- **`.regex` / `.regexi` / LIKE-family now accept polymorphic (`Object` /
+  `Serializable`) fields on Mongo and JSONB backends.** TMF-620 catalog and
+  similar TMF-domain models declare `productSpecCharacteristicValue.value` (and
+  analogous polymorphic scalar fields) as `Object` so the same DTO can carry
+  String / Number / Boolean depending on `valueType`. Before this fix,
+  `PredicateFactory.validateRegex` / `PredicateFactory.string(...)` rejected
+  those with HTTP 400 (`Regex only supported for String fields: ...`) even
+  though Mongo's `$regex` and JSONB text extraction both handle mixed-type
+  values natively (non-string values silently don't match). The static-type
+  gate now accepts `String`, `Object`, and `Serializable`; genuinely-typed
+  non-string fields (`Integer status`, `OffsetDateTime createdAt`, etc.) still
+  reject — the gate keeps doing useful work for those. Both the
+  attribute-shorthand grammar (`characteristic.value.regex=...`) and the
+  TMF-630 Part 6 JsonPath grammar
+  (`filter=$[?(@.characteristic[*].value =~ /.../)]`) benefit at once — they
+  share the same `PredicateFactory` code path.
+
+- **JPA + polymorphic-field guard.** On JPA roots, `.regex` / LIKE-family on
+  `Object` / `Serializable` fields still rejects — independent of the
+  `allow-jpa-like-semantics` opt-in — because the ORM serializes such fields
+  as a JSON blob and the emitted `LIKE` / regex would match against JSON
+  quotes and structural characters, not the value. The rejection message
+  points at `@Tmf630JsonbBacked` as the designed escape for polymorphic-value
+  semantics on a relational DB.
+
+- **JSONB backend was already correct** and required no code change — its
+  `JsonbPredicateFactory` has no static-type gate (JSONB storage is untyped;
+  `payload->>'field' ~ ?` evaluates text-vs-text natively). A regression pin
+  in `Tmf630JsonbFilterExecutorIT` (`regexOnPolymorphicObjectField`) exercises
+  the Postgres round-trip with a mixed-value seed to keep the "same predicate
+  factory call works across backends" invariant explicit.
+
 ## [3.0.0] - 2026-07-26
 
 ### Added (positional `[N]` in JPA `filter=` with `@OrderColumn` — v3.0.0)

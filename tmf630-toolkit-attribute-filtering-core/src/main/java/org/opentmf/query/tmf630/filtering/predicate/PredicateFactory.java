@@ -6,6 +6,8 @@ import com.querydsl.core.types.Predicate;
 import com.querydsl.core.types.dsl.Expressions;
 import com.querydsl.core.types.dsl.PathBuilder;
 import com.querydsl.core.types.dsl.SimplePath;
+import com.querydsl.core.types.dsl.StringPath;
+import java.io.Serializable;
 import java.lang.annotation.Annotation;
 import java.util.Collections;
 import java.util.List;
@@ -233,6 +235,7 @@ public class PredicateFactory {
 
   private Predicate regex(PathBuilder<?> root, String fieldPath, Class<?> type, String pattern) {
     validateRegex(fieldPath, type, pattern);
+    guardPolymorphicOnJpa(root, type, fieldPath, "'.regex'");
     guardJpaRegexSemantics(root, fieldPath, "regex");
     return root.getString(fieldPath).matches(pattern);
   }
@@ -240,6 +243,7 @@ public class PredicateFactory {
   private Predicate regexIgnoreCase(
       PathBuilder<?> root, String fieldPath, Class<?> type, String pattern) {
     validateRegex(fieldPath, type, pattern);
+    guardPolymorphicOnJpa(root, type, fieldPath, "'.regexi'");
     guardJpaRegexSemantics(root, fieldPath, "regexi");
     // Use Ops.MATCHES_IC directly rather than `lower().matches(lower(pattern))`.
     // QueryDSL's Mongo serializer translates MATCHES_IC into a $regex predicate
@@ -316,9 +320,52 @@ public class PredicateFactory {
     if (pattern.length() > maxRegexLength) {
       throw new TmfFilteringException("Regex pattern too long for field: " + fieldPath);
     }
-    if (!String.class.equals(type)) {
-      throw new TmfFilteringException("Regex only supported for String fields: " + fieldPath);
+    if (!isTextualOrPolymorphic(type)) {
+      throw new TmfFilteringException(
+          "Regex only supported for String or polymorphic (Object/Serializable) fields: "
+              + fieldPath);
     }
+  }
+
+  /**
+   * Accepts {@code String} plus polymorphic containers ({@code Object}, {@code Serializable}) for
+   * regex / LIKE / CONTAINS / STARTS_WITH / ENDS_WITH. Rationale: TMF-620 catalog and similar
+   * TMF domain models declare {@code value} as {@code Object} so it can carry String / Number /
+   * Boolean depending on {@code valueType}; Mongo's {@code $regex} and JSONB text extraction both
+   * handle mixed-type documents natively (non-string values simply don't match). Rejecting these
+   * at the static-type gate turns valid TMF filters into HTTP 400. Genuinely-typed non-string
+   * fields ({@code Integer status}, {@code OffsetDateTime createdAt}, etc.) are still rejected —
+   * the gate keeps doing useful work for those.
+   */
+  private static boolean isTextualOrPolymorphic(Class<?> type) {
+    return String.class.equals(type) || isPolymorphicContainer(type);
+  }
+
+  private static boolean isPolymorphicContainer(Class<?> type) {
+    return Object.class.equals(type) || Serializable.class.equals(type);
+  }
+
+  /**
+   * On JPA roots, reject regex / LIKE-family on polymorphic ({@code Object}/{@code Serializable})
+   * fields regardless of the {@code allow-jpa-like-semantics} opt-in. Rationale: even with the
+   * compat flag set, the ORM would serialize the field as a JSON blob and the emitted
+   * {@code field LIKE ?} would match against JSON quotes and structural characters, not the
+   * value itself — silently wrong. The designed escape for polymorphic-value semantics on a
+   * relational DB is a JSONB-backed entity ({@code @Tmf630JsonbBacked}).
+   */
+  private void guardPolymorphicOnJpa(
+      PathBuilder<?> root, Class<?> type, String fieldPath, String opDescription) {
+    if (!isPolymorphicContainer(type) || !isJpaRoot(root)) {
+      return;
+    }
+    throw new TmfFilteringException(
+        opDescription
+            + " on polymorphic (Object/Serializable) field '"
+            + fieldPath
+            + "' is not supported on JPA backends — the field would serialize as a JSON blob"
+            + " and the emitted LIKE/regex would match against JSON quotes and structural"
+            + " characters, not the value. For polymorphic-value semantics on a relational DB,"
+            + " use a JSONB-backed entity (@Tmf630JsonbBacked).");
   }
 
   private Predicate equalsIgnoreCase(
@@ -338,11 +385,13 @@ public class PredicateFactory {
     return root.getComparable(fieldPath, (Class) type).between(first, second);
   }
 
-  private com.querydsl.core.types.dsl.StringPath string(
-      PathBuilder<?> root, String fieldPath, Class<?> type) {
-    if (!String.class.equals(type)) {
-      throw new TmfFilteringException("String operator requires String field: " + fieldPath);
+  private StringPath string(PathBuilder<?> root, String fieldPath, Class<?> type) {
+    if (!isTextualOrPolymorphic(type)) {
+      throw new TmfFilteringException(
+          "String operator requires String or polymorphic (Object/Serializable) field: "
+              + fieldPath);
     }
+    guardPolymorphicOnJpa(root, type, fieldPath, "String operator");
     return root.getString(fieldPath);
   }
 

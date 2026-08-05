@@ -9,6 +9,9 @@ import com.querydsl.core.types.Operation;
 import com.querydsl.core.types.Ops;
 import com.querydsl.core.types.Predicate;
 import com.querydsl.core.types.dsl.PathBuilder;
+import jakarta.persistence.Entity;
+import java.io.Serializable;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -202,6 +205,96 @@ class PredicateFactoryTest {
     assertFalse(TmfOperator.EQ.isMultiValueOperator());
   }
 
+  @Test
+  void acceptsRegexOnPolymorphicObjectAndSerializableFields() {
+    PredicateFactory factory = new PredicateFactory(true, 256);
+    PathBuilder<PolymorphicEntity> root =
+        new PathBuilder<>(PolymorphicEntity.class, "polymorphicEntity");
+
+    assertNotNull(
+        factory.build(
+            root, new ResolvedField("objectValue", Object.class), TmfOperator.REGEX, "^Inf.*"));
+    assertNotNull(
+        factory.build(
+            root,
+            new ResolvedField("serializableValue", Serializable.class),
+            TmfOperator.REGEXI,
+            "^inf.*"));
+    // LIKE-family should also work through the widened string() gate.
+    assertNotNull(
+        factory.build(
+            root,
+            new ResolvedField("objectValue", Object.class),
+            TmfOperator.CONTAINS,
+            "Giga"));
+  }
+
+  @Test
+  void stillRejectsRegexAndStringOpsOnTypedNonStringFields() {
+    PredicateFactory factory = new PredicateFactory(true, 256);
+    PathBuilder<PolymorphicEntity> root =
+        new PathBuilder<>(PolymorphicEntity.class, "polymorphicEntity");
+    ResolvedField intField = new ResolvedField("intValue", Integer.class);
+    ResolvedField dateField = new ResolvedField("dateValue", OffsetDateTime.class);
+
+    assertThrows(
+        TmfFilteringException.class,
+        () -> factory.build(root, intField, TmfOperator.REGEX, "^2"));
+    assertThrows(
+        TmfFilteringException.class,
+        () -> factory.build(root, dateField, TmfOperator.REGEX, "^2026"));
+    assertThrows(
+        TmfFilteringException.class,
+        () -> factory.build(root, intField, TmfOperator.LIKE, "2%"));
+  }
+
+  @Test
+  void rejectsRegexOnPolymorphicFieldOnJpaRoot() {
+    PredicateFactory factory =
+        new PredicateFactory(true, 256, IsnullSemantics.MISSING_ONLY, true);
+    PathBuilder<JpaPolymorphicEntity> root =
+        new PathBuilder<>(JpaPolymorphicEntity.class, "jpaPolymorphicEntity");
+    ResolvedField field = new ResolvedField("value", Object.class);
+
+    TmfFilteringException ex =
+        assertThrows(
+            TmfFilteringException.class,
+            () -> factory.build(root, field, TmfOperator.REGEX, "^Inf.*"));
+    // Pointer to the JSONB escape hatch must be actionable.
+    if (!ex.getMessage().contains("@Tmf630JsonbBacked")) {
+      throw new AssertionError("unexpected message: " + ex.getMessage());
+    }
+  }
+
+  @Test
+  void rejectsLikeFamilyOnPolymorphicFieldOnJpaRoot() {
+    PredicateFactory factory =
+        new PredicateFactory(true, 256, IsnullSemantics.MISSING_ONLY, true);
+    PathBuilder<JpaPolymorphicEntity> root =
+        new PathBuilder<>(JpaPolymorphicEntity.class, "jpaPolymorphicEntity");
+    ResolvedField field = new ResolvedField("value", Object.class);
+
+    for (TmfOperator op :
+        List.of(
+            TmfOperator.LIKE,
+            TmfOperator.LIKEI,
+            TmfOperator.CONTAINS,
+            TmfOperator.CONTAINSI,
+            TmfOperator.STARTS_WITH,
+            TmfOperator.STARTS_WITHI,
+            TmfOperator.ENDS_WITH,
+            TmfOperator.ENDS_WITHI,
+            TmfOperator.EQI,
+            TmfOperator.NEI)) {
+      TmfFilteringException ex =
+          assertThrows(
+              TmfFilteringException.class, () -> factory.build(root, field, op, "Inf"));
+      if (!ex.getMessage().contains("@Tmf630JsonbBacked")) {
+        throw new AssertionError("op " + op + " unexpected message: " + ex.getMessage());
+      }
+    }
+  }
+
   static class SampleEntity {
     private String name;
     private Integer age;
@@ -210,6 +303,18 @@ class PredicateFactoryTest {
   }
 
   static class NonComparable {}
+
+  static class PolymorphicEntity {
+    private Object objectValue;
+    private Serializable serializableValue;
+    private Integer intValue;
+    private OffsetDateTime dateValue;
+  }
+
+  @Entity
+  static class JpaPolymorphicEntity {
+    private Object value;
+  }
 
   static class PrimitiveEntity {
     private int intValue;

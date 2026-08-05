@@ -9,6 +9,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.opentmf.query.tmf630.filtering.TmfOperator;
+import org.opentmf.query.tmf630.filtering.config.IsnullSemantics;
 import org.opentmf.query.tmf630.jsonb.it.JsonbTestDomain;
 import org.opentmf.query.tmf630.jsonb.it.JsonbTestRow;
 import org.opentmf.query.tmf630.jsonb.it.JsonbTestRowRepository;
@@ -239,6 +240,51 @@ class Tmf630JsonbFilterExecutorIT {
             + "{\"name\":\"price\",\"value\":"
             + priceValue
             + "}]}";
+    JsonbTestRow row = new JsonbTestRow();
+    row.setId(id);
+    row.setPayload(json);
+    repository.save(row);
+  }
+
+  @Test
+  @DisplayName(
+      "REGEX on a top-level polymorphic (Object) value field routes text-vs-text through Postgres"
+          + " — string values match, numeric values silently don't")
+  void regexOnPolymorphicObjectField() {
+    // Sibling of Mongo's PolymorphicRegexMongoIT in tmf630-toolkit-attribute-filtering-autoconfigure:
+    // the JSONB predicate factory has no static-type gate (JSONB is untyped), so passing
+    // Object.class routes to the TEXT cast and Postgres's `~` operator evaluates against the
+    // raw text extraction. String values matching the pattern return; numeric/boolean values
+    // return SQL NULL from `payload->>'value'` and drop out silently.
+    repository.deleteAll();
+    savePolymorphicRow("PG1", "\"Infinity_Giga\"");
+    savePolymorphicRow("PG2", "\"Infinity_Mega\"");
+    savePolymorphicRow("PG3", "\"Standard_Kilo\"");
+    savePolymorphicRow("PG4", "1024");
+    savePolymorphicRow("PG5", "true");
+
+    // Auto-configured predicateFactory has regex disabled by default (no Tmf630FilterSettings bean
+    // in this module's test context). Construct a regex-enabled one locally — the executor's
+    // findAll only cares about the emitted SQL fragment + params.
+    JsonbPredicateFactory regexEnabled =
+        new JsonbPredicateFactory(
+            new JsonbPathExtractor("payload"), IsnullSemantics.MISSING_ONLY, true);
+    JsonbClause where =
+        regexEnabled.build(TmfOperator.REGEX, "value", Object.class, "^Infinity_.*");
+
+    Page<JsonbTestDomain> page =
+        executor.findAll(
+            JsonbTestDomain.class, where, TmfSort.empty(), Pageable.unpaged(), any());
+
+    assertThat(page.getContent())
+        .extracting(JsonbTestDomain::getId)
+        .containsExactlyInAnyOrder("PG1", "PG2");
+  }
+
+  private void savePolymorphicRow(String id, String rawJsonValue) {
+    // rawJsonValue is inlined as raw JSON (already-quoted string, number, or boolean),
+    // so the payload can hold heterogeneously-typed values on the same key.
+    String json = "{\"id\":\"" + id + "\",\"value\":" + rawJsonValue + "}";
     JsonbTestRow row = new JsonbTestRow();
     row.setId(id);
     row.setPayload(json);

@@ -130,6 +130,27 @@ class JsonbPredicateFactoryTest {
   }
 
   @Test
+  @DisplayName("REGEX / LIKE-family on polymorphic (Object) field emit text-vs-text SQL — no cast")
+  void polymorphicObjectField() {
+    // TMF-620 catalog's productSpecCharacteristicValue.value is declared Object so it can carry
+    // String / Number / Boolean per valueType. JSONB stores it untyped, so text extraction
+    // (payload->>'x') + Postgres's native regex/LIKE do the right thing without a static-type
+    // gate: string values match the pattern, numeric/boolean values don't. Cross-reference the
+    // Mongo/JPA counterpart in tmf630-toolkit-attribute-filtering-core's PredicateFactory —
+    // JSONB never needed the widening because it doesn't hop through QueryDSL's typed path.
+    assertThat(
+            factory
+                .build(TmfOperator.REGEX, "characteristic.value", Object.class, "^Infinity_.*")
+                .sql())
+        .isEqualTo("payload#>>'{characteristic,value}' ~ ?");
+    assertThat(
+            factory
+                .build(TmfOperator.CONTAINS, "characteristic.value", Object.class, "Giga")
+                .sql())
+        .isEqualTo("payload#>>'{characteristic,value}' LIKE '%' || ? || '%'");
+  }
+
+  @Test
   @DisplayName("REGEX rejected when regex.enabled=false")
   void regexDisabled() {
     JsonbPredicateFactory f =
