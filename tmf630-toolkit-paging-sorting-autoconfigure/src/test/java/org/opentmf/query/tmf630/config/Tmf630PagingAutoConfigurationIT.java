@@ -37,12 +37,16 @@ class Tmf630PagingAutoConfigurationIT {
         .andExpect(content().string("7:3:createdOn:DESC"));
   }
 
+  // The 50 in the two sort-without-paging expectations below is the toolkit's
+  // default-limit default — NOT Spring Data's hard-coded 20. Pinning 20 here would
+  // reintroduce the pre-3.1.1 defect where the no-offset/limit fallback ignored
+  // opentmf.tmf630.paging.default-limit entirely.
   @Test
   void resolvesSignedSortWithoutOffsetLimitForPageable() throws Exception {
     mockMvc
         .perform(get("/page").param("sort", "-createdOn"))
         .andExpect(status().isOk())
-        .andExpect(content().string("0:20:createdOn:DESC"));
+        .andExpect(content().string("0:50:createdOn:DESC"));
   }
 
   @Test
@@ -50,7 +54,15 @@ class Tmf630PagingAutoConfigurationIT {
     mockMvc
         .perform(get("/page").param("sort", " transformationId"))
         .andExpect(status().isOk())
-        .andExpect(content().string("0:20:transformationId:ASC"));
+        .andExpect(content().string("0:50:transformationId:ASC"));
+  }
+
+  @Test
+  void noPagingParamsFallsBackToConfiguredDefaultLimit() throws Exception {
+    mockMvc
+        .perform(get("/page"))
+        .andExpect(status().isOk())
+        .andExpect(content().string("0:50:none"));
   }
 
   @Test

@@ -2,6 +2,28 @@
 
 All notable changes to `tmf630-toolkit` are documented in this file.
 
+## [3.1.1] - 2026-08-10
+
+### Fixed (configured paging limits ignored on the plain-`Pageable` fallback path)
+
+- **`default-limit` now applies when the client sends no paging parameters.** On a
+  plain-`Pageable` endpoint, a request without `offset`/`limit` fell through to the
+  Spring Data parent resolver, whose fallback is the hard-coded
+  `PageRequest.of(0, 20)` — `opentmf.tmf630.paging.default-limit` (default 50) was
+  never consulted on that path. The toolkit was also internally inconsistent:
+  `TmfRichPageable` endpoints already honored the configured default. The constructor
+  now propagates the settings into the parent via `setFallbackPageable(...)`.
+  Behavioral consequence: endpoints that silently served 20 rows now serve the
+  configured `default-limit` (50 out of the box) — the documented intent.
+- **`max-limit` now caps Spring-grammar `?size=` requests.** Same omission, second
+  facet: `setMaxPageSize(...)` was never configured, so `?page=`/`?size=` requests
+  were capped by Spring's own 2000 instead of `opentmf.tmf630.paging.max-limit`
+  (default 500). The TMF grammar (`limit=`) was already clamped correctly.
+- Regression ITs: `Tmf630PagingConfiguredLimitsIT` pins both facets with
+  deliberately non-default limits (7/9), plus a no-params case in
+  `Tmf630PagingAutoConfigurationIT`. Two pre-existing tests that asserted the buggy
+  `20` were corrected to the configured default.
+
 ## [3.1.0] - 2026-08-10
 
 ### Added (JSONB URL-binding bridge — `@Tmf630JsonbFilter`)

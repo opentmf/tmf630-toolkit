@@ -26,6 +26,12 @@ public class TmfPageableHandlerMethodArgumentResolver extends PageableHandlerMet
 
   public TmfPageableHandlerMethodArgumentResolver(Tmf630PagingSettings settings) {
     this.settings = settings;
+    // Propagate the toolkit settings into the Spring Data parent, which owns the
+    // non-TMF path (no offset/limit params). Without these, the no-params fallback is
+    // Spring's hard-coded PageRequest.of(0, 20) — not the configured default-limit —
+    // and a Spring-grammar ?size= is capped by Spring's own 2000, not max-limit.
+    setFallbackPageable(PageRequest.of(0, settings.defaultLimit()));
+    setMaxPageSize(settings.maxLimit());
     this.sortParser =
         new TmfSortParser(
             settings.sortAllowlist(),

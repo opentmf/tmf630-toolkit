@@ -89,7 +89,9 @@ class TmfPageableHandlerMethodArgumentResolverTest {
             null);
 
     assertEquals(0, pageable.getPageNumber());
-    assertEquals(20, pageable.getPageSize());
+    // The settings' defaultLimit (50) — not Spring Data's hard-coded 20 — must drive
+    // the fallback page size when the request carries no offset/limit params.
+    assertEquals(50, pageable.getPageSize());
     assertEquals("transformationId", pageable.getSort().toList().get(0).getProperty());
   }
 
