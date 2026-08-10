@@ -75,10 +75,10 @@ class PolymorphicRegexMongoIT {
 
     Set<String> hits = ids(execute(predicate));
 
-    // p1 and p2 match by native Mongo $regex on the string values; p3's string doesn't match;
-    // p4/p5/p6 carry non-string values, so Mongo's $regex silently skips them (the behavior we
-    // are pinning — pre-fix this whole call failed at the static-type gate before any Mongo op
-    // was issued).
+    // Native Mongo $regex matches the string values of p1 and p2 while the p3 string misses
+    // the pattern. The non-string values carried by p4/p5/p6 are silently skipped by Mongo —
+    // the exact behavior this test pins, because before the fix the whole call was rejected
+    // at the static-type gate and no Mongo operation was ever issued.
     assertEquals(Set.of("p1", "p2"), hits);
   }
 

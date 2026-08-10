@@ -76,10 +76,10 @@ class Tmf630JsonbAutoConfigurationTest {
     ObjectProvider<ObjectMapper> mapperProvider = mock(ObjectProvider.class);
     when(mapperProvider.getIfAvailable()).thenReturn(null);
     Tmf630JsonbAutoConfiguration autoconfig = new Tmf630JsonbAutoConfiguration();
+    JdbcClient jdbcClient = mock(JdbcClient.class);
+    JsonbEntityRegistry registry = new JsonbEntityRegistry();
     assertThatThrownBy(
-            () ->
-                autoconfig.tmf630JsonbWriteExecutor(
-                    mock(JdbcClient.class), mapperProvider, new JsonbEntityRegistry()))
+            () -> autoconfig.tmf630JsonbWriteExecutor(jdbcClient, mapperProvider, registry))
         .isInstanceOf(Tmf630JsonbConfigurationException.class)
         .hasMessageContaining("tools.jackson.databind.ObjectMapper")
         .hasMessageContaining("JsonMapper");

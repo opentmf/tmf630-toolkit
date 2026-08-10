@@ -150,7 +150,7 @@ class Tmf630JsonbSplitScaleIT {
       JsonNode node =
           new ObjectMapper().readTree(content);
       for (int i = 0; i < node.get("content").size(); i++) {
-        collectedIds.add(node.get("content").get(i).get("id").asText());
+        collectedIds.add(node.get("content").get(i).get("id").asString());
       }
     }
     // All 500 items collected, no duplicates, in item_order order.

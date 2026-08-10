@@ -32,7 +32,11 @@ public class Tmf630JsonbClauseArgumentResolver implements HandlerMethodArgumentR
       NativeWebRequest webRequest,
       WebDataBinderFactory binderFactory) {
     Tmf630JsonbFilter annotation = parameter.getParameterAnnotation(Tmf630JsonbFilter.class);
-    // supportsParameter guarantees the annotation's presence.
+    if (annotation == null) {
+      // supportsParameter gates on the annotation; reaching here without it is a wiring bug.
+      throw new IllegalStateException(
+          "@Tmf630JsonbFilter annotation missing on parameter: " + parameter);
+    }
     return clauseBuilder.build(annotation.root(), webRequest.getParameterMap());
   }
 }

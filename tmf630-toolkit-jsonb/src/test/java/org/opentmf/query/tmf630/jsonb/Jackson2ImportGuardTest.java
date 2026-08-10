@@ -25,7 +25,7 @@ class Jackson2ImportGuardTest {
 
   @Test
   @DisplayName("no Jackson 2 databind/core imports in main or test sources")
-  void noJackson2Imports() throws IOException {
+  void noJackson2Imports() {
     List<String> violations =
         Stream.of(Path.of("src", "main", "java"), Path.of("src", "test", "java"))
             .flatMap(Jackson2ImportGuardTest::javaFiles)

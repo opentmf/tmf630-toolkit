@@ -294,14 +294,12 @@ class Tmf630JsonbFilterExecutorIT {
     row.setPayload("{\"id\":\"BAD\",\"priority\":{\"nested\":true}}");
     repository.save(row);
 
+    JsonbClause where = JsonbClause.alwaysTrue();
+    TmfSort sort = TmfSort.empty();
+    Pageable pageable = Pageable.unpaged();
+    Function<String, Class<?>> typeResolver = any();
     assertThatThrownBy(
-            () ->
-                executor.findAll(
-                    JsonbTestDomain.class,
-                    JsonbClause.alwaysTrue(),
-                    TmfSort.empty(),
-                    Pageable.unpaged(),
-                    any()))
+            () -> executor.findAll(JsonbTestDomain.class, where, sort, pageable, typeResolver))
         .isInstanceOf(Tmf630JsonbSerializationException.class)
         .hasMessageContaining(JsonbTestDomain.class.getName())
         .hasCauseInstanceOf(JacksonException.class);
