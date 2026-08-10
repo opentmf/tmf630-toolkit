@@ -1,8 +1,5 @@
 package org.opentmf.query.tmf630.jsonb;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import java.io.UncheckedIOException;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -12,6 +9,8 @@ import org.opentmf.query.tmf630.versioning.Tmf630VersionResolverSupport;
 import org.opentmf.query.tmf630.versioning.Tmf630Versioned;
 import org.opentmf.query.tmf630.versioning.VersionComparators;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * PostgreSQL-with-JSONB implementation of {@link Tmf630VersionResolver}. Fetches every
@@ -86,8 +85,8 @@ public class Tmf630JsonbVersionResolver implements Tmf630VersionResolver {
   private <T> T deserialise(String json, Class<T> type) {
     try {
       return objectMapper.readValue(json, type);
-    } catch (JsonProcessingException e) {
-      throw new UncheckedIOException(
+    } catch (JacksonException e) {
+      throw new Tmf630JsonbSerializationException(
           "Failed to deserialise payload for " + type.getName() + " version resolution", e);
     }
   }

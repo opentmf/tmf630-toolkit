@@ -1,10 +1,10 @@
 package org.opentmf.query.tmf630.jsonb;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.persistence.EntityManagerFactory;
 import jakarta.persistence.Id;
 import jakarta.persistence.metamodel.EntityType;
@@ -12,6 +12,10 @@ import jakarta.persistence.metamodel.Metamodel;
 import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 class Tmf630JsonbAutoConfigurationTest {
 
@@ -64,6 +68,34 @@ class Tmf630JsonbAutoConfigurationTest {
     Tmf630JsonbAutoConfiguration autoconfig = new Tmf630JsonbAutoConfiguration();
     JsonbEntityRegistry registry = autoconfig.tmf630JsonbEntityRegistry(provider);
     assertThat(registry.all()).isEmpty();
+  }
+
+  @Test
+  @DisplayName("executor beans fail the boot with an actionable message when no Jackson 3 mapper bean exists")
+  void missingObjectMapperFailsWithActionableMessage() {
+    ObjectProvider<ObjectMapper> mapperProvider = mock(ObjectProvider.class);
+    when(mapperProvider.getIfAvailable()).thenReturn(null);
+    Tmf630JsonbAutoConfiguration autoconfig = new Tmf630JsonbAutoConfiguration();
+    assertThatThrownBy(
+            () ->
+                autoconfig.tmf630JsonbWriteExecutor(
+                    mock(JdbcClient.class), mapperProvider, new JsonbEntityRegistry()))
+        .isInstanceOf(Tmf630JsonbConfigurationException.class)
+        .hasMessageContaining("tools.jackson.databind.ObjectMapper")
+        .hasMessageContaining("JsonMapper");
+  }
+
+  @Test
+  @DisplayName("executor beans build when a Jackson 3 mapper bean is present")
+  void executorBeansBuildWithMapperPresent() {
+    ObjectProvider<ObjectMapper> mapperProvider = mock(ObjectProvider.class);
+    when(mapperProvider.getIfAvailable()).thenReturn(new ObjectMapper());
+    Tmf630JsonbAutoConfiguration autoconfig = new Tmf630JsonbAutoConfiguration();
+    JsonbEntityRegistry registry = new JsonbEntityRegistry();
+    assertThat(autoconfig.tmf630JsonbWriteExecutor(mock(JdbcClient.class), mapperProvider, registry))
+        .isNotNull();
+    assertThat(autoconfig.tmf630JsonbVersionResolver(mock(JdbcClient.class), mapperProvider, registry))
+        .isNotNull();
   }
 
   @Test

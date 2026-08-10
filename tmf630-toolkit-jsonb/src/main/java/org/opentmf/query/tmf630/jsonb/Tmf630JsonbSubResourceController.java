@@ -1,8 +1,5 @@
 package org.opentmf.query.tmf630.jsonb;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.util.List;
 import java.util.Optional;
 import org.opentmf.query.tmf630.annotation.Tmf630Response;
@@ -14,6 +11,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Phase (c.5) — abstract base class for the split-collection sub-endpoint. A developer
@@ -193,8 +192,8 @@ public abstract class Tmf630JsonbSubResourceController<C, P> {
     }
     try {
       return objectMapper.readValue(payloadJson, childType);
-    } catch (IOException e) {
-      throw new UncheckedIOException(
+    } catch (JacksonException e) {
+      throw new Tmf630JsonbSerializationException(
           "Failed to deserialize split-child payload into " + childType.getName(), e);
     }
   }

@@ -4,7 +4,7 @@
   <parent>
     <groupId>org.opentmf.query</groupId>
     <artifactId>tmf630-toolkit</artifactId>
-    <version>3.0.2-SNAPSHOT</version>
+    <version>3.1.0-SNAPSHOT</version>
     <relativePath>../pom.xml</relativePath>
   </parent>
 
@@ -45,8 +45,12 @@
       <groupId>jakarta.persistence</groupId>
       <artifactId>jakarta.persistence-api</artifactId>
     </dependency>
+    <!-- Jackson 3 (tools.jackson) — the toolkit's payload (de)serialization line.
+         Jackson 2 (com.fasterxml.jackson.databind/.core) is banned in this module;
+         see Jackson2ImportGuardTest. Annotations (com.fasterxml.jackson.annotation)
+         remain shared between Jackson 2 and 3 and stay legal. -->
     <dependency>
-      <groupId>com.fasterxml.jackson.core</groupId>
+      <groupId>tools.jackson.core</groupId>
       <artifactId>jackson-databind</artifactId>
     </dependency>
     <!-- spring-web is needed by Tmf630JsonbSubResourceController (@GetMapping,
@@ -58,6 +62,14 @@
     <dependency>
       <groupId>org.springframework</groupId>
       <artifactId>spring-web</artifactId>
+      <optional>true</optional>
+    </dependency>
+    <!-- spring-webmvc is needed only by the @Tmf630JsonbFilter URL-binding layer
+         (WebMvcConfigurer registration of Tmf630JsonbClauseArgumentResolver). Optional
+         for the same reason as spring-web above: headless consumers don't pull it in. -->
+    <dependency>
+      <groupId>org.springframework</groupId>
+      <artifactId>spring-webmvc</artifactId>
       <optional>true</optional>
     </dependency>
     <dependency>
@@ -98,6 +110,21 @@
     <dependency>
       <groupId>org.postgresql</groupId>
       <artifactId>postgresql</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- Parity-IT-only: stands up the QueryDSL-terminal endpoint next to the
+         @Tmf630JsonbFilter endpoint so the same-URLs-same-results battery can compare
+         both backends inside one application context. -->
+    <dependency>
+      <groupId>org.opentmf.query</groupId>
+      <artifactId>tmf630-toolkit-attribute-filtering-autoconfigure</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.querydsl</groupId>
+      <artifactId>querydsl-jpa</artifactId>
+      <version>${querydsl.version}</version>
+      <classifier>jakarta</classifier>
       <scope>test</scope>
     </dependency>
   </dependencies>

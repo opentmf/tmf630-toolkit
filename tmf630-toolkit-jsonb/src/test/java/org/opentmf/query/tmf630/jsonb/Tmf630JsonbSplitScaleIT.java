@@ -5,7 +5,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
@@ -24,6 +23,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Phase (c.7) — scale-heavy parity IT. Seeds a parent with 500 split children (the
@@ -146,7 +147,7 @@ class Tmf630JsonbSplitScaleIT {
               .getResponse()
               .getContentAsString();
       // Extract item ids from this page.
-      com.fasterxml.jackson.databind.JsonNode node =
+      JsonNode node =
           new ObjectMapper().readTree(content);
       for (int i = 0; i < node.get("content").size(); i++) {
         collectedIds.add(node.get("content").get(i).get("id").asText());

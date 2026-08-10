@@ -36,6 +36,20 @@ executors (b.4/b.5) — but **no sub-milestone delivered the HTTP binding**:
 
 ## 2. Work item 1 — backend-neutral parse core + JSONB argument resolver
 
+> **Status: DONE — landed on `develop` 2026-08-10.** Delivered as planned:
+> `Tmf630FilterParser` + `Tmf630FilterExpression`/`Tmf630AttributeClause` AST in
+> attribute-filtering-core (existing resolver now a thin terminal, public constructor
+> unchanged, pre-existing IT suite green as the no-behavior-change proof);
+> `Tmf630JsonbClauseBuilder` + `@Tmf630JsonbFilter` +
+> `Tmf630JsonbClauseArgumentResolver` in tmf630-toolkit-jsonb, auto-registered when
+> Spring MVC and a `Tmf630FilterSettings` bean are present; parity battery
+> `Tmf630JsonbUrlBindingParityIT` (30+ same-URL-same-results cases, rejection parity,
+> pinned `.regex` divergence). Notable delta vs the sketch below: instead of the
+> resolver taking parameter type `JsonbClause` bare, the binding also required exposing
+> `Tmf630FilterSettings` as a bean from attribute-filtering-autoconfigure — which
+> incidentally fixed the jsonb factories' settings lookup (regex flag now reaches the
+> JSONB backend from properties).
+
 The grammar is backend-neutral; only the terminal differs. Split accordingly.
 
 1. **Extract `Tmf630FilterParser`** (attribute-filtering-core): everything in
@@ -79,6 +93,14 @@ The grammar is backend-neutral; only the terminal differs. Split accordingly.
    same-URLs-same-results pattern the roadmap prescribes for c.7/d.7.
 
 ## 3. Work item 2 — Jackson 3 migration (jsonb module)
+
+> **Status: DONE — landed on `develop` 2026-08-10** (reactor bumped to
+> `3.1.0-SNAPSHOT`; CHANGELOG `[3.1.0]` section). Delivered as planned, plus:
+> the unused compile-scope Jackson 2 `jackson-databind` in
+> `tmf630-toolkit-mongo-split-collection` (missed by the audit below) was
+> removed; payload-failure wrapping moved from `UncheckedIOException` to a new
+> `Tmf630JsonbSerializationException`; `ErrorMessage` audit confirmed
+> annotation-only (nothing to migrate).
 
 The jsonb module is the toolkit's only main-source Jackson-2 dependency
 besides the legacy `ErrorMessage` (paging-sorting-core):

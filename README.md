@@ -2079,6 +2079,16 @@ against it via Postgres SQL/JSON path — no ORM object graph, no lazy-load surf
 3. Bootstrap discovers `@Tmf630JsonbBacked` via the JPA metamodel. Reads and writes go
    through auto-configured beans; you don't wire anything else.
 
+> **Jackson 3 required (since 3.1.0).** The module's executors (de)serialize payloads
+> through a **`tools.jackson.databind.ObjectMapper`** bean — Jackson 3, not the legacy
+> `com.fasterxml.jackson.databind` line. Spring Boot 4 auto-configures a `JsonMapper`
+> (an `ObjectMapper` subtype) out of the box, so most services need nothing extra.
+> On Spring Boot 3, add `tools.jackson.core:jackson-databind` and declare a
+> `JsonMapper` bean yourself; without one the boot fails fast with a
+> `Tmf630JsonbConfigurationException` naming the missing bean. The shared annotations
+> namespace (`com.fasterxml.jackson.annotation` — `@JsonInclude`, `@JsonIgnore`, …)
+> is unchanged and works with both lines.
+
 #### Payload column mapping — pick your ergonomic
 
 The Java type on the `payload` field is entirely the caller's choice — the toolkit's
@@ -2107,7 +2117,35 @@ Trade-offs to weigh:
 The examples further down use the typed-POJO shape for readability, but everything
 applies to `JsonNode` / `String` mappings unchanged.
 
-#### Level 1 (easiest) — list endpoint via the read executor
+#### Level 1 (easiest) — transparent URL binding via `@Tmf630JsonbFilter` (since 3.1.0)
+
+The JSONB counterpart of `@QuerydslPredicate`: one annotation binds the **full** TMF-630
+attribute-filter grammar — dot-suffix operators, §4.4 encoded operator literals,
+comma/semicolon OR lists with escapes, allowlists, clause/value limits, `filter=`
+JsonPath (split-collection aware), and `filter.combineWithAttributes` — into a ready
+`JsonbClause`:
+
+```java
+@GetMapping
+@Tmf630Response
+Page<ProductOrder> search(
+    @Tmf630JsonbFilter(root = ProductOrder.class) JsonbClause clause,
+    TmfSort sort,
+    Pageable pageable) {
+  return executor.findAll(ProductOrder.class, clause, sort, pageable, this::fieldType);
+}
+```
+
+`root` is the **domain** (payload POJO) type — field paths and value coercion resolve
+against it, with unknown fields honoring `on-unknown-field` and nested paths gated by
+`allow-nested-paths-docdb`. The binding registers automatically when Spring MVC and the
+`Tmf630FilterSettings` bean are present (the attribute-filtering starter provides the
+bean out of the box), and the same URL returns the same result set as a
+QueryDSL-terminal endpoint — pinned by the `Tmf630JsonbUrlBindingParityIT` battery. The
+one intended divergence: `.regex` runs natively here (Postgres `~`/`~*`) while the JPA
+column backend rejects it (LIKE-semantics guard, JPA gap analysis §3.6).
+
+#### Level 2 — list endpoint via the read executor (programmatic control)
 
 ```java
 @RestController
@@ -2149,14 +2187,14 @@ That's the full read path. `filter=`, `sort=`, `fields=`, paging, headers, statu
 and the TMF error body all apply automatically. The executor internally runs one
 Postgres query that assembles the paged result and total count.
 
-#### Level 2 — writes via a Spring Data JPA repository
+#### Level 3 — writes via a Spring Data JPA repository
 
 Writes are ordinary JPA against the row entity. Serialise your domain POJO to JSON and
 persist through `JpaRepository.save(...)`. The toolkit does not own the write path for
 the base (non-split) case — Postgres is your database and Spring Data JPA is the write
 API.
 
-#### Level 3 (advanced) — regex, correlated sort, native SQL/JSON path
+#### Level 4 (advanced) — regex, correlated sort, native SQL/JSON path
 
 The JSONB backend supports the full JsonPath grammar for `filter=` and `sort=` — array
 correlation (`@.characteristic[?(@.name == 'price')]`), positional index (`@.items[3].state`),

@@ -1,10 +1,5 @@
 package org.opentmf.query.tmf630.jsonb;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -14,6 +9,10 @@ import java.util.Set;
 import org.opentmf.query.tmf630.filtering.TmfFilteringException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * Phase (c.6) — auto-splitting write executor. Developer's POST/PATCH controllers call
@@ -106,7 +105,7 @@ public class Tmf630JsonbWriteExecutor {
       // before the parent payload is persisted. valueToTree round-trips through the
       // Jackson serializer so annotations like @JsonInclude and @JsonIgnore apply.
       ObjectNode parentTree = objectMapper.valueToTree(parent);
-      String parentId = parentTree.path("id").asText(null);
+      String parentId = parentTree.path("id").asString(null);
       if (parentId == null || parentId.isEmpty()) {
         throw new TmfFilteringException(
             "Parent instance must have a non-empty 'id' field for split-write: "
@@ -128,8 +127,8 @@ public class Tmf630JsonbWriteExecutor {
         childProcessor.process(entry.getKey(), parentId, entry.getValue());
       }
       return parent;
-    } catch (IOException e) {
-      throw new UncheckedIOException(
+    } catch (JacksonException e) {
+      throw new Tmf630JsonbSerializationException(
           "Failed to serialize parent " + parent.getClass().getName() + " for " + opLabel, e);
     }
   }
@@ -207,8 +206,8 @@ public class Tmf630JsonbWriteExecutor {
   private static String resolveChildId(JsonNode child, int index) {
     if (child != null && child.isObject()) {
       JsonNode idNode = child.get("id");
-      if (idNode != null && !idNode.isNull() && !idNode.asText().isEmpty()) {
-        return idNode.asText();
+      if (idNode != null && !idNode.isNull() && !idNode.asString("").isEmpty()) {
+        return idNode.asString("");
       }
       String fallback = String.valueOf(index);
       ((ObjectNode) child).put("id", fallback);
@@ -239,47 +238,40 @@ public class Tmf630JsonbWriteExecutor {
                         NO_DOMAIN_REGISTERED
                             + parentType.getName()));
     JsonbSplitCollectionMetadata split = findSplitForChildType(metadata, child.getClass());
-    try {
-      JsonNode childNode = objectMapper.valueToTree(child);
-      String childPayload = childNode.toString();
-      String childId = resolveChildId(childNode, -1); // -1 signals no known position yet
-      if ("-1".equals(childId)) {
-        throw new TmfFilteringException(
-            "appendChild requires the child instance to carry an 'id' field.");
-      }
-      String insertSql =
-          INSERT_INTO
-              + split.childTable()
-              + " ("
-              + split.parentIdColumn()
-              + ", "
-              + split.itemIdColumn()
-              + ", "
-              + split.itemOrderColumn()
-              + ", "
-              + split.payloadColumn()
-              + ") VALUES (?, ?, "
-              + " COALESCE((SELECT MAX("
-              + split.itemOrderColumn()
-              + ") + 1 FROM "
-              + split.childTable()
-              + WHERE
-              + split.parentIdColumn()
-              + " = ?), 0), "
-              + " ?::jsonb)";
-      jdbcClient
-          .sql(insertSql)
-          .param(1, parentId)
-          .param(2, childId)
-          .param(3, parentId)
-          .param(4, childPayload)
-          .update();
-    } catch (Exception e) {
-      if (e instanceof RuntimeException re) throw re;
-      throw new UncheckedIOException(
-          "Failed to serialize child " + child.getClass().getName() + " for append",
-          new IOException(e));
+    JsonNode childNode = objectMapper.valueToTree(child);
+    String childPayload = childNode.toString();
+    String childId = resolveChildId(childNode, -1); // -1 signals no known position yet
+    if ("-1".equals(childId)) {
+      throw new TmfFilteringException(
+          "appendChild requires the child instance to carry an 'id' field.");
     }
+    String insertSql =
+        INSERT_INTO
+            + split.childTable()
+            + " ("
+            + split.parentIdColumn()
+            + ", "
+            + split.itemIdColumn()
+            + ", "
+            + split.itemOrderColumn()
+            + ", "
+            + split.payloadColumn()
+            + ") VALUES (?, ?, "
+            + " COALESCE((SELECT MAX("
+            + split.itemOrderColumn()
+            + ") + 1 FROM "
+            + split.childTable()
+            + WHERE
+            + split.parentIdColumn()
+            + " = ?), 0), "
+            + " ?::jsonb)";
+    jdbcClient
+        .sql(insertSql)
+        .param(1, parentId)
+        .param(2, childId)
+        .param(3, parentId)
+        .param(4, childPayload)
+        .update();
   }
 
   private static JsonbSplitCollectionMetadata findSplitForChildType(
@@ -582,7 +574,7 @@ public class Tmf630JsonbWriteExecutor {
     // no-textual-match path. Reuses the executor's own ObjectMapper.
     try {
       return objectMapper.readTree(currentJson).equals(objectMapper.readTree(desiredJson));
-    } catch (IOException ex) {
+    } catch (JacksonException ex) {
       // Malformed JSON in the DB → treat as different so the UPDATE overwrites it.
       return false;
     }

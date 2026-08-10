@@ -4,6 +4,7 @@ import com.querydsl.core.types.Predicate;
 import java.util.ArrayList;
 import java.util.List;
 import org.opentmf.query.tmf630.filtering.advice.Tmf630FilteringExceptionHandler;
+import org.opentmf.query.tmf630.filtering.config.Tmf630FilterSettings;
 import org.opentmf.query.tmf630.filtering.predicate.FieldPathResolver;
 import org.opentmf.query.tmf630.filtering.predicate.PredicateFactory;
 import org.opentmf.query.tmf630.filtering.predicate.ValueConverter;
@@ -39,6 +40,18 @@ public class Tmf630AttributeFilteringAutoConfiguration {
   @ConditionalOnMissingBean
   public OperatorRegistry tmf630OperatorRegistry() {
     return new OperatorRegistry();
+  }
+
+  /**
+   * The resolved filter settings, exposed as a bean so backend modules outside this one
+   * (e.g. tmf630-toolkit-jsonb) consume the SAME configuration the QueryDSL resolver
+   * runs on — one settings source per application, no per-backend divergence.
+   */
+  @Bean
+  @ConditionalOnMissingBean
+  public Tmf630FilterSettings tmf630FilterSettings(
+      Tmf630AttributeFilteringProperties properties) {
+    return properties.toSettings();
   }
 
   @Bean
@@ -90,7 +103,7 @@ public class Tmf630AttributeFilteringAutoConfiguration {
   @ConditionalOnMissingBean
   public Tmf630PredicateArgumentResolver tmf630PredicateArgumentResolver(
       ParamKeyParser keyParser,
-      Tmf630AttributeFilteringProperties properties,
+      Tmf630FilterSettings settings,
       FieldAllowlistProvider allowlistProvider,
       FieldPathResolver pathResolver,
       ValueConverter valueConverter,
@@ -98,7 +111,7 @@ public class Tmf630AttributeFilteringAutoConfiguration {
       JsonPathFilterPredicateBuilder jsonPathFilterPredicateBuilder) {
     return new Tmf630PredicateArgumentResolver(
         keyParser,
-        properties.toSettings(),
+        settings,
         allowlistProvider,
         pathResolver,
         valueConverter,

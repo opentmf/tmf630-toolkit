@@ -2,7 +2,6 @@ package org.opentmf.query.tmf630.jsonb;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,6 +20,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Phase (c.4) IT — verifies split-collection read-merge against real Postgres. Parent
@@ -251,6 +251,43 @@ class Tmf630JsonbSplitCollectionIT {
     assertThat(loaded.getItems())
         .extracting(SplitOrderItem::getState)
         .containsExactly("PENDING", "SHIPPED");
+  }
+
+  @Test
+  @DisplayName(
+      "3.1.0 Jackson 3 migration: payload write shape is byte-stable and round-trips through "
+          + "Postgres unchanged")
+  void jackson3PayloadShapeIsStableAcrossRoundTrip() {
+    SplitOrderDomain order = new SplitOrderDomain();
+    order.setId("RT1");
+    order.setStatus("OPEN");
+    // items left null — @JsonInclude(NON_NULL) must keep it out of the payload, exactly
+    // as the pre-migration (Jackson 2) writer did.
+    assertThat(objectMapper.writeValueAsString(order))
+        .isEqualTo("{\"id\":\"RT1\",\"status\":\"OPEN\"}");
+
+    writeExecutor.saveWithSplits(order);
+    String parentPayload =
+        jdbcClient
+            .sql("SELECT payload::text FROM split_order_row WHERE id = ?")
+            .param(1, "RT1")
+            .query(String.class)
+            .single();
+    // Postgres reformats jsonb text output — compare structurally, not textually.
+    assertThat(objectMapper.readTree(parentPayload))
+        .isEqualTo(objectMapper.readTree("{\"id\":\"RT1\",\"status\":\"OPEN\"}"));
+
+    Page<SplitOrderDomain> page =
+        executor.findAll(
+            SplitOrderDomain.class,
+            JsonbClause.alwaysTrue(),
+            TmfSort.empty(),
+            Pageable.unpaged(),
+            field -> String.class);
+    assertThat(page.getContent()).hasSize(1);
+    SplitOrderDomain loaded = page.getContent().get(0);
+    assertThat(loaded.getId()).isEqualTo("RT1");
+    assertThat(loaded.getStatus()).isEqualTo("OPEN");
   }
 
   @Test

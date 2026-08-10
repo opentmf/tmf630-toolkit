@@ -1,11 +1,5 @@
 package org.opentmf.query.tmf630.jsonb;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.util.List;
 import java.util.function.Function;
 import org.opentmf.query.tmf630.filtering.TmfFilteringException;
@@ -14,6 +8,11 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * Phase (b.5) — end-to-end JSONB query executor. Composes a filter clause (built by
@@ -157,7 +156,7 @@ public class Tmf630JsonbFilterExecutor {
         return objectMapper.readValue(payloadJson, domainType);
       }
       JsonNode parentNode = objectMapper.readTree(payloadJson);
-      String parentId = parentNode.path("id").asText(null);
+      String parentId = parentNode.path("id").asString(null);
       if (parentId != null && parentNode.isObject()) {
         ObjectNode parentObj = (ObjectNode) parentNode;
         for (JsonbSplitCollectionMetadata split : metadata.splitCollections()) {
@@ -165,8 +164,8 @@ public class Tmf630JsonbFilterExecutor {
         }
       }
       return objectMapper.treeToValue(parentNode, domainType);
-    } catch (IOException e) {
-      throw new UncheckedIOException(
+    } catch (JacksonException e) {
+      throw new Tmf630JsonbSerializationException(
           "Failed to deserialize JSONB payload into " + domainType.getName(), e);
     }
   }
@@ -177,7 +176,7 @@ public class Tmf630JsonbFilterExecutor {
    * representation of the merged payload's split-collection field.
    */
   private ArrayNode fetchChildrenAsArrayNode(
-      JsonbSplitCollectionMetadata split, String parentId) throws IOException {
+      JsonbSplitCollectionMetadata split, String parentId) {
     String sql =
         "SELECT "
             + split.payloadColumn()

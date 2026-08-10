@@ -3,7 +3,6 @@ package org.opentmf.query.tmf630.jsonb;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.persistence.Id;
 import jakarta.persistence.Version;
 import java.time.OffsetDateTime;
@@ -13,6 +12,7 @@ import org.springframework.data.annotation.CreatedBy;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.LastModifiedBy;
 import org.springframework.data.annotation.LastModifiedDate;
+import tools.jackson.databind.JsonNode;
 
 class JsonbEntityMetadataTest {
 

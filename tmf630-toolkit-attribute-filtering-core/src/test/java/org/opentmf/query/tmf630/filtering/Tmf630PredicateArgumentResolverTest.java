@@ -392,19 +392,19 @@ class Tmf630PredicateArgumentResolverTest {
 
   @Test
   void csvSplitHonorsEscapedCommaAsLiteralInMultiValueOperators() {
-    assertEquals(List.of("A,B", "C"), Tmf630PredicateArgumentResolver.splitCsvForMultiValue("A\\,B,C"));
+    assertEquals(List.of("A,B", "C"), Tmf630FilterParser.splitCsvForMultiValue("A\\,B,C"));
   }
 
   @Test
   void csvSplitSkipsEmptyComponentsInMultiValueOperators() {
-    assertEquals(List.of("A", "B"), Tmf630PredicateArgumentResolver.splitCsvForMultiValue("A,,B,"));
+    assertEquals(List.of("A", "B"), Tmf630FilterParser.splitCsvForMultiValue("A,,B,"));
   }
 
   @Test
   void csvSplitPassesThroughNullAndCommaFreeValues() {
-    assertEquals(1, Tmf630PredicateArgumentResolver.splitCsvForMultiValue(null).size());
-    assertNull(Tmf630PredicateArgumentResolver.splitCsvForMultiValue(null).get(0));
-    assertEquals(List.of("solo"), Tmf630PredicateArgumentResolver.splitCsvForMultiValue("solo"));
+    assertEquals(1, Tmf630FilterParser.splitCsvForMultiValue(null).size());
+    assertNull(Tmf630FilterParser.splitCsvForMultiValue(null).get(0));
+    assertEquals(List.of("solo"), Tmf630FilterParser.splitCsvForMultiValue("solo"));
   }
 
   @Test

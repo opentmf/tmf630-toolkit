@@ -1,8 +1,8 @@
 package org.opentmf.query.tmf630.jsonb;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.function.Function;
 import org.junit.jupiter.api.BeforeEach;
@@ -23,6 +23,8 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.test.context.ActiveProfiles;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Phase (b.5) end-to-end IT — proves {@link Tmf630JsonbFilterExecutor} wires the b.2
@@ -279,6 +281,30 @@ class Tmf630JsonbFilterExecutorIT {
     assertThat(page.getContent())
         .extracting(JsonbTestDomain::getId)
         .containsExactlyInAnyOrder("PG1", "PG2");
+  }
+
+  @Test
+  @DisplayName(
+      "payload that cannot bind to the domain type surfaces as Tmf630JsonbSerializationException "
+          + "wrapping the Jackson 3 cause")
+  void unbindablePayloadWrapsJacksonFailure() {
+    JsonbTestRow row = new JsonbTestRow();
+    row.setId("BAD");
+    // priority is Integer on JsonbTestDomain — an object node cannot bind to it.
+    row.setPayload("{\"id\":\"BAD\",\"priority\":{\"nested\":true}}");
+    repository.save(row);
+
+    assertThatThrownBy(
+            () ->
+                executor.findAll(
+                    JsonbTestDomain.class,
+                    JsonbClause.alwaysTrue(),
+                    TmfSort.empty(),
+                    Pageable.unpaged(),
+                    any()))
+        .isInstanceOf(Tmf630JsonbSerializationException.class)
+        .hasMessageContaining(JsonbTestDomain.class.getName())
+        .hasCauseInstanceOf(JacksonException.class);
   }
 
   private void savePolymorphicRow(String id, String rawJsonValue) {

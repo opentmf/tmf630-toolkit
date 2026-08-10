@@ -2,6 +2,91 @@
 
 All notable changes to `tmf630-toolkit` are documented in this file.
 
+## [3.1.0] - 2026-08-10
+
+### Added (JSONB URL-binding bridge — `@Tmf630JsonbFilter`)
+
+- **Transparent TMF-630 attribute filtering for `@Tmf630JsonbBacked` endpoints.** A
+  controller now binds the full URL grammar with one annotation, mirroring the
+  QueryDSL-side `@QuerydslPredicate` ergonomics:
+
+  ```java
+  @GetMapping
+  @Tmf630Response
+  Page<CommunicationMessage> search(
+      @Tmf630JsonbFilter(root = CommunicationMessage.class) JsonbClause clause,
+      TmfSort sort, Pageable pageable);
+  ```
+
+  Dot-suffix operators, Part 1 §4.4 encoded operator literals
+  (`?dateTime%3E2013-04-20`, including the `;`-ORing form), comma/semicolon OR lists
+  with escapes, allowlists, clause/value limits, `filter=` JsonPath (split-collection
+  aware) and `filter.combineWithAttributes` all apply — hand-parsing filter params per
+  service is no longer needed.
+- **Backend-neutral parse core extracted.** Everything grammar-level moved out of
+  `Tmf630PredicateArgumentResolver` into the new `Tmf630FilterParser`, producing a
+  neutral AST (`Tmf630FilterExpression` / `Tmf630AttributeClause`); the QueryDSL
+  resolver is now a thin terminal over it (public constructor unchanged, behavior
+  unchanged — the pre-existing resolver IT suite passes as-is). The JSONB terminal
+  (`Tmf630JsonbClauseBuilder`) consumes the same AST, resolves field paths and value
+  coercion against the **domain type** with the same `FieldPathResolver` /
+  `ValueConverter` the QueryDSL terminal uses, and composes `JsonbClause`s with
+  identical repeated-value and combine-mode semantics.
+- **`Tmf630FilterSettings` is now an application bean** (exposed
+  `@ConditionalOnMissingBean` by `tmf630-toolkit-attribute-filtering-autoconfigure`).
+  The jsonb module's `JsonbPredicateFactory` / `JsonbSortBuilder` previously looked the
+  settings up via `ObjectProvider` but no bean existed unless the service defined one
+  by hand — `opentmf.tmf630.attribute-filtering.regex.enabled=true` silently did not
+  reach the JSONB backend. Both backends now run on one settings source; all defaults
+  are unchanged.
+- **Parity is proven, not assumed:** a same-URLs-same-results IT battery
+  (`Tmf630JsonbUrlBindingParityIT`) runs 30+ grammar cases against a QueryDSL endpoint
+  and a JSONB endpoint over identically-seeded data in one Postgres and asserts equal
+  statuses, equal id sets, and the semantically-expected ids. The one documented
+  divergence — `.regex` rejecting on JPA (LIKE-semantics guard, see 3.0.0 notes) while
+  running natively on JSONB — is pinned as a divergence test.
+- Nested field paths on JSONB endpoints are gated by
+  `opentmf.tmf630.attribute-filtering.allow-nested-paths-docdb` (default `true`) — a
+  JSONB payload is document-shaped, so the DocDB policy applies, not the JPA one.
+- Strictness fix: an invalid `filter.combineWithAttributes` value now rejects with 400
+  unconditionally. Previously it was silently ignored when only one of the two filter
+  sides (attributes / `filter=`) produced a predicate.
+
+### Changed (Jackson 3 migration — `tmf630-toolkit-jsonb`)
+
+- **The jsonb module now runs on Jackson 3 (`tools.jackson`).** All payload
+  (de)serialization — `Tmf630JsonbFilterExecutor`, `Tmf630JsonbWriteExecutor`,
+  `Tmf630JsonbVersionResolver`, `Tmf630JsonbSubResourceController` — consumes a
+  **`tools.jackson.databind.ObjectMapper`** instead of the legacy Jackson 2
+  (`com.fasterxml.jackson.databind`) mapper. The module no longer forces a
+  Jackson 2 mapper bean onto consumers: Spring Boot 4 auto-configures a
+  `JsonMapper` (an `ObjectMapper` subtype) out of the box, so a Boot 4 service
+  needs zero extra wiring. Spring Boot 3 consumers must add
+  `tools.jackson.core:jackson-databind` and declare a `JsonMapper` bean.
+- **Missing-mapper boot failure is now named and actionable.** The auto-config
+  resolves the mapper via `ObjectProvider`; when no Jackson 3 `ObjectMapper`
+  bean exists, the boot fails with `Tmf630JsonbConfigurationException`
+  explaining exactly which bean is missing and how each Boot generation
+  provides it — instead of a generic `NoSuchBeanDefinitionException`.
+- **Payload (de)serialization failures now surface as
+  `Tmf630JsonbSerializationException`** (new, `RuntimeException`-based) instead
+  of `java.io.UncheckedIOException`. Jackson 3 exceptions are unchecked and no
+  longer `IOException`-based, so the old wrapper type was untenable. Services
+  that caught `UncheckedIOException` around jsonb executor calls must switch to
+  the new type. Serialized payload **bytes are unchanged** across the migration
+  — pinned by a round-trip IT (`@JsonInclude`/`@JsonIgnoreProperties` semantics
+  carry over; the shared `com.fasterxml.jackson.annotation` namespace works
+  with both Jackson lines).
+- **Jackson 2 is now banned in the jsonb module's sources** — an import-guard
+  test (`Jackson2ImportGuardTest`) fails the build on any
+  `com.fasterxml.jackson.databind` / `.core` import (the shared
+  `com.fasterxml.jackson.annotation` namespace stays legal).
+- **`tmf630-toolkit-mongo-split-collection` no longer declares
+  `com.fasterxml.jackson.core:jackson-databind`.** The dependency was
+  compile-scope but entirely unused by the module's main sources; consumers
+  that (incorrectly) relied on it transitively must declare their own Jackson
+  dependency.
+
 ## [3.0.1] - 2026-08-05
 
 ### Fixed (regex / LIKE-family on polymorphic value fields — v3.0.1)
