@@ -120,6 +120,15 @@
       <artifactId>tmf630-toolkit-attribute-filtering-autoconfigure</artifactId>
       <scope>test</scope>
     </dependency>
+    <!-- The TMF paging/sort argument resolvers (offset/limit, +/- sort grammar, TmfSort) for the
+         sorted parity endpoints. Consumers get them through tmf630-toolkit-all; the filtering
+         autoconfigure declares them test-scoped only, so they are not transitive here. Without
+         them Spring Data's own resolver reads `sort=-priority` as a property named "-priority". -->
+    <dependency>
+      <groupId>org.opentmf.query</groupId>
+      <artifactId>tmf630-toolkit-paging-sorting-autoconfigure</artifactId>
+      <scope>test</scope>
+    </dependency>
     <dependency>
       <groupId>com.querydsl</groupId>
       <artifactId>querydsl-jpa</artifactId>

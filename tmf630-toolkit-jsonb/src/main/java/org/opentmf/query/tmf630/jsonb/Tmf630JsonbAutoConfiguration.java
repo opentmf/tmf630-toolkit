@@ -10,6 +10,7 @@ import org.opentmf.query.tmf630.filtering.FieldAllowlistProvider;
 import org.opentmf.query.tmf630.filtering.OperatorRegistry;
 import org.opentmf.query.tmf630.filtering.ParamKeyParser;
 import org.opentmf.query.tmf630.filtering.Tmf630FilterParser;
+import org.opentmf.query.tmf630.filtering.Tmf630FilterRootLocator;
 import org.opentmf.query.tmf630.filtering.config.Tmf630FilterSettings;
 import org.opentmf.query.tmf630.filtering.predicate.FieldPathResolver;
 import org.opentmf.query.tmf630.filtering.predicate.ValueConverter;
@@ -223,6 +224,13 @@ public class Tmf630JsonbAutoConfiguration {
     Tmf630JsonbClauseArgumentResolver tmf630JsonbClauseArgumentResolver(
         Tmf630JsonbClauseBuilder clauseBuilder) {
       return new Tmf630JsonbClauseArgumentResolver(clauseBuilder);
+    }
+
+    /** Lets the sort-key validator treat {@code @Tmf630JsonbFilter(root)} as a filter root. */
+    @Bean
+    @ConditionalOnMissingBean(name = "tmf630JsonbFilterRootLocator")
+    Tmf630FilterRootLocator tmf630JsonbFilterRootLocator() {
+      return new JsonbFilterRootLocator();
     }
 
     @Bean

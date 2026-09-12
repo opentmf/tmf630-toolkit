@@ -2,6 +2,58 @@
 
 All notable changes to `tmf630-toolkit` are documented in this file.
 
+## [3.2.0] - 2026-09-12
+
+### Added (`@Tmf630PassThrough` — per-handler query parameters the filter grammar leaves alone)
+
+- **A handler can name exact query parameters that are not filters.** The filter resolvers
+  read the whole query string, so a selector that is not an entity property (a mandatory
+  branch/tag `version`, a derived `state`) used to answer `400` under
+  `on-unknown-field: REJECT` even with a `@RequestParam` declared for it — the only ways out
+  were `IGNORE` service-wide (silencing every typo) or a path variable. Now:
+
+  ```java
+  @GetMapping("/use-cases")
+  @Tmf630PassThrough({"version"})
+  Page<UseCase> list(
+      @RequestParam(name = "version") String version,
+      @QuerydslPredicate(root = UseCase.class) Predicate predicate,
+      Pageable pageable);
+  ```
+
+- Honoured by both filter terminals (`@QuerydslPredicate`, `@Tmf630JsonbFilter`) and found on
+  an API interface method as well as on the implementing method.
+- Exact names only (`version.eq` is still a filter key); every other unknown name keeps its
+  `REJECT`/`IGNORE` behavior; nothing global, no property, the reserved-name set is unchanged.
+- API: `Tmf630FilterParser#parse(root, params, passThrough)` and
+  `Tmf630JsonbClauseBuilder#build(domainType, params, passThrough)` overloads; the existing
+  2-argument forms are unchanged.
+
+### Changed (unknown plain sort keys rejected against the handler's filter root)
+
+- **An unknown plain `sort=` key now answers `400` on handlers that bind a filter root** — a
+  `@QuerydslPredicate(root = X)` or `@Tmf630JsonbFilter(root = X)` parameter, including one
+  declared on an API interface. The key is checked against `X` with the filter grammar's field
+  resolver, after the nesting switch and `sort-allowlist`; the body is the existing TMF
+  sort/paging error (*"Unknown sort property: `<key>`"*). Before, the same request failed in
+  Spring Data on JPA (`PropertyReferenceException` → `500` through a service's catch-all).
+- **Mongo and JSONB endpoints that silently ignored an unknown plain sort key now answer
+  `400`** — a tightening in a minor release.
+- **A sort key must now name a declared field of the root**, resolved exactly like a filter
+  key: if you can filter on it, you can sort on it. A getter-only property that Spring Data
+  accepted is now rejected with `400`.
+- **Handlers without a filter root are unchanged.** No root is known there, so their sort
+  keys are not checked: an unknown key still fails in Spring Data on JPA and is still ignored
+  by Mongo and the JSONB executor. 3.2.0 is not "unknown sort key → `400` everywhere".
+- Correlated sort terms (`field[key=value].leaf`, JsonPath) and the correlated executors are
+  untouched.
+- Extension point: the new `TmfSortKeyValidator` SPI (paging-sorting-core), contributed as a
+  bean by the attribute-filtering autoconfiguration (`FilterRootSortKeyValidator`); declare a
+  `TmfSortKeyValidator` bean of your own (e.g. `TmfSortKeyValidator.NONE`) to opt out. Filter
+  bindings name their root through `Tmf630FilterRootLocator` beans. The sort/pageable
+  resolvers gained constructors taking the validator; their existing constructors keep
+  accepting every key.
+
 ## [3.1.1] - 2026-08-10
 
 ### Fixed (configured paging limits ignored on the plain-`Pageable` fallback path)

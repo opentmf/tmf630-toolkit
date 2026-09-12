@@ -8,6 +8,7 @@ import org.opentmf.query.tmf630.filtering.config.Tmf630FilterSettings;
 import org.opentmf.query.tmf630.filtering.predicate.FieldPathResolver;
 import org.opentmf.query.tmf630.filtering.predicate.PredicateFactory;
 import org.opentmf.query.tmf630.filtering.predicate.ValueConverter;
+import org.opentmf.query.tmf630.paging.TmfSortKeyValidator;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
@@ -117,6 +118,25 @@ public class Tmf630AttributeFilteringAutoConfiguration {
         valueConverter,
         predicateFactory,
         jsonPathFilterPredicateBuilder);
+  }
+
+  @Bean
+  @ConditionalOnMissingBean(name = "tmf630QuerydslPredicateRootLocator")
+  public Tmf630FilterRootLocator tmf630QuerydslPredicateRootLocator() {
+    return new QuerydslPredicateRootLocator();
+  }
+
+  /**
+   * Validates plain sort keys against the handler's filter root ({@link
+   * FilterRootSortKeyValidator}); the paging autoconfiguration hands it to every sort-parsing
+   * resolver. Every {@link Tmf630FilterRootLocator} bean takes part. Declare a {@code
+   * TmfSortKeyValidator} bean of your own (e.g. {@code TmfSortKeyValidator.NONE}) to opt out.
+   */
+  @Bean
+  @ConditionalOnMissingBean
+  public TmfSortKeyValidator tmf630SortKeyValidator(
+      FieldPathResolver pathResolver, ObjectProvider<Tmf630FilterRootLocator> rootLocators) {
+    return new FilterRootSortKeyValidator(pathResolver, rootLocators.orderedStream().toList());
   }
 
   @Bean

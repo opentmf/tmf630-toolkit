@@ -23,9 +23,16 @@ public class TmfPageableHandlerMethodArgumentResolver extends PageableHandlerMet
 
   private final Tmf630PagingSettings settings;
   private final TmfSortParser sortParser;
+  private final TmfSortKeyValidator sortKeyValidator;
 
   public TmfPageableHandlerMethodArgumentResolver(Tmf630PagingSettings settings) {
+    this(settings, TmfSortKeyValidator.NONE);
+  }
+
+  public TmfPageableHandlerMethodArgumentResolver(
+      Tmf630PagingSettings settings, TmfSortKeyValidator sortKeyValidator) {
     this.settings = settings;
+    this.sortKeyValidator = sortKeyValidator;
     // Propagate the toolkit settings into the Spring Data parent, which owns the
     // non-TMF path (no offset/limit params). Without these, the no-params fallback is
     // Spring's hard-coded PageRequest.of(0, 20) — not the configured default-limit —
@@ -71,6 +78,8 @@ public class TmfPageableHandlerMethodArgumentResolver extends PageableHandlerMet
     } else {
       parsedSort = sortParser.parse(sortParams);
     }
+
+    sortKeyValidator.validate(parameter, parsedSort);
 
     if (!isTmfMode(offsetRaw, limitRaw)) {
       Pageable fallback = super.resolveArgument(parameter, mavContainer, webRequest, binderFactory);

@@ -3,10 +3,14 @@ package org.opentmf.query.tmf630.config;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import org.junit.jupiter.api.Test;
 import org.opentmf.query.tmf630.exception.RequestedRangeNotSatisfiableException;
+import org.opentmf.query.tmf630.exception.TmfPagingException;
+import org.opentmf.query.tmf630.paging.TmfSortKeyValidator;
+import org.springframework.context.annotation.Bean;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -82,6 +86,18 @@ class Tmf630PagingAutoConfigurationIT {
   }
 
   @Test
+  void contributedSortKeyValidatorReachesThePageableAndSortResolvers() throws Exception {
+    mockMvc
+        .perform(get("/page").param("sort", "-nosuch"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.reason").value("Invalid sort or paging parameter."))
+        .andExpect(jsonPath("$.message").value("Unknown sort property: nosuch"));
+    mockMvc
+        .perform(get("/sort-only").param("sort", "nosuch"))
+        .andExpect(status().isBadRequest());
+  }
+
+  @Test
   void respectsEnabledPropertyCondition() {
     new WebApplicationContextRunner()
         .withConfiguration(
@@ -101,7 +117,18 @@ class Tmf630PagingAutoConfigurationIT {
 
   @SpringBootApplication
   @Import(TestController.class)
-  static class TestApp {}
+  static class TestApp {
+
+    /** Stands in for the attribute-filtering module's validator: pins the SPI wiring only. */
+    @Bean
+    TmfSortKeyValidator rejectingSortKeyValidator() {
+      return (parameter, keys) -> {
+        if (keys.contains("nosuch")) {
+          throw new TmfPagingException("Unknown sort property: nosuch");
+        }
+      };
+    }
+  }
 
   @RestController
   static class TestController {

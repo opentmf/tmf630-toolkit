@@ -23,9 +23,16 @@ public class TmfRichPageableHandlerMethodArgumentResolver
 
   private final Tmf630PagingSettings settings;
   private final TmfSortParser sortParser;
+  private final TmfSortKeyValidator sortKeyValidator;
 
   public TmfRichPageableHandlerMethodArgumentResolver(Tmf630PagingSettings settings) {
+    this(settings, TmfSortKeyValidator.NONE);
+  }
+
+  public TmfRichPageableHandlerMethodArgumentResolver(
+      Tmf630PagingSettings settings, TmfSortKeyValidator sortKeyValidator) {
     this.settings = settings;
+    this.sortKeyValidator = sortKeyValidator;
     this.sortParser =
         new TmfSortParser(
             settings.sortAllowlist(),
@@ -51,6 +58,7 @@ public class TmfRichPageableHandlerMethodArgumentResolver
     List<String> sortParams = sortArray == null ? List.of() : List.of(sortArray);
 
     TmfSort tmfSort = sortParser.parseRich(sortParams);
+    sortKeyValidator.validate(parameter, tmfSort);
     Sort plainSort =
         tmfSort.requiresAggregation()
             ? Sort.unsorted()
