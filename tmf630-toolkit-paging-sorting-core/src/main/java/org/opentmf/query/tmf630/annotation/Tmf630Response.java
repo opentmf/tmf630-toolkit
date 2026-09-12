@@ -24,7 +24,7 @@ import java.lang.annotation.Target;
  *
  * <p>May be placed at the type level to apply to every handler method in the controller.
  *
- * <h3>Controlling expansion depth</h3>
+ * <h2>Controlling expansion depth</h2>
  * <p>The {@link #depth()} attribute controls how deep nested objects are auto-expanded when a
  * {@code fields=} query parameter names a complex field (e.g. {@code fields=address} expands
  * {@code Address} into its sub-fields up to the given depth). When not set (or explicitly set to

@@ -133,7 +133,7 @@ public class MongoSplitAwareFilterTranslator {
    * <p>Emits at most:
    *
    * <pre>
-   * [ {$match: <parent-only criteria>},           // if parent-only clauses exist
+   * [ {$match: &lt;parent-only criteria&gt;},     // if parent-only clauses exist
    *   {$lookup: {...}}, {$match: {__M__: {$ne: []}}}, {$project: {__M__: 0}},
    *   ...one $lookup/$match/$project trio per split clause... ]
    * </pre>
