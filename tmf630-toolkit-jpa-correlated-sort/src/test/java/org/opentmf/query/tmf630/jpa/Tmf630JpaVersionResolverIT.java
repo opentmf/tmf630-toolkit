@@ -7,6 +7,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.opentmf.query.tmf630.jpa.it.VersionedRevisionSpec;
 import org.opentmf.query.tmf630.jpa.it.VersionedSpec;
 import org.opentmf.query.tmf630.versioning.TmfVersionedId;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -43,7 +44,26 @@ class Tmf630JpaVersionResolverIT {
     entityManager.persist(row("row2", "VirtualStorage", "2.0", "v2"));
     entityManager.persist(row("row3", "VirtualStorage", "3.0", "v3"));
     entityManager.persist(row("row4", "OtherThing", "1.0", "other-v1"));
+    entityManager.persist(revision("rev1", "K1", 1, "r1"));
+    entityManager.persist(revision("rev2", "K1", 2, "r2"));
+    entityManager.persist(revision("rev3", "K1", 3, "r3"));
+    entityManager.persist(revision("rev4", "K2", 1, "k2-r1"));
     entityManager.flush();
+  }
+
+  @Test
+  @DisplayName("custom field names + Integer version: String version binds to the typed field")
+  void customFieldNamesAndIntegerVersion() {
+    assertThat(resolver.resolveSpecific(VersionedRevisionSpec.class, "K1", "2"))
+        .map(VersionedRevisionSpec::getName)
+        .contains("r2");
+    assertThat(resolver.resolveSpecific(VersionedRevisionSpec.class, "K1", "9")).isEmpty();
+    assertThat(resolver.resolveLatest(VersionedRevisionSpec.class, "K1"))
+        .map(VersionedRevisionSpec::getName)
+        .contains("r3");
+    assertThat(resolver.resolveLatest(VersionedRevisionSpec.class, "K2"))
+        .map(VersionedRevisionSpec::getName)
+        .contains("k2-r1");
   }
 
   @Test
@@ -106,6 +126,16 @@ class Tmf630JpaVersionResolverIT {
     spec.setRowId(rowId);
     spec.setId(id);
     spec.setVersion(version);
+    spec.setName(name);
+    return spec;
+  }
+
+  private static VersionedRevisionSpec revision(
+      String rowId, String logicalKey, int revision, String name) {
+    VersionedRevisionSpec spec = new VersionedRevisionSpec();
+    spec.setRowId(rowId);
+    spec.setLogicalKey(logicalKey);
+    spec.setRevision(revision);
     spec.setName(name);
     return spec;
   }

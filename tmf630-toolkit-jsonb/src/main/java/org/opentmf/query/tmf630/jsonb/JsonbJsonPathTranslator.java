@@ -1,7 +1,6 @@
 package org.opentmf.query.tmf630.jsonb;
 
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.Optional;
 import org.opentmf.query.tmf630.filtering.TmfFilteringException;
 
 /**
@@ -34,22 +33,15 @@ import org.opentmf.query.tmf630.filtering.TmfFilteringException;
  * {@code =~} regex (Postgres has {@code like_regex} but not first-class here yet),
  * {@code [*]} bare wildcard as top-level projection (implicit via [*] in array
  * correlation but not standalone).
+ *
+ * <p>The wrapper and the {@code length()} form are recognised by single-pass scans rather
+ * than regular expressions: the former patterns backtracked quadratically on runs of
+ * whitespace. The accepted language is unchanged — whitespace means the ASCII set
+ * {@code [ \t\n\x0B\f\r]} (regex {@code \s}), exactly as before.
  */
 public class JsonbJsonPathTranslator {
 
-  private static final Pattern OUTER_WRAPPER =
-      Pattern.compile("^\\s*(?:\\$\\s*\\.?)?\\s*\\[\\s*\\?\\s*\\((.*)\\)\\s*]\\s*$", Pattern.DOTALL);
-
-  /**
-   * TMF630 Part 6 {@code length()} on a collection field:
-   * {@code $[?(@.arr.length() == N)]} — translated separately via
-   * {@link #translateLengthEquality} because it does not fit the {@code jsonb_path_exists}
-   * shape (needs {@code jsonb_array_length(payload->'arr') = N}).
-   */
-  private static final Pattern LENGTH_EQUALITY =
-      Pattern.compile(
-          "^\\s*(?:\\$\\s*\\.?)?\\s*\\[\\s*\\?\\s*\\(\\s*@\\.([A-Za-z_][A-Za-z0-9_.]*)\\.length\\(\\)\\s*==\\s*(-?\\d+)\\s*\\)\\s*]\\s*$",
-          Pattern.DOTALL);
+  private static final String LENGTH_SUFFIX = ".length";
 
   private final JsonbPathExtractor extractor;
   private final String payloadColumn;
@@ -79,16 +71,22 @@ public class JsonbJsonPathTranslator {
     if (filterExpression == null || filterExpression.isBlank()) {
       throw new TmfFilteringException("filter= expression must not be blank");
     }
-    Matcher lengthMatcher = LENGTH_EQUALITY.matcher(filterExpression);
-    if (lengthMatcher.matches()) {
-      return translateLengthEquality(lengthMatcher.group(1), Integer.parseInt(lengthMatcher.group(2)));
+    String body =
+        filterBody(filterExpression)
+            .orElseThrow(
+                () ->
+                    new TmfFilteringException(
+                        "filter= expression must be wrapped in $[?(...)]: " + filterExpression));
+    Optional<LengthEquality> lengthEquality = lengthEquality(body);
+    if (lengthEquality.isPresent()) {
+      return translateLengthEquality(
+          lengthEquality.get().field(), Integer.parseInt(lengthEquality.get().literal()));
     }
-    return translateAsJsonbPathExists(filterExpression);
+    return translateAsJsonbPathExists(body);
   }
 
-  private JsonbClause translateAsJsonbPathExists(String filterExpression) {
-    String inner = unwrap(filterExpression);
-    String jsonPath = "$ ? (" + translatePredicate(inner) + ")";
+  private JsonbClause translateAsJsonbPathExists(String body) {
+    String jsonPath = "$ ? (" + translatePredicate(body) + ")";
     // JDBC parameter for the jsonpath text — Postgres will cast the text to jsonpath.
     return JsonbClause.of(
         "jsonb_path_exists(" + payloadColumn + ", ?::jsonpath)", jsonPath);
@@ -103,13 +101,132 @@ public class JsonbJsonPathTranslator {
         "jsonb_array_length(" + extractor.extractAsJsonb(dottedField) + ") = ?", expectedLength);
   }
 
-  private String unwrap(String expression) {
-    Matcher matcher = OUTER_WRAPPER.matcher(expression);
-    if (!matcher.matches()) {
-      throw new TmfFilteringException(
-          "filter= expression must be wrapped in $[?(...)]: " + expression);
+  /**
+   * The predicate body of a {@code $[?(<body>)]} wrapper, or empty when the expression is not
+   * wrapped. Grammar: whitespace, optionally {@code $} (then whitespace, optionally {@code .}),
+   * whitespace, {@code [}, whitespace, {@code ?}, whitespace, {@code (}, the body, {@code )},
+   * whitespace, {@code ]}, whitespace. The body runs from just past that {@code (} to the LAST
+   * {@code )} followed only by whitespace, {@code ]} and whitespace.
+   */
+  private static Optional<String> filterBody(String s) {
+    int i = skipSpaces(s, 0);
+    if (i < s.length() && s.charAt(i) == '$') {
+      i = skipSpaces(s, i + 1);
+      if (i < s.length() && s.charAt(i) == '.') {
+        i = skipSpaces(s, i + 1);
+      }
     }
-    return matcher.group(1);
+    i = consume(s, i, '[');
+    if (i >= 0) {
+      i = consume(s, skipSpaces(s, i), '?');
+    }
+    if (i >= 0) {
+      i = consume(s, skipSpaces(s, i), '(');
+    }
+    if (i < 0) {
+      return Optional.empty();
+    }
+    int close = closingParen(s, i);
+    return close < 0 ? Optional.empty() : Optional.of(s.substring(i, close));
+  }
+
+  /**
+   * Index of the {@code )} that starts the trailing {@code )}, whitespace, {@code ]},
+   * whitespace suffix, provided it lies at or after {@code bodyStart}; otherwise -1.
+   */
+  private static int closingParen(String s, int bodyStart) {
+    int end = skipSpacesBackward(s, s.length(), bodyStart);
+    if (end <= bodyStart || s.charAt(end - 1) != ']') {
+      return -1;
+    }
+    end = skipSpacesBackward(s, end - 1, bodyStart);
+    if (end <= bodyStart || s.charAt(end - 1) != ')') {
+      return -1;
+    }
+    return end - 1;
+  }
+
+  /**
+   * The {@code @.<field>.length() == <integer>} form of a wrapper body, with optional
+   * whitespace around the tokens. {@code <field>} is {@code [A-Za-z_][A-Za-z0-9_.]*} and may
+   * itself contain {@code .length} segments — the LAST {@code .length()} is the call.
+   */
+  private static Optional<LengthEquality> lengthEquality(String body) {
+    int start = skipSpaces(body, 0);
+    if (!body.startsWith("@.", start)) {
+      return Optional.empty();
+    }
+    int fieldStart = start + 2;
+    int runEnd = fieldStart;
+    while (runEnd < body.length() && isFieldChar(body.charAt(runEnd))) {
+      runEnd++;
+    }
+    String run = body.substring(fieldStart, runEnd);
+    if (!run.endsWith(LENGTH_SUFFIX) || !body.startsWith("()", runEnd)) {
+      return Optional.empty();
+    }
+    String field = run.substring(0, run.length() - LENGTH_SUFFIX.length());
+    if (field.isEmpty() || !isFieldStart(field.charAt(0))) {
+      return Optional.empty();
+    }
+    int operator = skipSpaces(body, runEnd + 2);
+    if (!body.startsWith("==", operator)) {
+      return Optional.empty();
+    }
+    int literalStart = skipSpaces(body, operator + 2);
+    int literalEnd = integerLiteralEnd(body, literalStart);
+    if (literalEnd < 0 || skipSpaces(body, literalEnd) != body.length()) {
+      return Optional.empty();
+    }
+    return Optional.of(new LengthEquality(field, body.substring(literalStart, literalEnd)));
+  }
+
+  /** End of an {@code -?[0-9]+} literal starting at {@code start}, or -1 when there is none. */
+  private static int integerLiteralEnd(String s, int start) {
+    int i = start;
+    if (i < s.length() && s.charAt(i) == '-') {
+      i++;
+    }
+    int digitsStart = i;
+    while (i < s.length() && s.charAt(i) >= '0' && s.charAt(i) <= '9') {
+      i++;
+    }
+    return i == digitsStart ? -1 : i;
+  }
+
+  private record LengthEquality(String field, String literal) {}
+
+  private static int consume(String s, int i, char expected) {
+    return i < s.length() && s.charAt(i) == expected ? i + 1 : -1;
+  }
+
+  private static int skipSpaces(String s, int from) {
+    int i = from;
+    while (i < s.length() && isSpace(s.charAt(i))) {
+      i++;
+    }
+    return i;
+  }
+
+  private static int skipSpacesBackward(String s, int end, int floor) {
+    int i = end;
+    while (i > floor && isSpace(s.charAt(i - 1))) {
+      i--;
+    }
+    return i;
+  }
+
+  /** The regex {@code \s} class: {@code [ \t\n\x0B\f\r]} — ASCII only, as before. */
+  private static boolean isSpace(char c) {
+    return c == ' ' || c == '\t' || c == '\n' || c == 0x0B || c == '\f' || c == '\r';
+  }
+
+  private static boolean isFieldStart(char c) {
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_';
+  }
+
+  private static boolean isFieldChar(char c) {
+    return isFieldStart(c) || (c >= '0' && c <= '9') || c == '.';
   }
 
   /**

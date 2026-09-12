@@ -2,6 +2,7 @@ package org.opentmf.query.tmf630.jpa;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 import org.opentmf.query.tmf630.exception.TmfPagingException;
 
 /**
@@ -34,6 +35,9 @@ import org.opentmf.query.tmf630.exception.TmfPagingException;
  * that belongs on the JSONB backend.
  */
 final class SimpleRichSortTermParser {
+
+  /** A positional index {@code [N]} anywhere in the term — a plain search, no backtracking. */
+  private static final Pattern POSITIONAL_INDEX = Pattern.compile("\\[\\d+]");
 
   private SimpleRichSortTermParser() {}
 
@@ -163,7 +167,7 @@ final class SimpleRichSortTermParser {
               + " intended reduction, or a JSONB-backed entity. Term: "
               + expression);
     }
-    if (expression.matches(".*\\[\\d+].*")) {
+    if (POSITIONAL_INDEX.matcher(expression).find()) {
       throw new TmfPagingException(
           "Positional index '[N]' in sort is not portable across JPA dialects and is not"
               + " supported. Use a @OrderColumn-based association plus repository-level Criteria"

@@ -117,6 +117,14 @@ class SimpleRichSortTermParserTest {
   }
 
   @Test
+  @DisplayName("rejects positional [N] index even when the term contains a line break")
+  void rejectsPositionalIndexAcrossALineBreak() {
+    assertThatThrownBy(() -> SimpleRichSortTermParser.parse("characteristics[0]\n.value"))
+        .isInstanceOf(TmfPagingException.class)
+        .hasMessageContaining("Positional index");
+  }
+
+  @Test
   @DisplayName("rejects num()/str()/date() coercions")
   void rejectsCoercions() {
     assertThatThrownBy(() -> SimpleRichSortTermParser.parse("num(characteristics[name=price].value)"))

@@ -161,6 +161,14 @@ class JsonbCorrelatedSortTranslatorTest {
   }
 
   @Test
+  @DisplayName("positional [N] rejected even when the term contains a line break")
+  void rejectsPositionalAcrossALineBreak() {
+    assertThatThrownBy(() -> translator.translate("arr[0]\n.leaf"))
+        .isInstanceOf(TmfPagingException.class)
+        .hasMessageContaining("Positional");
+  }
+
+  @Test
   @DisplayName("malformed term rejected with actionable message")
   void rejectsMalformed() {
     assertThatThrownBy(() -> translator.translate("plainName"))

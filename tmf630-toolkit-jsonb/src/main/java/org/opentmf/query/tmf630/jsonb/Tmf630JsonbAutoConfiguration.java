@@ -31,13 +31,10 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * Phase (b.1) skeleton — registers the {@link JsonbEntityRegistry} bean and populates it
- * by scanning the JPA {@link EntityManagerFactory}'s metamodel for {@link Tmf630JsonbBacked}
- * annotations. Later sub-milestones (b.2 - b.7) hang the {@code JsonbPredicateFactory},
- * {@code JsonbFilterFragment}, and correlated-sort machinery off this registry.
- */
-/**
- * Auto-config for the JSONB backend. Deliberately framework-neutral — depends only on
+ * Auto-config for the JSONB backend: registers the {@link JsonbEntityRegistry}, populated by
+ * scanning the JPA {@link EntityManagerFactory}'s metamodel for {@link Tmf630JsonbBacked}
+ * entities, and hangs the predicate, split-collection and correlated-sort machinery off it.
+ * Deliberately framework-neutral — depends only on
  * the JPA specification ({@code jakarta.persistence.EntityManager} /
  * {@code EntityManagerFactory} / metamodel) and never on any specific JPA
  * implementation. Zero {@code org.hibernate.*} or provider-specific imports.

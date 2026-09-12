@@ -2,7 +2,9 @@ package org.opentmf.query.tmf630.jsonb;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
+import java.time.Duration;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.opentmf.query.tmf630.filtering.TmfFilteringException;
@@ -147,6 +149,40 @@ class JsonbJsonPathTranslatorTest {
             "$[?(@.a[?(@.b[?(@.c == 'X')])])]");
     assertThat(c.params())
         .containsExactly("$ ? (@.a[*] ? (@.b[*] ? (@.c == \"X\")))");
+  }
+
+  @Test
+  @DisplayName("wrapper tolerates whitespace around every token, as before")
+  void wrapperWhitespaceTolerance() {
+    JsonbClause c = translator.translate("  $ . [ ? ( @.status == 'Pending' ) ]  ");
+    assertThat(c.params()).containsExactly("$ ? ( @.status == \"Pending\" )");
+  }
+
+  @Test
+  @DisplayName("length() form tolerates whitespace and a '.length' segment inside the field path")
+  void lengthWithWhitespaceAndLengthSegment() {
+    JsonbClause c = translator.translate("$[?( @.a.length.b.length() == 2 )]");
+    assertThat(c.sql()).isEqualTo("jsonb_array_length(payload#>'{a,length,b}') = ?");
+    assertThat(c.params()).containsExactly(2);
+  }
+
+  @Test
+  @DisplayName("only ASCII whitespace surrounds the wrapper: a trailing U+2028 is rejected, as before")
+  void nonAsciiLineSeparatorIsNotWrapperWhitespace() {
+    assertThatThrownBy(() -> translator.translate("$[?(@.status == 'x')]\u2028"))
+        .isInstanceOf(TmfFilteringException.class)
+        .hasMessageContaining("must be wrapped");
+  }
+
+  @Test
+  @DisplayName("wrapper parsing stays linear on pathological whitespace (no regex backtracking)")
+  void wrapperParsingIsLinear() {
+    String pathological = "$" + " ".repeat(100_000) + "x";
+    assertTimeoutPreemptively(
+        Duration.ofSeconds(2),
+        () ->
+            assertThatThrownBy(() -> translator.translate(pathological))
+                .isInstanceOf(TmfFilteringException.class));
   }
 
   @Test

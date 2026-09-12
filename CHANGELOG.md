@@ -2,6 +2,21 @@
 
 All notable changes to `tmf630-toolkit` are documented in this file.
 
+## [3.2.1] - 2026-09-12
+
+### Fixed (regular-expression backtracking in filter / sort parsing)
+
+- **JSONB `filter=` wrapper recognition no longer backtracks.** The `$[?(...)]` wrapper and
+  the `length() == N` form were recognised by regular expressions whose adjacent optional
+  whitespace made a failed match quadratic in the length of a whitespace run, so a crafted
+  `filter=` value could burn CPU on the request thread (bounded in practice by the
+  container's URL-length limit). They are now single-pass scans; the accepted grammar is
+  unchanged.
+- **A positional `[N]` in a correlated sort term is rejected as such even when the term
+  contains a line break** (JPA and JSONB correlated sort). The former check could not see
+  past a line break, so those terms fell through to a generic "malformed" rejection. The
+  status stays `400`; the message now names the actual problem.
+
 ## [3.2.0] - 2026-09-12
 
 ### Added (`@Tmf630PassThrough` — per-handler query parameters the filter grammar leaves alone)
