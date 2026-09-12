@@ -1,7 +1,10 @@
 package org.opentmf.query.tmf630.jsonb;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.util.List;
@@ -169,6 +172,9 @@ class Tmf630JsonbUrlBindingParityIT {
     return Stream.of(
         Arguments.of("unknown field REJECT", Map.of("bogusField", List.of("1"))),
         Arguments.of(
+            "pass-through name on a handler WITHOUT @Tmf630PassThrough is an unknown field",
+            Map.of("version", List.of("v7"))),
+        Arguments.of(
             "invalid filter.combineWithAttributes",
             Map.of(
                 "status", List.of("NEW"),
@@ -198,6 +204,41 @@ class Tmf630JsonbUrlBindingParityIT {
     MvcResult jsonb = perform("/parity/jsonb", params);
     assertThat(jsonb.getResponse().getStatus()).isEqualTo(200);
     assertThat(jsonb.getResponse().getContentAsString()).isEqualTo("[\"P1\",\"P4\"]");
+  }
+
+  static Stream<String> scopedTerminals() {
+    return Stream.of("/parity/scoped/jpa", "/parity/scoped/jsonb");
+  }
+
+  @ParameterizedTest(name = "{0}")
+  @MethodSource("scopedTerminals")
+  @DisplayName("@Tmf630PassThrough on an API interface: the name reaches the handler, not the grammar")
+  void passThroughNameReachesHandlerNotFilterGrammar(String path) throws Exception {
+    mockMvc
+        .perform(get(path).param("version", "v7").param("status", "NEW"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.version").value("v7"))
+        .andExpect(jsonPath("$.ids", contains("P1", "P4")));
+  }
+
+  @ParameterizedTest(name = "{0}")
+  @MethodSource("scopedTerminals")
+  @DisplayName("@Tmf630PassThrough loosens nothing else: an unknown name beside it still 400s")
+  void unknownNameBesidePassThroughStillRejected(String path) throws Exception {
+    mockMvc
+        .perform(get(path).param("version", "v7").param("bogusField", "1"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.message", containsString("bogusField")));
+  }
+
+  @ParameterizedTest(name = "{0}")
+  @MethodSource("scopedTerminals")
+  @DisplayName("@Tmf630PassThrough matches the exact name only: version.eq is still a filter key")
+  void passThroughIsExactNameOnly(String path) throws Exception {
+    mockMvc
+        .perform(get(path).param("version", "v7").param("version.eq", "v7"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.message", containsString("version")));
   }
 
   private MvcResult perform(String path, Map<String, List<String>> params) throws Exception {
