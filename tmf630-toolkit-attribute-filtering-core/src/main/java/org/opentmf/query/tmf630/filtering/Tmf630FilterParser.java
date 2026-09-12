@@ -51,24 +51,40 @@ public class Tmf630FilterParser {
   }
 
   public Tmf630FilterExpression parse(Class<?> rootEntity, Map<String, String[]> parameterMap) {
+    return parse(rootEntity, parameterMap, Set.of());
+  }
+
+  /**
+   * Parses the filter surface, leaving the exact parameter names in {@code passThrough} to the
+   * handler's own bindings ({@link Tmf630PassThrough}): they are never read as attribute filters
+   * — nor as {@code filter} / {@code filter.combineWithAttributes} when a handler names those.
+   * Every other name keeps the configured unknown-field / unknown-operator behavior.
+   */
+  public Tmf630FilterExpression parse(
+      Class<?> rootEntity, Map<String, String[]> parameterMap, Set<String> passThrough) {
     Set<String> allowed = allowlistProvider.allowedFields(rootEntity);
     List<Tmf630AttributeClause> clauses = new ArrayList<>();
     ClauseCounter counter = new ClauseCounter(settings.limits().maxClauses());
     for (Map.Entry<String, String[]> entry : parameterMap.entrySet()) {
-      Tmf630AttributeClause clause = parseAttributeEntry(entry, allowed, counter);
+      Tmf630AttributeClause clause = parseAttributeEntry(entry, allowed, counter, passThrough);
       if (clause != null) {
         clauses.add(clause);
       }
     }
     return new Tmf630FilterExpression(
         Collections.unmodifiableList(clauses),
-        extractJsonPathFilter(parameterMap),
-        resolveFilterCombineMode(parameterMap));
+        passThrough.contains(FILTER_PARAM) ? null : extractJsonPathFilter(parameterMap),
+        passThrough.contains(FILTER_COMBINE_PARAM)
+            ? CombineMode.AND
+            : resolveFilterCombineMode(parameterMap));
   }
 
   private Tmf630AttributeClause parseAttributeEntry(
-      Map.Entry<String, String[]> entry, Set<String> allowed, ClauseCounter counter) {
-    if (isReservedKey(entry.getKey())) {
+      Map.Entry<String, String[]> entry,
+      Set<String> allowed,
+      ClauseCounter counter,
+      Set<String> passThrough) {
+    if (isReservedKey(entry.getKey(), passThrough)) {
       return null;
     }
     NormalizedParam normalized = normalize(entry.getKey(), entry.getValue());
@@ -79,10 +95,11 @@ public class Tmf630FilterParser {
     return clauseFor(normalized.key(), normalized.values(), parsed, counter);
   }
 
-  private boolean isReservedKey(String rawKey) {
+  private boolean isReservedKey(String rawKey, Set<String> passThrough) {
     return RESERVED_PARAMS.contains(rawKey)
         || FILTER_PARAM.equals(rawKey)
-        || FILTER_COMBINE_PARAM.equals(rawKey);
+        || FILTER_COMBINE_PARAM.equals(rawKey)
+        || passThrough.contains(rawKey);
   }
 
   private NormalizedParam normalize(String rawKey, String[] rawValues) {

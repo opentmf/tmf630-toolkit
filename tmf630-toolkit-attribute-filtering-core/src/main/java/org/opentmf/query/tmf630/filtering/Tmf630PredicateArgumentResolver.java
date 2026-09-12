@@ -6,6 +6,7 @@ import com.querydsl.core.types.dsl.PathBuilder;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.opentmf.query.tmf630.filtering.config.CombineMode;
 import org.opentmf.query.tmf630.filtering.config.Tmf630FilterSettings;
 import org.opentmf.query.tmf630.filtering.config.UnknownParamBehavior;
@@ -71,11 +72,13 @@ public class Tmf630PredicateArgumentResolver implements HandlerMethodArgumentRes
       throw new TmfFilteringException("Predicate parameter requires @QuerydslPredicate(root=...)");
     }
 
-    return buildPredicate(rootEntity, webRequest.getParameterMap());
+    return buildPredicate(
+        rootEntity, webRequest.getParameterMap(), Tmf630PassThroughNames.of(parameter));
   }
 
-  private Predicate buildPredicate(Class<?> rootEntity, Map<String, String[]> parameterMap) {
-    Tmf630FilterExpression expression = filterParser.parse(rootEntity, parameterMap);
+  private Predicate buildPredicate(
+      Class<?> rootEntity, Map<String, String[]> parameterMap, Set<String> passThrough) {
+    Tmf630FilterExpression expression = filterParser.parse(rootEntity, parameterMap, passThrough);
     PathBuilder<?> rootPath = pathResolver.createRootPath(rootEntity);
     boolean allowNestedPaths = settings.allowNestedPathsFor(rootEntity);
 

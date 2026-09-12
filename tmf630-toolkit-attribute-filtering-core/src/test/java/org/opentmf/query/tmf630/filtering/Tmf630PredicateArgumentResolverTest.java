@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.querydsl.core.BooleanBuilder;
+import com.querydsl.core.types.Predicate;
 import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Set;
@@ -858,6 +860,98 @@ class Tmf630PredicateArgumentResolverTest {
     assertFalse(((com.querydsl.core.BooleanBuilder) predicate).hasValue());
   }
 
+  @Test
+  void passThroughNameIsLeftToTheHandlerAndNeverParsedAsFilter() throws Exception {
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setParameter("version", "v1");
+    request.setParameter("name.eq", "abc");
+
+    Object predicate =
+        newResolver(AllowlistMode.ALLOW_ALL)
+            .resolveArgument(
+                passThroughParameter("scopedSearch"), null, new ServletWebRequest(request), null);
+
+    assertTrue(predicate.toString().contains("name"));
+    assertFalse(predicate.toString().contains("version"));
+  }
+
+  @Test
+  void unknownNameBesideAPassThroughNameIsStillRejected() throws Exception {
+    Tmf630PredicateArgumentResolver resolver = newResolver(AllowlistMode.ALLOW_ALL);
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setParameter("version", "v1");
+    request.setParameter("bogus.eq", "x");
+    MethodParameter parameter = passThroughParameter("scopedSearch");
+    ServletWebRequest webRequest = new ServletWebRequest(request);
+
+    TmfFilteringException ex =
+        assertThrows(
+            TmfFilteringException.class,
+            () -> resolver.resolveArgument(parameter, null, webRequest, null));
+    assertTrue(ex.getMessage().contains("bogus"));
+  }
+
+  @Test
+  void passThroughMatchesTheExactParameterNameOnly() throws Exception {
+    Tmf630PredicateArgumentResolver resolver = newResolver(AllowlistMode.ALLOW_ALL);
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setParameter("version.eq", "v1");
+    MethodParameter parameter = passThroughParameter("scopedSearch");
+    ServletWebRequest webRequest = new ServletWebRequest(request);
+
+    TmfFilteringException ex =
+        assertThrows(
+            TmfFilteringException.class,
+            () -> resolver.resolveArgument(parameter, null, webRequest, null));
+    assertTrue(ex.getMessage().contains("version"));
+  }
+
+  @Test
+  void withoutTheAnnotationThePassThroughNameIsStillParsedAsFilter() throws Exception {
+    Tmf630PredicateArgumentResolver resolver = newResolver(AllowlistMode.ALLOW_ALL);
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setParameter("version", "v1");
+    MethodParameter parameter = predicateParameter();
+    ServletWebRequest webRequest = new ServletWebRequest(request);
+
+    assertThrows(
+        TmfFilteringException.class,
+        () -> resolver.resolveArgument(parameter, null, webRequest, null));
+  }
+
+  @Test
+  void passThroughNameShadowsAnEntityFieldOnThatHandler() throws Exception {
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setParameter("name", "abc");
+
+    Object predicate =
+        newResolver(AllowlistMode.ALLOW_ALL)
+            .resolveArgument(
+                passThroughParameter("shadowingSearch"),
+                null,
+                new ServletWebRequest(request),
+                null);
+
+    assertFalse(((BooleanBuilder) predicate).hasValue());
+  }
+
+  @Test
+  void passedThroughFilterNamesAreNotReadAsJsonPathFilter() throws Exception {
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setParameter("filter", "not-a-jsonpath-expression");
+    request.setParameter("filter.combineWithAttributes", "BOGUS");
+
+    Object predicate =
+        newResolver(AllowlistMode.ALLOW_ALL)
+            .resolveArgument(
+                passThroughParameter("ownFilterSearch"),
+                null,
+                new ServletWebRequest(request),
+                null);
+
+    assertFalse(((BooleanBuilder) predicate).hasValue());
+  }
+
   private static String resolveToString(
       Tmf630PredicateArgumentResolver resolver, MockHttpServletRequest request) throws Exception {
     return resolver
@@ -952,6 +1046,31 @@ class Tmf630PredicateArgumentResolverTest {
   private static class StubController {
     @SuppressWarnings("unused")
     void search(@QuerydslPredicate(root = Entity.class) com.querydsl.core.types.Predicate predicate) { /* signature-only stub for MethodParameter reflection */ }
+  }
+
+  private static MethodParameter passThroughParameter(String methodName) throws Exception {
+    Method method = PassThroughStubController.class.getDeclaredMethod(methodName, Predicate.class);
+    return new MethodParameter(method, 0);
+  }
+
+  private static class PassThroughStubController {
+    @Tmf630PassThrough({"version"})
+    @SuppressWarnings("unused")
+    void scopedSearch(@QuerydslPredicate(root = Entity.class) Predicate predicate) {
+      // signature-only stub for MethodParameter reflection
+    }
+
+    @Tmf630PassThrough({"name"})
+    @SuppressWarnings("unused")
+    void shadowingSearch(@QuerydslPredicate(root = Entity.class) Predicate predicate) {
+      // signature-only stub for MethodParameter reflection
+    }
+
+    @Tmf630PassThrough({"filter", "filter.combineWithAttributes"})
+    @SuppressWarnings("unused")
+    void ownFilterSearch(@QuerydslPredicate(root = Entity.class) Predicate predicate) {
+      // signature-only stub for MethodParameter reflection
+    }
   }
 
   private static class InvalidStubController {

@@ -10,6 +10,9 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.opentmf.query.tmf630.config.Tmf630ExceptionHandlingAutoConfiguration;
+import org.opentmf.query.tmf630.config.Tmf630FieldSelectionAutoConfiguration;
+import org.opentmf.query.tmf630.config.Tmf630WebMvcConfigurer;
 import org.opentmf.query.tmf630.jsonb.it.SplitOrderDomain;
 import org.opentmf.query.tmf630.jsonb.it.SplitOrderItem;
 import org.opentmf.query.tmf630.jsonb.it.SplitOrderItemSubController;
@@ -241,7 +244,17 @@ class Tmf630JsonbSplitScaleIT {
     writeExecutor.saveWithSplits(order);
   }
 
-  @SpringBootApplication(scanBasePackageClasses = SplitOrderItemSubController.class)
+  // Pinned to the environment these assertions were written for: the plain Spring Data Page
+  // JSON of listChildren. The paging autoconfiguration is on this module's test classpath
+  // since 3.2.0 (for the sorted parity endpoints), and its @Tmf630Response advice would
+  // unwrap the Page into a plain array with a 206 — the production shape.
+  @SpringBootApplication(
+      scanBasePackageClasses = SplitOrderItemSubController.class,
+      exclude = {
+        Tmf630WebMvcConfigurer.class,
+        Tmf630ExceptionHandlingAutoConfiguration.class,
+        Tmf630FieldSelectionAutoConfiguration.class
+      })
   static class TestApp {
     @org.springframework.context.annotation.Bean
     ObjectMapper objectMapper() {

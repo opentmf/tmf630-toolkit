@@ -1,5 +1,6 @@
 package org.opentmf.query.tmf630.jsonb;
 
+import org.opentmf.query.tmf630.filtering.Tmf630PassThroughNames;
 import org.springframework.core.MethodParameter;
 import org.springframework.web.bind.support.WebDataBinderFactory;
 import org.springframework.web.context.request.NativeWebRequest;
@@ -37,6 +38,7 @@ public class Tmf630JsonbClauseArgumentResolver implements HandlerMethodArgumentR
       throw new IllegalStateException(
           "@Tmf630JsonbFilter annotation missing on parameter: " + parameter);
     }
-    return clauseBuilder.build(annotation.root(), webRequest.getParameterMap());
+    return clauseBuilder.build(
+        annotation.root(), webRequest.getParameterMap(), Tmf630PassThroughNames.of(parameter));
   }
 }

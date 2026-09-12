@@ -1,7 +1,12 @@
 package org.opentmf.query.tmf630.jsonb;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.util.List;
@@ -13,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.opentmf.query.tmf630.jsonb.it.parity.ParityController;
 import org.opentmf.query.tmf630.jsonb.it.parity.ParityDomain;
 import org.opentmf.query.tmf630.jsonb.it.parity.ParityEntity;
@@ -169,6 +175,9 @@ class Tmf630JsonbUrlBindingParityIT {
     return Stream.of(
         Arguments.of("unknown field REJECT", Map.of("bogusField", List.of("1"))),
         Arguments.of(
+            "pass-through name on a handler WITHOUT @Tmf630PassThrough is an unknown field",
+            Map.of("version", List.of("v7"))),
+        Arguments.of(
             "invalid filter.combineWithAttributes",
             Map.of(
                 "status", List.of("NEW"),
@@ -198,6 +207,121 @@ class Tmf630JsonbUrlBindingParityIT {
     MvcResult jsonb = perform("/parity/jsonb", params);
     assertThat(jsonb.getResponse().getStatus()).isEqualTo(200);
     assertThat(jsonb.getResponse().getContentAsString()).isEqualTo("[\"P1\",\"P4\"]");
+  }
+
+  static Stream<String> scopedTerminals() {
+    return Stream.of("/parity/scoped/jpa", "/parity/scoped/jsonb");
+  }
+
+  @ParameterizedTest(name = "{0}")
+  @MethodSource("scopedTerminals")
+  @DisplayName("@Tmf630PassThrough on an API interface: the name reaches the handler, not the grammar")
+  void passThroughNameReachesHandlerNotFilterGrammar(String path) throws Exception {
+    mockMvc
+        .perform(get(path).param("version", "v7").param("status", "NEW"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.version").value("v7"))
+        .andExpect(jsonPath("$.ids", contains("P1", "P4")));
+  }
+
+  @ParameterizedTest(name = "{0}")
+  @MethodSource("scopedTerminals")
+  @DisplayName("@Tmf630PassThrough loosens nothing else: an unknown name beside it still 400s")
+  void unknownNameBesidePassThroughStillRejected(String path) throws Exception {
+    mockMvc
+        .perform(get(path).param("version", "v7").param("bogusField", "1"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.message", containsString("bogusField")));
+  }
+
+  @ParameterizedTest(name = "{0}")
+  @MethodSource("scopedTerminals")
+  @DisplayName("@Tmf630PassThrough matches the exact name only: version.eq is still a filter key")
+  void passThroughIsExactNameOnly(String path) throws Exception {
+    mockMvc
+        .perform(get(path).param("version", "v7").param("version.eq", "v7"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.message", containsString("version")));
+  }
+
+  /**
+   * Handlers that bind a filter root beside the sort — plain (JPA through Spring Data's Querydsl
+   * helper, JSONB through the executor) and the API-interface form with a pass-through selector.
+   */
+  static Stream<String> rootedSortEndpoints() {
+    return Stream.of(
+        "/parity/sorted/jpa",
+        "/parity/sorted/jsonb",
+        "/parity/scoped/sorted/jpa",
+        "/parity/scoped/sorted/jsonb");
+  }
+
+  @ParameterizedTest(name = "{0}")
+  @MethodSource("rootedSortEndpoints")
+  @DisplayName("unknown plain sort key → 400 when the handler binds a filter root")
+  void unknownSortKeyRejectedAgainstFilterRoot(String path) throws Exception {
+    mockMvc
+        .perform(sortRequest(path, "-nosuch"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.reason").value("Invalid sort or paging parameter."))
+        .andExpect(jsonPath("$.message", containsString("nosuch")));
+  }
+
+  @ParameterizedTest(name = "{0}")
+  @MethodSource("rootedSortEndpoints")
+  @DisplayName("a known sort key orders exactly as before")
+  void knownSortKeyOrdersAsBefore(String path) throws Exception {
+    mockMvc
+        .perform(sortRequest(path, "-priority"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath(idsPath(path), contains("P4", "P3", "P2", "P1")));
+  }
+
+  @ParameterizedTest(name = "{0}")
+  @MethodSource("rootedSortEndpoints")
+  @DisplayName("nested sort keys are still gated by allow-nested-sort-properties (default off)")
+  void nestedSortKeyStillRejectedByTheNestingSwitch(String path) throws Exception {
+    mockMvc
+        .perform(sortRequest(path, "status.length"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.message", containsString("Nested sort properties are not allowed")));
+  }
+
+  @Test
+  @DisplayName("no filter root on the handler: a JPA unknown sort key still fails in Spring Data")
+  void handlerWithoutFilterRootKeepsJpaBehaviour() throws Exception {
+    mockMvc
+        .perform(get("/parity/sorted/unrooted/jpa").param("sort", "-nosuch"))
+        .andExpect(status().isInternalServerError())
+        .andExpect(content().string(containsString("PropertyReferenceException")));
+  }
+
+  @Test
+  @DisplayName("no filter root on the handler: a JSONB unknown sort key is still ignored")
+  void handlerWithoutFilterRootKeepsJsonbBehaviour() throws Exception {
+    mockMvc
+        .perform(get("/parity/sorted/unrooted/jsonb").param("sort", "-nosuch"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$", hasSize(4)));
+  }
+
+  @ParameterizedTest(name = "{0}")
+  @ValueSource(strings = {"/parity/sorted/unrooted/jpa", "/parity/sorted/unrooted/jsonb"})
+  @DisplayName("no filter root on the handler: known sort keys still order")
+  void handlerWithoutFilterRootStillSortsKnownKeys(String path) throws Exception {
+    mockMvc
+        .perform(get(path).param("sort", "-priority"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$", contains("P4", "P3", "P2", "P1")));
+  }
+
+  private static MockHttpServletRequestBuilder sortRequest(String path, String sort) {
+    MockHttpServletRequestBuilder builder = get(path).param("sort", sort);
+    return path.contains("/scoped/") ? builder.param("version", "v7") : builder;
+  }
+
+  private static String idsPath(String path) {
+    return path.contains("/scoped/") ? "$.ids" : "$";
   }
 
   private MvcResult perform(String path, Map<String, List<String>> params) throws Exception {

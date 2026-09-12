@@ -3,6 +3,7 @@ package org.opentmf.query.tmf630.jsonb;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.opentmf.query.tmf630.filtering.Tmf630AttributeClause;
 import org.opentmf.query.tmf630.filtering.Tmf630FilterExpression;
 import org.opentmf.query.tmf630.filtering.Tmf630FilterParser;
@@ -68,7 +69,16 @@ public class Tmf630JsonbClauseBuilder {
    * callers can pass the result to {@code Tmf630JsonbFilterExecutor.findAll} unchanged.
    */
   public JsonbClause build(Class<?> domainType, Map<String, String[]> parameterMap) {
-    Tmf630FilterExpression expression = filterParser.parse(domainType, parameterMap);
+    return build(domainType, parameterMap, Set.of());
+  }
+
+  /**
+   * As {@link #build(Class, Map)}, leaving the exact parameter names in {@code passThrough} to
+   * the handler's own bindings — see {@code Tmf630PassThrough}.
+   */
+  public JsonbClause build(
+      Class<?> domainType, Map<String, String[]> parameterMap, Set<String> passThrough) {
+    Tmf630FilterExpression expression = filterParser.parse(domainType, parameterMap, passThrough);
 
     JsonbClause attributeClause = null;
     for (Tmf630AttributeClause clause : expression.attributeClauses()) {

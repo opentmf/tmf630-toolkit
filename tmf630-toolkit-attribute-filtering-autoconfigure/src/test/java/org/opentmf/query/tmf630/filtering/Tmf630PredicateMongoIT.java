@@ -2,6 +2,7 @@ package org.opentmf.query.tmf630.filtering;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -401,6 +402,16 @@ class Tmf630PredicateMongoIT {
         .andExpect(jsonPath("$.length()").value(2))
         .andExpect(jsonPath("$[0].href").value(hrefLow))
         .andExpect(jsonPath("$[1].href").value(hrefHigh));
+  }
+
+  @Test
+  void rejectsUnknownPlainSortKeyAgainstTheFilterRootOnMongo() throws Exception {
+    // Mongo sorts on a missing field without complaint, so before the sort-key validation
+    // an unknown key silently returned the page in natural order.
+    mockMvc
+        .perform(get("/mongo-search-paged").param("sort", "-nosuch"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.message").value(containsString("nosuch")));
   }
 
   @Test

@@ -18,6 +18,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -154,9 +155,54 @@ class Tmf630PredicateArgumentResolverIT {
         .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("Instant")));
   }
 
+  @Test
+  void passThroughDeclaredOnApiInterfaceReachesHandlerNotFilterGrammar() throws Exception {
+    mockMvc
+        .perform(
+            get("/scoped-search").param("version", "v1").param("transformationId.eq", "abc"))
+        .andExpect(status().isOk())
+        .andExpect(content().string(Matchers.startsWith("v1|")))
+        .andExpect(content().string(Matchers.containsString("transformationId")))
+        .andExpect(content().string(Matchers.not(Matchers.containsString("version"))));
+  }
+
+  @Test
+  void passThroughDoesNotLoosenTheAllowlistForOtherNames() throws Exception {
+    mockMvc
+        .perform(get("/scoped-search").param("version", "v1").param("forbidden.eq", "x"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.message").value(Matchers.containsString("forbidden")));
+  }
+
+  @Test
+  void passThroughNameIsStillAFilterOnHandlersThatDoNotDeclareIt() throws Exception {
+    mockMvc
+        .perform(get("/search").param("version", "v1"))
+        .andExpect(status().isBadRequest());
+  }
+
   @SpringBootApplication
-  @Import({TestController.class, CatchAllExceptionHandler.class})
+  @Import({TestController.class, ScopedSearchController.class, CatchAllExceptionHandler.class})
   static class TestApp {}
+
+  /** API-interface form (mapping, bindings and pass-through declared here), as consumers use. */
+  interface ScopedSearchApi {
+
+    @GetMapping("/scoped-search")
+    @Tmf630PassThrough({"version"})
+    String search(
+        @RequestParam(name = "version") String version,
+        @QuerydslPredicate(root = TestEntity.class) Predicate predicate);
+  }
+
+  @RestController
+  static class ScopedSearchController implements ScopedSearchApi {
+
+    @Override
+    public String search(String version, Predicate predicate) {
+      return version + "|" + predicate;
+    }
+  }
 
   @RestController
   static class TestController {

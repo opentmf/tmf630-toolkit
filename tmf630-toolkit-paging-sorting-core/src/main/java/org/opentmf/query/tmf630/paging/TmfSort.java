@@ -29,6 +29,20 @@ public record TmfSort(List<TmfSortTerm> terms) {
     return false;
   }
 
+  /**
+   * The expressions of the {@link TmfSortTerm.Kind#PLAIN PLAIN} terms, in request order —
+   * correlated terms are skipped. What a {@link TmfSortKeyValidator} checks.
+   */
+  public List<String> plainKeys() {
+    List<String> keys = new ArrayList<>(terms.size());
+    for (TmfSortTerm term : terms) {
+      if (term.kind() == TmfSortTerm.Kind.PLAIN) {
+        keys.add(term.expression());
+      }
+    }
+    return keys;
+  }
+
   public Sort toPlainSort() {
     return toPlainSort(false);
   }

@@ -812,6 +812,33 @@ array (TMF "characteristics" pattern), the optional `tmf630-toolkit-mongo-aggreg
 module adds two additional sort grammars on top of the plain form. See
 [**section 12) Correlated sort (MongoDB)**](#12-correlated-sort-mongodb).
 
+#### Unknown sort keys (3.2.0)
+
+When the handler binds a **filter root** — a `@QuerydslPredicate(root = X)` or
+`@Tmf630JsonbFilter(root = X)` parameter — every **plain** sort key is checked against `X`
+with the same field resolver the filter grammar uses: if you can filter on it, you can sort
+on it. A key `X` does not declare answers `400` (*"Unknown sort property: `<key>`"*), on JPA,
+Mongo and JSONB alike. The root is found on an API interface parameter as well as on the
+implementing method.
+
+- The check runs **after** the `allow-nested-sort-properties` and `sort-allowlist` gates,
+  which keep their own messages; nested keys are resolved through the root's field types.
+- A key must name a declared **field** of the root (or of a superclass). A getter-only
+  property that Spring Data would accept is rejected.
+- Correlated terms (`field[key=value].leaf`, JsonPath) are not part of this check — their
+  executors validate them as before.
+
+**Handlers without a filter root are NOT checked.** There is no root to check against, and
+3.2.0 leaves them exactly as they were: an unknown key still fails inside Spring Data on JPA
+(a `PropertyReferenceException`, i.e. a `500` through a service's catch-all handler), and
+Mongo and the JSONB executor still ignore it. So 3.2.0 does not make every unknown sort key a
+`400` — only those on handlers that bind a filter root. Give a handler a filter-root parameter
+if its sort keys should be validated.
+
+The check is contributed by the attribute-filtering autoconfiguration as a
+`TmfSortKeyValidator` bean. Declare your own (for example `TmfSortKeyValidator.NONE`) to opt
+out; register a `Tmf630FilterRootLocator` bean to let a further filter binding name the root.
+
 #### Response headers
 
 Every paged response emitted through `@Tmf630Response` (or `Tmf630Util.tmfPage(Page)`)
@@ -1092,6 +1119,40 @@ class ChildController {
 
 This separation is intentional — the library stays focused on query-string parsing and
 does not make assumptions about URL structure or entity relationships.
+
+#### Non-entity query parameters beside the filter — `@Tmf630PassThrough` (3.2.0)
+
+Query parameters are a different matter: the filter resolvers read the **whole** query
+string. Every parameter except the TMF-630 reserved names (`offset`, `limit`, `sort`,
+`fields`, `page`, `size`, `depth`, `expand`, `filter`, `filter.combineWithAttributes`) is
+parsed as an attribute filter, and under `on-unknown-field: REJECT` a name that is not a
+property of the root answers `400` — declaring a `@RequestParam` for it does not change
+that. When a handler needs a selector that is not an entity property (a mandatory
+branch/tag `version`, a derived `state`), name it on the handler:
+
+```java
+@GetMapping("/use-cases")
+@Tmf630Response
+@Tmf630PassThrough({"version"})
+Page<UseCase> list(
+    @RequestParam(name = "version") String version,
+    @QuerydslPredicate(root = UseCase.class) Predicate predicate,
+    Pageable pageable) {
+  return repository.findAll(QUseCase.useCase.catalogVersion.eq(version).and(predicate), pageable);
+}
+```
+
+- Honoured by both filter terminals — `@QuerydslPredicate` and `@Tmf630JsonbFilter` — and
+  found on an API interface method as well as on the implementing method.
+- **Exact names only.** `?version=` is passed through; `?version.eq=` is still parsed as a
+  filter key.
+- **It loosens nothing else.** Every other unknown name on the same request is still
+  rejected under `REJECT`.
+- A passed-through name that is also an entity property is no longer filterable on that
+  handler — naming it is an explicit choice. Naming `filter` / `filter.combineWithAttributes`
+  hands those to the handler too.
+- There is deliberately no global or property-based equivalent. Prefer this over
+  `on-unknown-field: IGNORE`, which silences every typo on every endpoint of the service.
 
 ### 8) Value types — dates, datetimes, enums
 
@@ -3106,6 +3167,10 @@ Since 2.1.5, sort/paging errors also return the TMF `ErrorMessage` body (via
     non-empty) → *"Sort property is not allowed: `<field>`"*
   - `sort=parent.child` when `allow-nested-sort-properties=false` → *"Nested sort
     properties are not allowed: `parent.child`"*
+  - `sort=<field>` on a handler that binds a filter root (`@QuerydslPredicate(root = X)` /
+    `@Tmf630JsonbFilter(root = X)`) where `X` declares no such field (**3.2.0**) →
+    *"Unknown sort property: `<field>`"*. Handlers without a filter root are not checked —
+    see [Unknown sort keys](#unknown-sort-keys-320).
 - **`offset=`**
   - Negative value → *"offset must be >= 0"*
   - Non-numeric value → *"offset must be numeric"*

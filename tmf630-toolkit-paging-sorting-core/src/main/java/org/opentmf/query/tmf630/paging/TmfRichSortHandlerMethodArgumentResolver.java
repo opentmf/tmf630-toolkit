@@ -14,9 +14,16 @@ public class TmfRichSortHandlerMethodArgumentResolver implements HandlerMethodAr
   private static final String SORT = "sort";
 
   private final TmfSortParser sortParser;
+  private final TmfSortKeyValidator sortKeyValidator;
 
   public TmfRichSortHandlerMethodArgumentResolver(TmfSortParser sortParser) {
+    this(sortParser, TmfSortKeyValidator.NONE);
+  }
+
+  public TmfRichSortHandlerMethodArgumentResolver(
+      TmfSortParser sortParser, TmfSortKeyValidator sortKeyValidator) {
     this.sortParser = sortParser;
+    this.sortKeyValidator = sortKeyValidator;
   }
 
   @Override
@@ -32,6 +39,8 @@ public class TmfRichSortHandlerMethodArgumentResolver implements HandlerMethodAr
       @Nullable WebDataBinderFactory binderFactory) {
     String[] sortArray = webRequest.getParameterValues(SORT);
     List<String> sortParams = sortArray == null ? List.of() : List.of(sortArray);
-    return sortParser.parseRich(sortParams);
+    TmfSort sort = sortParser.parseRich(sortParams);
+    sortKeyValidator.validate(parameter, sort);
+    return sort;
   }
 }
