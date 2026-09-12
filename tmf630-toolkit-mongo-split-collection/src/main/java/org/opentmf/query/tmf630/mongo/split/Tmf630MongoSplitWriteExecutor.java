@@ -266,7 +266,7 @@ public class Tmf630MongoSplitWriteExecutor {
    * {@code remove /items/<itemId>}. Does not renumber remaining children's
    * {@code itemOrder}; gaps are harmless (the read merge sorts by order, not
    * position). If dense ordering matters, follow with
-   * {@link #reindexChildren(Class, Object, Class)}.
+   * {@link #reindexChildren(Class, String, Class)}.
    *
    * <p>Returns {@code 1} on success, {@code 0} if the child does not exist.
    */

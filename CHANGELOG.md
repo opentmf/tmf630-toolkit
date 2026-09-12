@@ -2,6 +2,17 @@
 
 All notable changes to `tmf630-toolkit` are documented in this file.
 
+## [3.2.2] - 2026-09-12
+
+### Fixed (published Javadoc)
+
+- **Three Javadoc errors in the published API docs.** The `@Tmf630Response` class docs used a
+  heading level out of sequence; the pipeline sketch on
+  `MongoSplitAwareFilterTranslator#translateAsPipeline` contained an unescaped `<…>` that
+  rendered as a broken tag; and `Tmf630MongoSplitWriteExecutor#removeChild` linked to
+  `reindexChildren` with the wrong signature, so the link was dead. The Javadoc build now
+  reports no errors. Documentation only; no code changed.
+
 ## [3.2.1] - 2026-09-12
 
 ### Fixed (regular-expression backtracking in filter / sort parsing)
