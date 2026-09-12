@@ -36,6 +36,9 @@ import org.opentmf.query.tmf630.exception.TmfPagingException;
  */
 public class JsonbCorrelatedSortTranslator {
 
+  /** A positional index {@code [N]} anywhere in the term — a plain search, no backtracking. */
+  private static final Pattern POSITIONAL_INDEX = Pattern.compile("\\[\\d+]");
+
   /** {@code hop[key=value].leaf} — group 1=hop, 2=key, 3=value, 4=leaf. */
   private static final Pattern SIMPLE_RICH =
       Pattern.compile(
@@ -158,7 +161,7 @@ public class JsonbCorrelatedSortTranslator {
   }
 
   private static void rejectPositional(String trimmed) {
-    if (trimmed.matches(".*\\[\\d+].*")) {
+    if (POSITIONAL_INDEX.matcher(trimmed).find()) {
       throw new TmfPagingException(
           "Positional [N] in JSONB correlated sort is not supported (use plain dotted"
               + " sort with numeric segments: e.g. sort=arr.0.leaf). Term: "
