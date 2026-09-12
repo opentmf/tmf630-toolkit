@@ -106,10 +106,11 @@ class TmfSortKeyValidatorResolverTest {
                 parameter("tmfSort", TmfSort.class)));
 
     for (ResolverCase resolverCase : cases) {
+      HandlerMethodArgumentResolver resolver = resolverCase.resolver();
+      MethodParameter parameter = resolverCase.parameter();
       TmfPagingException ex =
           assertThrows(
-              TmfPagingException.class,
-              () -> resolve(resolverCase.resolver(), resolverCase.parameter(), "-nosuch"));
+              TmfPagingException.class, () -> resolve(resolver, parameter, "-nosuch"));
       assertEquals("Unknown sort property: nosuch", ex.getMessage());
     }
   }
@@ -133,7 +134,7 @@ class TmfSortKeyValidatorResolverTest {
   }
 
   @Test
-  void legacyConstructorsKeepAcceptingEveryKey() throws Exception {
+  void legacyConstructorsKeepAcceptingEveryKey() {
     assertDoesNotThrow(
         () ->
             resolve(
