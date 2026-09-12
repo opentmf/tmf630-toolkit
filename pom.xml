@@ -67,12 +67,12 @@
     <java.version>17</java.version>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <maven.compiler.release>${java.version}</maven.compiler.release>
-    <spring-boot.version>4.1.0</spring-boot.version>
+    <spring-boot.version>4.1.1</spring-boot.version>
     <json-path.version>3.0.0</json-path.version>
     <querydsl.version>5.1.0</querydsl.version>
-    <maven.compiler.plugin.version>3.15.0</maven.compiler.plugin.version>
-    <maven.surefire.plugin.version>3.5.6</maven.surefire.plugin.version>
-    <maven.failsafe.plugin.version>3.5.6</maven.failsafe.plugin.version>
+    <maven.compiler.plugin.version>3.16.0</maven.compiler.plugin.version>
+    <maven.surefire.plugin.version>3.6.0</maven.surefire.plugin.version>
+    <maven.failsafe.plugin.version>3.6.0</maven.failsafe.plugin.version>
     <jacoco.plugin.version>0.8.15</jacoco.plugin.version>
     <jacoco.min.covered.ratio>0.80</jacoco.min.covered.ratio>
     <maven.enforcer.plugin.version>3.6.3</maven.enforcer.plugin.version>
@@ -81,7 +81,7 @@
     <maven.gpg.plugin.version>3.2.8</maven.gpg.plugin.version>
     <maven.release.plugin.version>3.3.1</maven.release.plugin.version>
     <central.publishing.maven.plugin.version>0.11.0</central.publishing.maven.plugin.version>
-    <sonar.maven.plugin.version>5.7.0.6970</sonar.maven.plugin.version>
+    <sonar.maven.plugin.version>5.8.0.7211</sonar.maven.plugin.version>
     <failsafe.includes.pattern>**/*IT.java</failsafe.includes.pattern>
     <tmf630.sql.it.datasource.url>jdbc:tc:postgresql:18.1-alpine:///db</tmf630.sql.it.datasource.url>
   </properties>
