@@ -2,6 +2,56 @@
 
 All notable changes to `tmf630-toolkit` are documented in this file.
 
+## [3.3.0] - 2026-09-17
+
+### Fixed (`500` with an empty body on any paged endpoint given one long query parameter)
+
+- **A long query parameter no longer takes down the response.** The pagination `Link`
+  header echoed the request's full query string in each of its four links, so
+  `GET /x?fields=<≥2100 chars>&offset=10&limit=10` produced a header larger than
+  Tomcat's 8 KB response-header buffer; Tomcat failed the commit, the application's
+  catch-all `@ExceptionHandler` wrote into the same oversized header set and failed
+  identically, and the client saw `500`, `Connection: close` and the body `0` (found by
+  the DAST-2 active scan of 2026-09-17 on two adopters; every adopter with a paged list
+  endpoint was exposed). Three independent layers now close it — see
+  `docs/LINK_HEADER_BOUNDS_PLAN.md` for the measurements.
+
+### Added (bounded `Link` header)
+
+- **The `Link` header has a size budget.** When any single query-parameter value is
+  longer than `opentmf.tmf630.paging.link.max-param-value-length` (default `256`), or
+  the assembled header would be longer than `opentmf.tmf630.paging.link.max-length`
+  (default `2048`), the header is **omitted**; `X-Total-Count`, `X-Result-Count`,
+  `Content-Range` and the status are unchanged. A value is never dropped or truncated
+  inside a link, because a `next` that drops a filter walks a different result set.
+  Clients must treat `Link` as the SHOULD it is in TMF-630 Part 1 §4.5.1 and page by
+  `offset`/`limit` against `X-Total-Count` when it is absent. New
+  `Tmf630LinkHeaderSettings` record and a `Tmf630Util.applyLinkHeader(...)` overload
+  taking it; the existing overload and `tmfPage(...)` use the defaults.
+
+### Added (query-parameter guard — `opentmf.tmf630.query-limits.*`)
+
+- **Oversize query parameters are rejected before any handler runs.** A new
+  `Tmf630QueryLimitsInterceptor`, registered on every mapping by
+  `Tmf630QueryLimitsAutoConfiguration`, measures the raw query string: a single value
+  longer than `max-param-value-length` (default `2048`) answers `400`, a query string
+  longer than `max-query-string-length` (default `4096`) answers `414 URI Too Long`,
+  both as TMF `ErrorMessage` bodies via the new `Tmf630QueryLimitExceptionHandler`
+  (`HIGHEST_PRECEDENCE`, like the other toolkit handlers). `enabled=false` switches the
+  guard off; it is independent of `paging.enabled`. The defaults reject nothing the
+  filtering module accepts today (`2048` equals `json-path-filter.max-length`).
+
+### Added (`HeadersTooLargeException` recovery)
+
+- **A response-header overflow is answered once, with a body.** New
+  `Tmf630HeadersTooLargeRecoveryResolver` (`HandlerExceptionResolver`,
+  `HIGHEST_PRECEDENCE`) recognises Tomcat's `HeadersTooLargeException` by class name,
+  logs which header overflowed, resets the uncommitted response and answers a `500` TMF
+  error body itself — chunked, because Tomcat leaves the failed attempt's output filter
+  active and would corrupt any `Content-Length`-delimited body written afterwards. A
+  committed response is left alone. Covers adopter-added headers and raised `Link`
+  budgets that the two layers above do not.
+
 ## [3.2.2] - 2026-09-12
 
 ### Fixed (published Javadoc)

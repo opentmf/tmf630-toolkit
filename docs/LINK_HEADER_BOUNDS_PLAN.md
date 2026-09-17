@@ -165,17 +165,37 @@ by class name; the toolkit does not depend on Tomcat) and the response is not
 committed, it:
 
 1. logs at `WARN` the request path and the name and size of the largest response
-   headers currently set, so the operator learns *which* header overflowed;
+   header currently set, so the operator learns *which* header overflowed;
 2. calls `response.reset()`, which clears the status, the body buffer and — the
    part that matters — Tomcat's `MimeHeaders`, so the next write starts from an
    empty header set;
-3. returns `null` so the remaining resolvers (the adopter's catch-all, or Boot's
-   `/error`) produce the `500` body exactly as they would for any other failure.
+3. **answers the `500` itself** with a TMF error body (`code` `500`, `reason`
+   "Response headers too large."), written without a `Content-Length` and
+   flushed, and returns an empty `ModelAndView` so no other handler writes.
 
 If the response is already committed it logs at `WARN` and returns `null`
 without touching the response — nothing can be written any more, and the
 container closes the connection. Either way the toolkit never writes headers
 into a response that has just refused them.
+
+**Why it answers itself instead of stepping aside (measured, Tomcat 11.0.24).**
+The first draft returned `null` after the reset so the application's catch-all
+would produce the `500`. The client then received `Content-Length: 9` with the
+body `9\r\ncatch-` — chunk framing under a content length. Cause, in
+`Http11Processor.prepareResponse`: the output filter chosen for the first
+attempt (chunked, because the page body had no known length) is added to
+`Http11OutputBuffer` *before* the headers are written and stays active when the
+header write throws; `Response.reset()` recycles the headers but no
+`ActionCode` recycles the filters. Any later response that carries a
+`Content-Length` — which Spring computes for every small error entity, and which
+Tomcat's `OutputBuffer.close()` computes itself for an unflushed body — gets an
+identity filter stacked on the leftover chunked one and reaches the client
+corrupted. A body written with **no** length and **flushed** makes
+`prepareResponse` choose chunked again, and `addActiveFilter` is idempotent, so
+the framing is right. The two shapes that cannot be made right — a failed attempt
+that already had a `Content-Length` (leftover identity filter truncates at the
+old length) or a `Content-Encoding` (leftover gzip filter) — get a status-only
+`500`; the resolver reads both headers before the reset to decide.
 
 ## 4. Tests — red first
 
@@ -202,12 +222,14 @@ Each test is written against the current code, seen to fail, then made to pass.
    request under both limits reaches the handler; `enabled=false` disables the
    guard; the handler wins over a catch-all `@ExceptionHandler(Exception.class)`.
 4. `Tmf630HeadersTooLargeRecoveryIT` (autoconfigure, real Tomcat): a test
-   controller sets an 9 KB custom response header itself (bypassing layers (a)
+   controller sets a 9 KB custom response header itself (bypassing layers (a)
    and (b)); the adopter's catch-all is present. Expected: one
-   `HeadersTooLargeException`, then `500` **with the catch-all's JSON body** and
-   no second failure — versus today's empty/`0` body. Also a unit test for the
-   resolver: unrelated exceptions return `null` untouched; a committed response
-   is not reset.
+   `HeadersTooLargeException`, then `500` **with the toolkit's TMF JSON body,
+   chunked**, the catch-all not invoked — versus today's empty/`0` body. Also
+   the scan's request shape at the default limits → `400` typed. Unit tests for
+   the resolver: unrelated exceptions return `null` untouched; a committed
+   response is not reset; a previously length-delimited response gets the
+   status-only `500`.
 5. Existing suites (`Tmf630ResponseBodyAdviceIT`, `PagingSortingCoreIT`, the
    jsonb parity and Mongo HTTP ITs) stay green — the no-behaviour-change proof
    for requests within the budget.

@@ -860,6 +860,21 @@ carries these headers:
   `offset` is rewritten.
 - Silent no-op when called outside a request context (unit tests calling
   `Tmf630Util.tmfPage(page)` directly).
+- **Bounded (3.3.0).** The links echo the request's query string up to four times, so one
+  long value multiplies into a header that can exceed the container's response-header
+  buffer (8 KB on Tomcat), and the container then fails the whole response. The header is
+  therefore **omitted** when any single query-parameter value is longer than
+  `opentmf.tmf630.paging.link.max-param-value-length` (default `256`) or the assembled
+  header would be longer than `opentmf.tmf630.paging.link.max-length` (default `2048`).
+  Nothing else changes: `X-Total-Count`, `X-Result-Count`, `Content-Range` and the status
+  are still emitted. A value is never dropped or truncated inside a link — a `next` that
+  drops a filter walks a different result set, and a truncated `fields=` is rejected by the
+  target — so omission is the one bounded behaviour that is never wrong. The decision is
+  logged at `DEBUG` under `org.opentmf.query.tmf630.util.Tmf630Util`.
+- **Clients must treat `Link` as optional.** TMF-630 Part 1 §4.5.1 makes `X-Total-Count`
+  a MUST and the navigation links a SHOULD: when `Link` is absent, page by `offset` /
+  `limit` against `X-Total-Count`. Adopters whose legitimate `fields=` lists exceed 256
+  characters raise the cap rather than lose the header.
 
 Example of the full paged-response header set:
 
@@ -1275,8 +1290,9 @@ Factory methods are discovered once per enum type and cached.
 ### 9) Error response shapes
 
 The toolkit produces a **single, uniform TMF-630 error body** for every query-parameter
-validation failure it owns. Consumers can deserialise all four error paths (`filter=`,
-`sort=`/`offset=`/`limit=`, `fields=`, range) into the same `ErrorMessage` type.
+validation failure it owns. Consumers can deserialise every error path (`filter=`,
+`sort=`/`offset=`/`limit=`, `fields=`, oversize query parameters, range, and the
+response-header overflow recovery) into the same `ErrorMessage` type.
 
 #### The TMF `ErrorMessage` body (TMF-630 Part 1 §3.4)
 
@@ -1344,6 +1360,58 @@ Examples that produce this body:
 - `?offset=-1` → *"offset must be >= 0"*
 - `?offset=notANumber` → *"offset must be numeric"*
 - `?limit=0` or `?limit=-5` → *"limit must be > 0"*
+
+#### Oversize query parameter → 400, oversize query string → 414 (added in 3.3.0)
+
+`Tmf630QueryLimitsInterceptor` measures the raw query string **before any handler,
+argument resolver or response advice runs**, so an oversize value never reaches anything
+that could echo it. `Tmf630QueryLimitExceptionHandler` maps the rejection to:
+
+```json
+{
+  "code": "400",
+  "status": "Bad Request",
+  "reason": "Query parameter too long.",
+  "message": "Query parameter 'fields' is 2100 characters long; the limit is 2048."
+}
+```
+
+```json
+{
+  "code": "414",
+  "status": "URI Too Long",
+  "reason": "Query string too long.",
+  "message": "Query string is 5000 characters long; the limit is 4096."
+}
+```
+
+Limits and the master switch are under `opentmf.tmf630.query-limits.*` — see
+[Query-limit properties](#query-limit-properties-330).
+
+#### Response headers too large → 500 (added in 3.3.0)
+
+If the response headers still do not fit the container's buffer — an adopter-added
+header, or the `Link` budget raised past what the buffer allows — Tomcat throws
+`HeadersTooLargeException` while committing. Before 3.3.0 the application's catch-all
+`@ExceptionHandler` then wrote its error entity into the same oversized header set,
+failed the same way, and the client saw a `500` with an empty body (`0`) and a closed
+connection. `Tmf630HeadersTooLargeRecoveryResolver` now runs first, logs at `WARN` which
+header overflowed, resets the response and answers itself:
+
+```json
+{
+  "code": "500",
+  "status": "Internal Server Error",
+  "reason": "Response headers too large.",
+  "message": "The response headers exceeded the server's header buffer; the server log names the header that overflowed."
+}
+```
+
+It answers itself rather than deferring to the application's handlers because Tomcat
+leaves the output filter of the failed attempt active after `reset()`; a body written
+without a `Content-Length` is the only shape it then frames correctly. When the failed
+attempt already had a `Content-Length` or `Content-Encoding`, the `500` is sent without a
+body.
 
 #### Range not satisfiable → 416
 
@@ -2773,6 +2841,7 @@ MongoDB and wants the correlated-sort features (JSONPath / simple-rich grammar w
 | Prefix                               | Purpose                                                    |
 | ------------------------------------ | ---------------------------------------------------------- |
 | `opentmf.tmf630.paging`              | Paging/sorting behaviour                                   |
+| `opentmf.tmf630.query-limits`        | Request-side query-string / parameter length guard (3.3.0) |
 | `opentmf.tmf630.attribute-filtering` | Query filter parsing and rules                             |
 | `opentmf.tmf630.field-selection`     | `@Tmf630Response` field selection behaviour                |
 | `opentmf.tmf630.mongo-aggregation`   | Correlated-sort behaviour (mongo-aggregation module only)  |
@@ -2787,7 +2856,23 @@ MongoDB and wants the correlated-sort features (JSONPath / simple-rich grammar w
 | `opentmf.tmf630.paging.strict-mode`                         | `true`  | If `true`, out-of-range offsets 416; if `false`, they return an empty page |
 | `opentmf.tmf630.paging.allow-nested-sort-properties`        | `false` | Whether `sort=parent.child` is allowed                                  |
 | `opentmf.tmf630.paging.sort-allowlist`                      | empty   | List of allowed sort field names; empty means unrestricted              |
+| `opentmf.tmf630.paging.link.max-param-value-length`         | `256`   | Longest single query-parameter value the pagination `Link` header will echo; any longer value omits the header (3.3.0) |
+| `opentmf.tmf630.paging.link.max-length`                     | `2048`  | Longest `Link` header value emitted; a longer one is omitted (3.3.0)  |
 | `opentmf.tmf630.paging.nulls-last`                          | `false` | If `true`, every plain sort order is decorated with `Sort.Order.nullsLast()` — null-valued rows sort last regardless of ASC/DESC direction. Cross-backend parity with Mongo's 2.1.1 nulls-last handling. Hibernate emits explicit `NULLS LAST` SQL only when it differs from the dialect default (elided on Postgres ASC, emitted on Postgres DESC); non-native dialects fall back to a synthetic `CASE WHEN` sort key (index-scan cost implications on large tables) |
+
+#### Query-limit properties (3.3.0)
+
+| Property                                                    | Default | Purpose                                                                 |
+| ----------------------------------------------------------- | ------- | ----------------------------------------------------------------------- |
+| `opentmf.tmf630.query-limits.enabled`                       | `true`  | Master switch for the request-side guard; independent of `paging.enabled` |
+| `opentmf.tmf630.query-limits.max-query-string-length`       | `4096`  | Longest raw query string accepted; longer answers `414 URI Too Long`    |
+| `opentmf.tmf630.query-limits.max-param-value-length`        | `2048`  | Longest single raw parameter value accepted; longer answers `400`       |
+
+Lengths are measured on the query string as received (encoded form), never on a form
+body. The defaults are generous on purpose: `2048` equals
+`attribute-filtering.json-path-filter.max-length`, so no `filter=` accepted today is newly
+rejected, and `4096` is half of Tomcat's request-line ceiling, so the typed TMF error is
+reached before the container's untyped one.
 
 #### Common filtering properties
 
@@ -3177,6 +3262,13 @@ Since 2.1.5, sort/paging errors also return the TMF `ErrorMessage` body (via
 - **`limit=`**
   - Zero or negative value → *"limit must be > 0"*
   - Non-numeric value → *"limit must be numeric"*
+
+- **Any query parameter (3.3.0)** — a raw value longer than
+  `opentmf.tmf630.query-limits.max-param-value-length` (default `2048`) →
+  *"Query parameter `<name>` is N characters long; the limit is 2048."*; a raw query string
+  longer than `max-query-string-length` (default `4096`) answers `414` instead. Both are
+  rejected before the handler runs — see
+  [Error response shapes](#9-error-response-shapes).
 
 **`fields=`** errors — unknown field names in the request are silently skipped (per
 TMF-630 Part 1 §4.3 convention). Reflection catastrophes inside `FieldSelectionUtil`
