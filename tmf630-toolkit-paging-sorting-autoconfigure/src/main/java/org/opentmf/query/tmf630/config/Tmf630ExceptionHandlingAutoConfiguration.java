@@ -1,6 +1,7 @@
 package org.opentmf.query.tmf630.config;
 
 import org.opentmf.query.tmf630.advice.Tmf630FieldSelectionExceptionHandler;
+import org.opentmf.query.tmf630.advice.Tmf630HeadersTooLargeRecoveryResolver;
 import org.opentmf.query.tmf630.advice.Tmf630PagingExceptionHandler;
 import org.opentmf.query.tmf630.advice.Tmf630RangeExceptionHandler;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
@@ -22,5 +23,10 @@ public class Tmf630ExceptionHandlingAutoConfiguration {
   @Bean
   public Tmf630FieldSelectionExceptionHandler tmf630FieldSelectionExceptionHandler() {
     return new Tmf630FieldSelectionExceptionHandler();
+  }
+
+  @Bean
+  public Tmf630HeadersTooLargeRecoveryResolver tmf630HeadersTooLargeRecoveryResolver() {
+    return new Tmf630HeadersTooLargeRecoveryResolver();
   }
 }

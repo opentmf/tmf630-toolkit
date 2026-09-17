@@ -1,3 +1,4 @@
 org.opentmf.query.tmf630.config.Tmf630WebMvcConfigurer
 org.opentmf.query.tmf630.config.Tmf630ExceptionHandlingAutoConfiguration
 org.opentmf.query.tmf630.config.Tmf630FieldSelectionAutoConfiguration
+org.opentmf.query.tmf630.config.Tmf630QueryLimitsAutoConfiguration

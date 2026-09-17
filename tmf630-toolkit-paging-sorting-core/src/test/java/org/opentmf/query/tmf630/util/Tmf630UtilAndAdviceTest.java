@@ -3,6 +3,7 @@ package org.opentmf.query.tmf630.util;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -13,6 +14,7 @@ import org.opentmf.query.tmf630.advice.Tmf630RangeExceptionHandler;
 import org.opentmf.query.tmf630.exception.RequestedRangeNotSatisfiableException;
 import org.opentmf.query.tmf630.model.ErrorMessage;
 import org.opentmf.query.tmf630.paging.OffsetLimitPageRequest;
+import org.opentmf.query.tmf630.paging.config.Tmf630LinkHeaderSettings;
 import org.opentmf.query.tmf630.paging.config.Tmf630PagingSettings;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -264,6 +266,73 @@ class Tmf630UtilAndAdviceTest {
     assertNotNull(link);
     // The other query params must survive the offset= replacement round-trip.
     assertTrue(link.contains("status=active"), link);
+  }
+
+  @Test
+  void linkHeaderIsOmittedWhenAQueryValueExceedsTheDefaultCap() {
+    // The DAST-2 shape: one 3000-char value would be echoed in all four links and blow
+    // Tomcat's 8 KB response-header buffer. The header is omitted, nothing else changes.
+    HttpHeaders headers = new HttpHeaders();
+    String baseUri = "http://host/api/x?fields=" + "a".repeat(3000) + "&offset=10&limit=10";
+    Tmf630Util.applyLinkHeader(headers, baseUri, 50, 10, 10);
+    assertNull(headers.getFirst(HttpHeaders.LINK));
+  }
+
+  @Test
+  void linkHeaderValueCapIsExactAndConfigurable() {
+    String value = "a".repeat(257);
+    String baseUri = "http://host/api/x?fields=" + value + "&offset=0&limit=10";
+
+    HttpHeaders atDefault = new HttpHeaders();
+    Tmf630Util.applyLinkHeader(atDefault, baseUri, 50, 0, 10, Tmf630LinkHeaderSettings.DEFAULT);
+    assertNull(atDefault.getFirst(HttpHeaders.LINK), "257 > 256 must omit the header");
+
+    HttpHeaders raised = new HttpHeaders();
+    Tmf630Util.applyLinkHeader(raised, baseUri, 50, 0, 10, new Tmf630LinkHeaderSettings(300, 4096));
+    String link = raised.getFirst(HttpHeaders.LINK);
+    assertNotNull(link, "257 <= 300 must emit the header");
+    assertTrue(link.contains("rel=\"first\"") && link.contains("rel=\"next\""), link);
+    assertEquals(3, link.split("fields=" + value).length - 1, "value echoed in every link");
+  }
+
+  @Test
+  void linkHeaderIsOmittedWhenManyShortValuesExceedTheTotalBudget() {
+    // Every value is under the per-value cap; only the assembled header is over budget.
+    StringBuilder query = new StringBuilder("http://host/api/x?offset=10&limit=10");
+    for (int i = 0; i < 20; i++) {
+      query.append("&p").append(i).append('=').append("v".repeat(100));
+    }
+    HttpHeaders headers = new HttpHeaders();
+    Tmf630Util.applyLinkHeader(headers, query.toString(), 50, 10, 10);
+    assertNull(headers.getFirst(HttpHeaders.LINK));
+
+    HttpHeaders generous = new HttpHeaders();
+    Tmf630Util.applyLinkHeader(
+        generous, query.toString(), 50, 10, 10, new Tmf630LinkHeaderSettings(256, 16384));
+    assertNotNull(generous.getFirst(HttpHeaders.LINK));
+  }
+
+  @Test
+  void linkHeaderTotalBudgetIsExact() {
+    String baseUri = "http://host/api/x?offset=0&limit=10";
+    HttpHeaders probe = new HttpHeaders();
+    Tmf630Util.applyLinkHeader(probe, baseUri, 50, 0, 10);
+    int emitted = probe.getFirst(HttpHeaders.LINK).length();
+
+    HttpHeaders exact = new HttpHeaders();
+    Tmf630Util.applyLinkHeader(exact, baseUri, 50, 0, 10, new Tmf630LinkHeaderSettings(256, emitted));
+    assertNotNull(exact.getFirst(HttpHeaders.LINK), "a header exactly at the budget is emitted");
+
+    HttpHeaders oneUnder = new HttpHeaders();
+    Tmf630Util.applyLinkHeader(
+        oneUnder, baseUri, 50, 0, 10, new Tmf630LinkHeaderSettings(256, emitted - 1));
+    assertNull(oneUnder.getFirst(HttpHeaders.LINK), "one char over the budget omits it");
+  }
+
+  @Test
+  void linkHeaderSettingsRejectNonPositiveLimits() {
+    assertThrows(IllegalArgumentException.class, () -> new Tmf630LinkHeaderSettings(0, 2048));
+    assertThrows(IllegalArgumentException.class, () -> new Tmf630LinkHeaderSettings(256, 0));
   }
 
   @Test
