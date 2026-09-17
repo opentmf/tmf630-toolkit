@@ -5,15 +5,22 @@ import java.util.List;
 import java.util.Map;
 import org.opentmf.query.commons.fieldselection.FieldSelectionUtil;
 import org.opentmf.query.tmf630.exception.RequestedRangeNotSatisfiableException;
+import org.opentmf.query.tmf630.paging.config.Tmf630LinkHeaderSettings;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.util.MultiValueMap;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
+import org.springframework.web.util.UriComponents;
 import org.springframework.web.util.UriComponentsBuilder;
 
 public final class Tmf630Util {
+
+  private static final Logger log = LoggerFactory.getLogger(Tmf630Util.class);
 
   private Tmf630Util() {}
 
@@ -117,29 +124,84 @@ public final class Tmf630Util {
    * Same as {@link #applyLinkHeaderFromCurrentRequest} but with an explicitly supplied
    * {@code baseUri}. Prefer this overload from paths where the request is already available
    * (e.g. inside a {@code ResponseBodyAdvice.beforeBodyWrite}) — it avoids the
-   * {@code RequestContextHolder} lookup.
+   * {@code RequestContextHolder} lookup. Applies the {@link Tmf630LinkHeaderSettings#DEFAULT
+   * default} size budget.
    */
   public static void applyLinkHeader(
       HttpHeaders headers, String baseUri, long total, long offset, long limit) {
+    applyLinkHeader(headers, baseUri, total, offset, limit, Tmf630LinkHeaderSettings.DEFAULT);
+  }
+
+  /**
+   * Emits the pagination {@code Link} header for {@code baseUri} within the given size budget.
+   * Every query parameter of {@code baseUri} is preserved and only {@code offset} is rewritten
+   * per link; when a single query value is longer than {@link
+   * Tmf630LinkHeaderSettings#maxParamValueLength()} or the assembled header would be longer
+   * than {@link Tmf630LinkHeaderSettings#maxLength()}, the header is omitted and the decision
+   * is logged at {@code DEBUG} — see the settings record for why omission, not truncation.
+   */
+  public static void applyLinkHeader(
+      HttpHeaders headers,
+      String baseUri,
+      long total,
+      long offset,
+      long limit,
+      Tmf630LinkHeaderSettings settings) {
     if (total <= 0 || limit <= 0 || baseUri == null) {
       return;
     }
-    long lastOffset = ((total - 1) / limit) * limit;
-    List<String> links = new ArrayList<>(4);
-    links.add(linkWithOffset(baseUri, 0L) + "; rel=\"first\"");
-    if (offset > 0) {
-      links.add(linkWithOffset(baseUri, Math.max(0L, offset - limit)) + "; rel=\"prev\"");
+    UriComponents request = UriComponentsBuilder.fromUriString(baseUri).build();
+    if (exceedsValueCap(request, settings)) {
+      return;
     }
-    if (offset + limit < total) {
-      links.add(linkWithOffset(baseUri, offset + limit) + "; rel=\"next\"");
+    String value = buildLinks(request, total, offset, limit);
+    if (value.length() > settings.maxLength()) {
+      log.debug(
+          "Omitting the Link header for {}: {} chars exceed the {}-char budget",
+          request.getPath(),
+          value.length(),
+          settings.maxLength());
+      return;
     }
-    links.add(linkWithOffset(baseUri, lastOffset) + "; rel=\"last\"");
-    headers.add(HttpHeaders.LINK, String.join(", ", links));
+    headers.add(HttpHeaders.LINK, value);
   }
 
-  private static String linkWithOffset(String baseUri, long offset) {
+  private static boolean exceedsValueCap(UriComponents request, Tmf630LinkHeaderSettings settings) {
+    MultiValueMap<String, String> params = request.getQueryParams();
+    for (Map.Entry<String, List<String>> param : params.entrySet()) {
+      for (String value : param.getValue()) {
+        if (value != null && value.length() > settings.maxParamValueLength()) {
+          log.debug(
+              "Omitting the Link header for {}: query parameter '{}' is {} chars, cap is {}",
+              request.getPath(),
+              param.getKey(),
+              value.length(),
+              settings.maxParamValueLength());
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  private static String buildLinks(UriComponents request, long total, long offset, long limit) {
+    long lastOffset = ((total - 1) / limit) * limit;
+    List<String> links = new ArrayList<>(4);
+    links.add(linkWithOffset(request, 0L) + "; rel=\"first\"");
+    if (offset > 0) {
+      links.add(linkWithOffset(request, Math.max(0L, offset - limit)) + "; rel=\"prev\"");
+    }
+    if (offset + limit < total) {
+      links.add(linkWithOffset(request, offset + limit) + "; rel=\"next\"");
+    }
+    links.add(linkWithOffset(request, lastOffset) + "; rel=\"last\"");
+    return String.join(", ", links);
+  }
+
+  private static String linkWithOffset(UriComponents request, long offset) {
     String rebuilt =
-        UriComponentsBuilder.fromUriString(baseUri)
+        UriComponentsBuilder.newInstance()
+            .uriComponents(request)
             .replaceQueryParam("offset", offset)
             .build()
             .toUriString();

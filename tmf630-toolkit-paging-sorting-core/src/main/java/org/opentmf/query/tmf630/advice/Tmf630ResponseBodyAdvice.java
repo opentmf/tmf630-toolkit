@@ -6,6 +6,7 @@ import org.jspecify.annotations.Nullable;
 import org.opentmf.query.commons.fieldselection.FieldSelectionUtil;
 import org.opentmf.query.tmf630.annotation.Tmf630Response;
 import org.opentmf.query.tmf630.model.ErrorMessage;
+import org.opentmf.query.tmf630.paging.config.Tmf630LinkHeaderSettings;
 import org.opentmf.query.tmf630.util.Tmf630Util;
 import org.springframework.core.MethodParameter;
 import org.springframework.core.annotation.AnnotatedElementUtils;
@@ -49,13 +50,23 @@ public class Tmf630ResponseBodyAdvice implements ResponseBodyAdvice<Object> {
   private static final int FALLBACK_DEPTH = 1;
 
   private final int defaultDepth;
+  private final Tmf630LinkHeaderSettings linkHeaderSettings;
 
   public Tmf630ResponseBodyAdvice() {
     this(FALLBACK_DEPTH);
   }
 
   public Tmf630ResponseBodyAdvice(int defaultDepth) {
+    this(defaultDepth, Tmf630LinkHeaderSettings.DEFAULT);
+  }
+
+  /**
+   * @param linkHeaderSettings the size budget applied to the pagination {@code Link} header of
+   *     transparently handled pages — see {@link Tmf630LinkHeaderSettings}
+   */
+  public Tmf630ResponseBodyAdvice(int defaultDepth, Tmf630LinkHeaderSettings linkHeaderSettings) {
     this.defaultDepth = defaultDepth;
+    this.linkHeaderSettings = linkHeaderSettings;
   }
 
   @Override
@@ -141,7 +152,8 @@ public class Tmf630ResponseBodyAdvice implements ResponseBodyAdvice<Object> {
           request.getURI().toString(),
           total,
           offset,
-          page.getSize());
+          page.getSize(),
+          linkHeaderSettings);
     }
 
     List<?> content = page.getContent();

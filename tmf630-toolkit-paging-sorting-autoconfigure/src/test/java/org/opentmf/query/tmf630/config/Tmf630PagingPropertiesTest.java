@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.opentmf.query.tmf630.paging.config.Tmf630LinkHeaderSettings;
 import org.opentmf.query.tmf630.paging.config.Tmf630PagingSettings;
 
 class Tmf630PagingPropertiesTest {
@@ -28,5 +29,23 @@ class Tmf630PagingPropertiesTest {
     assertFalse(settings.strictMode());
     assertTrue(settings.allowNestedSortProperties());
     assertEquals(List.of("id", "createdOn"), settings.sortAllowlist());
+  }
+
+  @Test
+  void linkHeaderBudgetDefaultsToTheSettingsDefault() {
+    assertEquals(
+        Tmf630LinkHeaderSettings.DEFAULT, new Tmf630PagingProperties().toLinkHeaderSettings());
+  }
+
+  @Test
+  void toLinkHeaderSettingsMapsBothFields() {
+    Tmf630PagingProperties properties = new Tmf630PagingProperties();
+    properties.getLink().setMaxParamValueLength(512);
+    properties.getLink().setMaxLength(4096);
+
+    Tmf630LinkHeaderSettings settings = properties.toLinkHeaderSettings();
+
+    assertEquals(512, settings.maxParamValueLength());
+    assertEquals(4096, settings.maxLength());
   }
 }
