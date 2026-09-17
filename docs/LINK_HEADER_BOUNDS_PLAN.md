@@ -95,7 +95,9 @@ wrong: the spec makes `Link` a SHOULD precisely because `X-Total-Count` +
 `offset`/`limit` are the contract, and a client that depends on `Link` fails
 visibly instead of paginating the wrong data. The caps are configurable, so an
 adopter with legitimately long `fields=` lists raises them rather than losing
-the header.
+the header. Clients must treat `Link` as optional — it is a SHOULD — and page by
+`offset`/`limit` against `X-Total-Count` when it is absent; that guidance goes
+into the README next to the header table.
 
 Lengths are measured on the values as they appear in the request URI (encoded
 form) — that is what ends up in the header bytes Tomcat counts.
