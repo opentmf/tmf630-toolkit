@@ -80,10 +80,12 @@ public class Tmf630HeadersTooLargeRecoveryResolver implements HandlerExceptionRe
           where);
       return null;
     }
-    log.warn(
-        "Response headers for {} exceeded the container's buffer (largest: {}); answering 500",
-        where,
-        largestHeader(response));
+    if (log.isWarnEnabled()) {
+      log.warn(
+          "Response headers for {} exceeded the container's buffer (largest: {}); answering 500",
+          where,
+          largestHeader(response));
+    }
     boolean bodyCanBeFramed =
         response.getHeader(HttpHeaders.CONTENT_LENGTH) == null
             && response.getHeader(HttpHeaders.CONTENT_ENCODING) == null;

@@ -21,8 +21,8 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.bind.annotation.ExceptionHandler;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -167,14 +167,8 @@ class Tmf630QueryLimitsIT {
       this.counter = counter;
     }
 
-    @GetMapping("/guarded")
-    public String get() {
-      counter.calls.incrementAndGet();
-      return "ok";
-    }
-
-    @PostMapping("/guarded")
-    public String post() {
+    @RequestMapping(path = "/guarded", method = {RequestMethod.GET, RequestMethod.POST})
+    public String guarded() {
       counter.calls.incrementAndGet();
       return "ok";
     }

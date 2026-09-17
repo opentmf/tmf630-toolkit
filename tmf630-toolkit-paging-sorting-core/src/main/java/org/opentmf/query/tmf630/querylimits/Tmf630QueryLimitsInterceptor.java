@@ -29,9 +29,16 @@ public class Tmf630QueryLimitsInterceptor implements HandlerInterceptor {
       @NonNull HttpServletRequest request,
       @NonNull HttpServletResponse response,
       @NonNull Object handler) {
-    String query = request.getQueryString();
+    check(request.getQueryString());
+    return true;
+  }
+
+  /**
+   * @throws TmfQueryLimitException when {@code query} or one of its values is over the limit
+   */
+  void check(String query) {
     if (query == null || query.isEmpty()) {
-      return true;
+      return;
     }
     if (query.length() > settings.maxQueryStringLength()) {
       throw new TmfQueryLimitException(
@@ -57,6 +64,5 @@ public class Tmf630QueryLimitsInterceptor implements HandlerInterceptor {
                 + ".");
       }
     }
-    return true;
   }
 }

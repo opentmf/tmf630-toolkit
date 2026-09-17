@@ -38,10 +38,11 @@ class Tmf630QueryLimitsInterceptorTest {
 
   @Test
   void oneCharOverTheValueLimitIs400NamingTheParameter() {
+    MockHttpServletRequest request = get("fields=" + "a".repeat(21));
     TmfQueryLimitException ex =
         assertThrows(
             TmfQueryLimitException.class,
-            () -> interceptor.preHandle(get("fields=" + "a".repeat(21)), response, handler));
+            () -> interceptor.preHandle(request, response, handler));
 
     assertEquals(400, ex.getStatus());
     assertEquals("Query parameter 'fields' is 21 characters long; the limit is 20.", ex.getMessage());
@@ -51,11 +52,12 @@ class Tmf630QueryLimitsInterceptorTest {
   void oneCharOverTheQueryStringLimitIs414() {
     String query = "a=1&" + "b=2&".repeat(24) + "c";
     assertEquals(101, query.length());
+    MockHttpServletRequest request = get(query);
 
     TmfQueryLimitException ex =
         assertThrows(
             TmfQueryLimitException.class,
-            () -> interceptor.preHandle(get(query), response, handler));
+            () -> interceptor.preHandle(request, response, handler));
 
     assertEquals(414, ex.getStatus());
     assertEquals("Query string is 101 characters long; the limit is 100.", ex.getMessage());
@@ -69,10 +71,11 @@ class Tmf630QueryLimitsInterceptorTest {
   @Test
   void rawEncodedLengthIsWhatCounts() {
     // 7 encoded chars ("%20" x 7 = 21) for 7 decoded spaces: the encoded form is measured.
+    MockHttpServletRequest request = get("q=" + "%20".repeat(7));
     TmfQueryLimitException ex =
         assertThrows(
             TmfQueryLimitException.class,
-            () -> interceptor.preHandle(get("q=" + "%20".repeat(7)), response, handler));
+            () -> interceptor.preHandle(request, response, handler));
     assertEquals(400, ex.getStatus());
   }
 
