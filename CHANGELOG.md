@@ -35,13 +35,16 @@ All notable changes to `tmf630-toolkit` are documented in this file.
   outright in this minor because dropping the `Tmf630FilterSettings` component and the
   `PredicateFactory` constructor parameter would break source compatibility for callers
   that construct either by hand; removal is a 4.0.0 item.
-- **Adopter note.** Since 3.0.0, `.regex` on a JPA root was a `400` unless the flag was
-  set. An adopter test that pins `.regex` → `400` on a JPA endpoint (dnms-catalog's
-  `AuthoringFilterIT` is one) will go red on this bump and must be re-pinned to the new
-  behaviour: `200` with the LIKE-subset rows, or `400` naming the subset for an
-  out-of-subset pattern. A test that pins `400` because `regex.enabled` is `false` (the
-  default; dnms-journal's `FilterOperatorGrammarIT` is one) is unaffected: that gate runs
-  first on every backend and is unchanged.
+- **Adopter note: the bump itself changes nothing for a service that has not enabled
+  regex.** `opentmf.tmf630.attribute-filtering.regex.enabled` still defaults to `false`,
+  and that gate runs first on every backend, so a test pinning `.regex` → `400 "Regex
+  operator is disabled."` (every dnms service today, e.g. dnms-catalog's
+  `AuthoringFilterIT` and dnms-journal's `FilterOperatorGrammarIT`) stays green. The new
+  behaviour appears only once a service sets `regex.enabled: true`; from then on `.regex`
+  on a JPA root answers `200` with the LIKE-subset rows, or `400` naming the subset for an
+  out-of-subset pattern, and any test that pinned the pre-3.4.0 JPA refusal is re-pinned
+  in the same change that enables the operator. Nothing else gates the translator:
+  `allow-jpa-like-semantics` is not required and only logs a warning if set.
 
 ### Fixed (JSONB `filter=` with `=~` was a `500`)
 
