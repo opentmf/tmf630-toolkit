@@ -423,7 +423,7 @@ Every one of these is a first-class Postgres/JSONB operation with no JOIN requir
 | Correlated sort `arr[key=X].value` | `ORDER BY (jsonb_path_query_first(payload, '$.arr[*] ? (@.id == "X").value')::text)` | Absent on JPA (whole `Tmf630MongoCorrelatedSortExecutor` has no analogue) |
 | `min()` / `max()` aggregators in sort | `ORDER BY jsonb_path_query_first(...)` with subselect over `jsonb_path_query(...)` folded via SQL `MIN`/`MAX` | Impractical portably on JPA (dialect-specific SQL) |
 | `length() == N` on arrays | `jsonb_array_length(payload->'arr') = N` | Works on JPA and Mongo (2.1.5, via `Ops.COL_SIZE`) |
-| Real regex (`.regex` / `=~`) | `payload->>'field' ~ ?` (case-sensitive) / `~* ?` (case-insensitive) | Works on JPA as `LIKE` (semantic drift — see JPA doc §3.6) |
+| Real regex (`.regex` / `=~`) | `payload->>'field' ~ ?` (case-sensitive) / `~* ?` (case-insensitive) | JPA renders the LIKE-expressible subset faithfully and rejects the rest with `400` (3.4.0 — see JPA doc §3.6) |
 
 **Read this table carefully.** The JSONB backend closes **7 of the 11 divergences**
 listed in the JPA gap analysis, in most cases *more cleanly* than a JPA-relational

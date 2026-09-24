@@ -26,11 +26,17 @@ import org.opentmf.query.tmf630.filtering.TmfFilteringException;
  *       {@code <}, {@code <=} pass through unchanged.
  *   <li>Numeric and boolean literals pass through unchanged.
  *   <li>{@code null} → {@code null} (SQL/JSON path {@code null}, all lowercase).
+ *   <li>{@code =~ /pattern/} and {@code =~ /pattern/i} (TMF-630 Part 6 regex) →
+ *       {@code like_regex "pattern"} / {@code like_regex "pattern" flag "i"}. Postgres
+ *       evaluates {@code like_regex} with the same POSIX engine as the {@code ~} operator the
+ *       attribute-side {@code .regex} uses, so both grammars match the same rows. Gated by
+ *       {@code regex.enabled} exactly like the attribute side; only the {@code i} flag is
+ *       accepted (3.4.0 — before that the operator passed through verbatim and Postgres
+ *       rejected the jsonpath, surfacing as a 500).
  * </ul>
  *
  * <p>Deferred to a follow-up cut (rejected with a clear message):
  * {@code length()} function (handled by {@link #translateLengthEquality}),
- * {@code =~} regex (Postgres has {@code like_regex} but not first-class here yet),
  * {@code [*]} bare wildcard as top-level projection (implicit via [*] in array
  * correlation but not standalone).
  *
@@ -45,8 +51,15 @@ public class JsonbJsonPathTranslator {
 
   private final JsonbPathExtractor extractor;
   private final String payloadColumn;
+  private final boolean regexEnabled;
 
+  /** Regex-disabled translator: {@code =~} is rejected, matching the attribute side's default. */
   public JsonbJsonPathTranslator(JsonbPathExtractor extractor, String payloadColumn) {
+    this(extractor, payloadColumn, false);
+  }
+
+  public JsonbJsonPathTranslator(
+      JsonbPathExtractor extractor, String payloadColumn, boolean regexEnabled) {
     if (extractor == null) {
       throw new IllegalArgumentException("extractor must not be null");
     }
@@ -55,6 +68,7 @@ public class JsonbJsonPathTranslator {
     }
     this.extractor = extractor;
     this.payloadColumn = payloadColumn;
+    this.regexEnabled = regexEnabled;
   }
 
   /**
@@ -248,6 +262,8 @@ public class JsonbJsonPathTranslator {
       int consumed;
       if (c == '\'' || c == '"') {
         consumed = translateQuotedLiteral(input, i, out);
+      } else if (c == '=' && i + 1 < input.length() && input.charAt(i + 1) == '~') {
+        consumed = translateRegexOperator(input, i, out);
       } else if (c == '[' && looksLikeFilterOpen(input, i)) {
         consumed = translateFilterExpression(input, i, out);
       } else {
@@ -263,6 +279,56 @@ public class JsonbJsonPathTranslator {
     int end = findStringEnd(input, i);
     out.append('"').append(JsonbStringEscape.escapeForDoubleQuoted(input.substring(i + 1, end))).append('"');
     return end + 1 - i;
+  }
+
+  /**
+   * Consumes {@code =~ /pattern/flags} starting at the {@code =} and appends
+   * {@code like_regex "pattern"} plus {@code flag "i"} when the {@code i} flag is present. The
+   * literal grammar is the one the core JsonPath builder accepts: {@code \\/} keeps a literal
+   * slash inside the pattern, and trailing letters are flags.
+   */
+  private int translateRegexOperator(String input, int i, StringBuilder out) {
+    if (!regexEnabled) {
+      throw new TmfFilteringException("Regex operator is disabled.");
+    }
+    int open = skipSpaces(input, i + 2);
+    if (open >= input.length() || input.charAt(open) != '/') {
+      throw new TmfFilteringException("=~ requires a /pattern/ literal in jsonPath filter.");
+    }
+    int close = regexLiteralEnd(input, open);
+    int flagsEnd = close + 1;
+    while (flagsEnd < input.length() && Character.isLetter(input.charAt(flagsEnd))) {
+      flagsEnd++;
+    }
+    String flags = input.substring(close + 1, flagsEnd);
+    if (!flags.isEmpty() && !"i".equals(flags)) {
+      throw new TmfFilteringException(
+          "Unsupported regex flags '" + flags + "' in jsonPath filter; supported: i");
+    }
+    String pattern = input.substring(open + 1, close);
+    out.append("like_regex \"")
+        .append(JsonbStringEscape.escapeForDoubleQuoted(pattern))
+        .append('"');
+    if (!flags.isEmpty()) {
+      out.append(" flag \"i\"");
+    }
+    return flagsEnd - i;
+  }
+
+  private static int regexLiteralEnd(String s, int open) {
+    int i = open + 1;
+    while (i < s.length()) {
+      char c = s.charAt(i);
+      if (c == '\\') {
+        i += 2;
+        continue;
+      }
+      if (c == '/') {
+        return i;
+      }
+      i++;
+    }
+    throw new TmfFilteringException("Unterminated regex literal in jsonPath filter.");
   }
 
   /**

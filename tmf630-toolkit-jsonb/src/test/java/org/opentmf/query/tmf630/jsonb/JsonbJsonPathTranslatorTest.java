@@ -186,6 +186,43 @@ class JsonbJsonPathTranslatorTest {
   }
 
   @Test
+  @DisplayName("=~ /pattern/ lowers to like_regex with the pattern as a double-quoted literal")
+  void regexOperator() {
+    JsonbJsonPathTranslator regex = new JsonbJsonPathTranslator(extractor, "payload", true);
+    assertThat(regex.translate("$[?(@.status =~ /^Resol.*?/)]").params())
+        .containsExactly("$ ? (@.status like_regex \"^Resol.*?\")");
+    assertThat(regex.translate("$[?(@.status =~ /^resol.*/i)]").params())
+        .containsExactly("$ ? (@.status like_regex \"^resol.*\" flag \"i\")");
+    // backslashes survive as regex escapes: the jsonpath literal doubles them
+    assertThat(regex.translate("$[?(@.name =~ /a\\.b/)]").params())
+        .containsExactly("$ ? (@.name like_regex \"a\\\\.b\")");
+    // a literal slash inside the pattern, and =~ inside || and inside array correlation
+    assertThat(
+            regex.translate("$[?(@.href =~ /\\/v4\\// || @.items[?(@.id =~ /^X/i)])]").params())
+        .containsExactly(
+            "$ ? (@.href like_regex \"\\\\/v4\\\\/\""
+                + " || @.items[*] ? (@.id like_regex \"^X\" flag \"i\"))");
+  }
+
+  @Test
+  @DisplayName("=~ is gated by regex.enabled and accepts only the i flag")
+  void regexOperatorGates() {
+    assertThatThrownBy(() -> translator.translate("$[?(@.status =~ /x/)]"))
+        .isInstanceOf(TmfFilteringException.class)
+        .hasMessageContaining("disabled");
+    JsonbJsonPathTranslator regex = new JsonbJsonPathTranslator(extractor, "payload", true);
+    assertThatThrownBy(() -> regex.translate("$[?(@.status =~ /x/m)]"))
+        .isInstanceOf(TmfFilteringException.class)
+        .hasMessageContaining("supported: i");
+    assertThatThrownBy(() -> regex.translate("$[?(@.status =~ 'x')]"))
+        .isInstanceOf(TmfFilteringException.class)
+        .hasMessageContaining("/pattern/");
+    assertThatThrownBy(() -> regex.translate("$[?(@.status =~ /x)]"))
+        .isInstanceOf(TmfFilteringException.class)
+        .hasMessageContaining("Unterminated");
+  }
+
+  @Test
   @DisplayName("null extractor / blank payload column rejected at construction")
   void rejectsInvalidConstruction() {
     assertThatThrownBy(() -> new JsonbJsonPathTranslator(null, "payload"))

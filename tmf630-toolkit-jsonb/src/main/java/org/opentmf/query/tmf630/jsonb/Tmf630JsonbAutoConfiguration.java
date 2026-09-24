@@ -116,8 +116,11 @@ public class Tmf630JsonbAutoConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
-  public JsonbJsonPathTranslator tmf630JsonbJsonPathTranslator(JsonbPathExtractor extractor) {
-    return new JsonbJsonPathTranslator(extractor, "payload");
+  public JsonbJsonPathTranslator tmf630JsonbJsonPathTranslator(
+      JsonbPathExtractor extractor, ObjectProvider<Tmf630FilterSettings> filterSettings) {
+    Tmf630FilterSettings settings = filterSettings.getIfAvailable();
+    boolean regexEnabled = settings != null && settings.regexEnabled();
+    return new JsonbJsonPathTranslator(extractor, "payload", regexEnabled);
   }
 
   @Bean

@@ -61,7 +61,9 @@ Rationale by principle:
 
 Deliverables at end of (a):
 - Nulls-last cross-backend parity property.
-- `.regex` semantic-drift closed via strict rejection.
+- `.regex` semantic-drift closed via strict rejection. *(Superseded in 3.4.0: JPA now
+  renders the LIKE-expressible subset faithfully and rejects only the rest — JPA doc
+  §3.6 resolution note.)*
 - Filter-side array correlation works on JPA for JOIN-mapped associations.
 - Sort-side correlated sort works on JPA for JOIN-mapped associations (the largest
   historical gap).
@@ -229,6 +231,9 @@ Explicitly deferred to a later release:
 - **Portable real regex on JPA via `regexp_like` dialect templates** — not worth the
   dialect-detect surface until a downstream service actually asks. The (a.2) rejection
   makes the current silent-drift explicit; the extension to real regex can come later.
+  *(3.4.0 took a middle path instead: a faithful LIKE rendering of the subset LIKE can
+  express, with a `400` outside it, which met the first downstream ask — contains-with-OR
+  on a relational catalog — without a dialect surface.)*
 - **Write-side payload validation** (rejecting `@CreatedDate`/`@Version` fields from
   client POSTs) — a legitimate future direction but explicitly not tied to v3.0.0.
 - **Cross-entity JOIN filter/sort** on any backend — remains scoped out per JSONB doc

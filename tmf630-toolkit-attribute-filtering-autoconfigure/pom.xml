@@ -4,7 +4,7 @@
   <parent>
     <groupId>org.opentmf.query</groupId>
     <artifactId>tmf630-toolkit</artifactId>
-    <version>3.3.1-SNAPSHOT</version>
+    <version>3.4.0-SNAPSHOT</version>
     <relativePath>../pom.xml</relativePath>
   </parent>
 
@@ -154,10 +154,19 @@
               <groupId>jakarta.persistence</groupId>
               <artifactId>jakarta.persistence-api</artifactId>
             </path>
+            <!-- An explicit processor path replaces classpath discovery, so Boot's metadata
+                 processor must be listed here too or spring-configuration-metadata.json is
+                 never generated for this module (it was missing from every release up to
+                 3.3.0). -->
+            <path>
+              <groupId>org.springframework.boot</groupId>
+              <artifactId>spring-boot-configuration-processor</artifactId>
+              <version>${spring-boot.version}</version>
+            </path>
           </annotationProcessorPaths>
           <compilerArgs>
             <arg>-processor</arg>
-            <arg>com.querydsl.apt.jpa.JPAAnnotationProcessor,com.querydsl.apt.QuerydslAnnotationProcessor</arg>
+            <arg>com.querydsl.apt.jpa.JPAAnnotationProcessor,com.querydsl.apt.QuerydslAnnotationProcessor,org.springframework.boot.configurationprocessor.ConfigurationMetadataAnnotationProcessor</arg>
           </compilerArgs>
         </configuration>
       </plugin>

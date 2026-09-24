@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.querydsl.core.types.Operation;
 import com.querydsl.core.types.Ops;
@@ -311,9 +312,78 @@ class PredicateFactoryTest {
     private OffsetDateTime dateValue;
   }
 
+  @Test
+  void jpaRootRegexRendersAsEscapedLikeForTheSubset() {
+    PredicateFactory factory = new PredicateFactory(true, 256);
+    PathBuilder<JpaStringEntity> root = new PathBuilder<>(JpaStringEntity.class, "jpaStringEntity");
+    ResolvedField field = new ResolvedField("name", String.class);
+
+    String contains = factory.build(root, field, TmfOperator.REGEX, "p").toString();
+    assertTrue(contains.contains("like"), contains);
+    assertTrue(contains.contains("%p%"), contains);
+    assertFalse(contains.contains("matches"), contains);
+
+    String literalPercent = factory.build(root, field, TmfOperator.REGEX, "^50% off$").toString();
+    assertTrue(literalPercent.contains("50!% off"), literalPercent);
+
+    String ignoreCase = factory.build(root, field, TmfOperator.REGEXI, "^Resol.*?").toString();
+    assertTrue(ignoreCase.contains("lower("), ignoreCase);
+    assertTrue(ignoreCase.contains("Resol%"), ignoreCase);
+  }
+
+  @Test
+  void jpaRootRegexOutsideTheSubsetIsRejectedWithTheSubsetNamed() {
+    PredicateFactory factory = new PredicateFactory(true, 256);
+    PathBuilder<JpaStringEntity> root = new PathBuilder<>(JpaStringEntity.class, "jpaStringEntity");
+    ResolvedField field = new ResolvedField("name", String.class);
+
+    for (String pattern : List.of("p+", "(p|q)", "[pq]", "\\d", "^p{2}")) {
+      TmfFilteringException ex =
+          assertThrows(
+              TmfFilteringException.class,
+              () -> factory.build(root, field, TmfOperator.REGEX, pattern));
+      assertTrue(ex.getMessage().contains("Supported subset on JPA"), ex.getMessage());
+      TmfFilteringException exI =
+          assertThrows(
+              TmfFilteringException.class,
+              () -> factory.build(root, field, TmfOperator.REGEXI, pattern));
+      assertTrue(exI.getMessage().contains("Supported subset on JPA"), exI.getMessage());
+    }
+  }
+
+  @Test
+  void jpaLikeSemanticsCompatFlagIsInert() {
+    PredicateFactory flagged = new PredicateFactory(true, 256, IsnullSemantics.MISSING_ONLY, true);
+    PredicateFactory plain = new PredicateFactory(true, 256);
+    PathBuilder<JpaStringEntity> root = new PathBuilder<>(JpaStringEntity.class, "jpaStringEntity");
+    ResolvedField field = new ResolvedField("name", String.class);
+
+    assertEquals(
+        plain.build(root, field, TmfOperator.REGEX, "^p.*").toString(),
+        flagged.build(root, field, TmfOperator.REGEX, "^p.*").toString());
+    assertThrows(
+        TmfFilteringException.class, () -> flagged.build(root, field, TmfOperator.REGEX, "p+"));
+  }
+
+  @Test
+  void nonJpaRootKeepsRealRegex() {
+    PredicateFactory factory = new PredicateFactory(true, 256);
+    PathBuilder<SampleEntity> root = new PathBuilder<>(SampleEntity.class, "sampleEntity");
+    ResolvedField field = new ResolvedField("name", String.class);
+
+    String predicate = factory.build(root, field, TmfOperator.REGEX, "p+|[q]\\d").toString();
+    assertTrue(predicate.contains("matches"), predicate);
+    assertFalse(predicate.contains("like"), predicate);
+  }
+
   @Entity
   static class JpaPolymorphicEntity {
     private Object value;
+  }
+
+  @Entity
+  static class JpaStringEntity {
+    private String name;
   }
 
   static class PrimitiveEntity {

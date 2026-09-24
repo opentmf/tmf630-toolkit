@@ -493,13 +493,19 @@ carrying two expressions) folds the same way as repeated parameters.
 - `regex` / `regexi` require `opentmf.tmf630.attribute-filtering.regex.enabled=true`
   (default `false`). Max pattern length is bounded by
   `opentmf.tmf630.attribute-filtering.regex.max-length` (default `256`).
-- **3.0.0**: `regex` / `regexi` on `@Entity` (pure JPA) rooted queries return
-  `400` at parse time — querydsl-jpa renders them as SQL `LIKE` (not real regex),
-  silently differing from Mongo/JSONB semantics. Escape hatch (deprecated):
-  set `opentmf.tmf630.attribute-filtering.regex.allow-jpa-like-semantics=true`
-  to preserve the pre-3.0.0 `LIKE`-based behavior; a one-time `WARN` log is
-  emitted on first use. For real regex on Postgres, use the JSONB backend
-  (native `~` / `~*` operators) — see the JSONB backend handbook.
+- **JPA roots render the LIKE-expressible subset (3.4.0).** On an `@Entity` root the
+  toolkit translates the pattern to an escaped SQL `LIKE` itself: literal characters
+  (a typed `%` or `_` matches itself), `\`-escaped metacharacters, `.` (any one
+  character), `.*` / `.*?` (any sequence), a leading `^` and a trailing `$` as anchors,
+  and `regexi` / the `i` flag as `lower(column) LIKE lower(pattern)`. An unanchored side
+  is padded, so `name.regex=p` is *contains* `p`, `name.regex=^p` is *starts with*, and
+  `name.regex=^p$` is *equals* — the same rows Mongo and JSONB return for the same
+  URL. Anything the subset cannot express (`+`, `?` outside `.*?`, `[...]`, `(...)`,
+  `{n}`, `|`, `\d` and friends, `^`/`$` away from the ends) is a `400` whose message
+  names the subset. For full regex on Postgres use the JSONB backend (native `~` /
+  `~*`), or MongoDB. The pre-3.4.0 opt-in
+  `opentmf.tmf630.attribute-filtering.regex.allow-jpa-like-semantics` is inert and
+  deprecated for removal.
 - `between`, `in`, `nin` are multi-value operators. Values can be provided either as
   repeated query parameters (`?key.in=A&key.in=B`) or as a single comma-separated list
   (`?key.in=A,B`). A literal comma inside a value can be escaped with `\,`. The two
@@ -591,7 +597,8 @@ GET /api/persons?filter=$[?(!@.middleName)]
 ```
 
 Supported operators inside `[?(...)]`: `==`, `!=`, `>`, `>=`, `<`, `<=`, `=~` (regex —
-requires `regex.enabled=true`), `&&`, `||`, `!` (only as prefix on `@.field`).
+requires `regex.enabled=true`; on JPA roots the LIKE-expressible subset described under
+the attribute operators, `400` outside it), `&&`, `||`, `!` (only as prefix on `@.field`).
 
 String literals accept both `'...'` and `"..."` — the opening quote is the close
 sentinel, so `'X"` does not terminate at the `"`. Number, boolean, and `null` literals
@@ -2272,7 +2279,8 @@ against it, with unknown fields honoring `on-unknown-field` and nested paths gat
 bean out of the box), and the same URL returns the same result set as a
 QueryDSL-terminal endpoint — pinned by the `Tmf630JsonbUrlBindingParityIT` battery. The
 one intended divergence: `.regex` runs natively here (Postgres `~`/`~*`) while the JPA
-column backend rejects it (LIKE-semantics guard, JPA gap analysis §3.6).
+column backend renders only the LIKE-expressible subset and answers `400` outside it
+(JPA gap analysis §3.6, resolved in 3.4.0).
 
 #### Level 2 — list endpoint via the read executor (programmatic control)
 
@@ -3166,7 +3174,9 @@ Supported subset (Mongo/document backends):
 - regex match: `=~` with a `/pattern/` or `/pattern/i` literal; requires
   `regex.enabled=true` and honours `regex.max-length`, exactly like the attribute-side
   `.regex` / `.regexi` operators. Only the `i` flag is supported — other flags are
-  rejected.
+  rejected. On JPA roots the pattern is rendered as an escaped SQL `LIKE` for the
+  LIKE-expressible subset (literals, `\`-escapes, `.`, `.*`, `.*?`, `^…$` anchors, `i`)
+  and rejected with `400` outside it (3.4.0).
 - literals: string (single- or double-quoted), number, boolean, `null`
 - field paths: `@.field`, `@.nested.field`
 - array correlation: `@.arrayField[?(...)]` with strict same-element semantics via
