@@ -39,7 +39,9 @@ All notable changes to `tmf630-toolkit` are documented in this file.
   set. An adopter test that pins `.regex` → `400` on a JPA endpoint (dnms-catalog's
   `AuthoringFilterIT` is one) will go red on this bump and must be re-pinned to the new
   behaviour: `200` with the LIKE-subset rows, or `400` naming the subset for an
-  out-of-subset pattern.
+  out-of-subset pattern. A test that pins `400` because `regex.enabled` is `false` (the
+  default; dnms-journal's `FilterOperatorGrammarIT` is one) is unaffected: that gate runs
+  first on every backend and is unchanged.
 
 ### Fixed (JSONB `filter=` with `=~` was a `500`)
 
