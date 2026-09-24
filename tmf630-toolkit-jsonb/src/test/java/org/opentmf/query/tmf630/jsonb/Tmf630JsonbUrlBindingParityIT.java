@@ -9,8 +9,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -45,8 +47,10 @@ import tools.jackson.databind.ObjectMapper;
  * two endpoints return the same HTTP status, the same id set, and (for 200s) the id set
  * the URL semantically demands.
  *
- * <p>The one DOCUMENTED divergence — {@code .regex} rejecting on JPA (LIKE-semantics
- * guard) while running natively on JSONB — is pinned as such in its own test.
+ * <p>Since 3.4.0 {@code .regex} / {@code .regexi} / {@code =~} agree on both terminals for the
+ * LIKE-expressible subset (JPA renders it as an escaped {@code LIKE}, JSONB runs the real regex).
+ * The one remaining DOCUMENTED divergence — patterns outside that subset are a 400 on JPA and
+ * real regex on JSONB — is pinned as such in its own test.
  */
 @SpringBootTest(
     classes = Tmf630JsonbUrlBindingParityIT.TestApp.class,
@@ -197,16 +201,124 @@ class Tmf630JsonbUrlBindingParityIT {
         .isEqualTo(400);
   }
 
-  @Test
+  // ---- regex parity (3.4.0) ---------------------------------------------------------------
+  //
+  // Verbatim copy of RegexParityFixture in tmf630-toolkit-attribute-filtering-autoconfigure
+  // (this module cannot see that module's test classes). Keep the seed and both tables in
+  // step with Tmf630PredicateSqlJpaRegexParityIT and Tmf630PredicateMongoRegexParityIT.
+
+  private static final Map<String, String> REGEX_VALUES = new LinkedHashMap<>();
+
+  static {
+    REGEX_VALUES.put("R1", "Pass-through");
+    REGEX_VALUES.put("R2", "PASSWORD_1");
+    REGEX_VALUES.put("R3", "50% off");
+    REGEX_VALUES.put("R4", "a.b");
+    REGEX_VALUES.put("R5", "axb");
+    REGEX_VALUES.put("R6", "p");
+    REGEX_VALUES.put("R7", "Resolved");
+    REGEX_VALUES.put("R8", "Resolution");
+    REGEX_VALUES.put("R9", "unresolved");
+    REGEX_VALUES.put("R10", "100_percent");
+  }
+
+  private static final Set<String> REGEX_ALL = Set.copyOf(REGEX_VALUES.keySet());
+
+  static Stream<Arguments> regexParityCases() {
+    return Stream.of(
+        Arguments.of("bare literal is CONTAINS", "regex", "p", Set.of("R6", "R10")),
+        Arguments.of("bare literal, i flag", "regexi", "p", Set.of("R1", "R2", "R6", "R10")),
+        Arguments.of("both anchors is exact", "regexi", "^p$", Set.of("R6")),
+        Arguments.of("leading anchor is STARTS WITH", "regexi", "^p", Set.of("R1", "R2", "R6")),
+        Arguments.of("trailing anchor is ENDS WITH", "regexi", "d$", Set.of("R7", "R9")),
+        Arguments.of("spec example Resol.*?", "regex", "Resol.*?", Set.of("R7", "R8")),
+        Arguments.of("spec example, i flag", "regexi", "resol.*?", Set.of("R7", "R8", "R9")),
+        Arguments.of("explicit .*p.*", "regex", ".*p.*", Set.of("R6", "R10")),
+        Arguments.of("percent is a literal", "regex", "%", Set.of("R3")),
+        Arguments.of("underscore is a literal", "regex", "_", Set.of("R2", "R10")),
+        Arguments.of("dot is any one char", "regex", "a.b", Set.of("R4", "R5")),
+        Arguments.of("escaped dot is a literal dot", "regex", "a\\.b", Set.of("R4")),
+        Arguments.of("anchored with percent", "regex", "^50% off$", Set.of("R3")),
+        Arguments.of("anchored with underscore", "regex", "^100_percent$", Set.of("R10")),
+        Arguments.of("hyphen is a literal", "regex", "Pass-through", Set.of("R1")),
+        Arguments.of("hyphen, i flag", "regexi", "PASS-THROUGH", Set.of("R1")),
+        Arguments.of("anchor after wildcard", "regexi", "^.*ED$", Set.of("R7", "R9")),
+        Arguments.of("wildcard then anchor", "regex", "ol.*n$", Set.of("R8")),
+        Arguments.of("match all", "regex", ".*", REGEX_ALL),
+        Arguments.of("empty string only", "regex", "^$", Set.of()));
+  }
+
+  static Stream<Arguments> regexOutsideSubsetCases() {
+    return Stream.of(
+        Arguments.of("p+", Set.of("R6", "R10")),
+        Arguments.of("[pq]", Set.of("R6", "R10")),
+        Arguments.of("(p|q)", Set.of("R6", "R10")),
+        Arguments.of("\\d", Set.of("R2", "R3", "R10")));
+  }
+
+  private void seedRegexRows() {
+    rowRepository.deleteAll();
+    entityRepository.deleteAll();
+    REGEX_VALUES.forEach(
+        (id, value) ->
+            save(id, "R9".equals(id) ? "TEST" : "NEW", 1, value, "2025-01-01T00:00:00Z"));
+  }
+
+  @ParameterizedTest(name = "{0}: modifiedBy.{1}={2}")
+  @MethodSource("regexParityCases")
   @DisplayName(
-      "documented divergence: .regex rejects on JPA (LIKE-semantics guard) but runs natively "
-          + "on JSONB")
-  void regexDivergenceIsPinned() throws Exception {
-    Map<String, List<String>> params = Map.of("status.regex", List.of("^NE.*"));
-    mockMvc.perform(withParams(get("/parity/jpa"), params)).andExpect(status().isBadRequest());
+      "3.4.0: in-subset regex → same rows on JPA (LIKE translation) and JSONB (real regex)")
+  void regexInSubsetSameRowsOnBothTerminals(
+      String label, String op, String pattern, Set<String> expected) throws Exception {
+    seedRegexRows();
+    Map<String, List<String>> params = Map.of("modifiedBy." + op, List.of(pattern));
+    MvcResult jpa = perform("/parity/jpa", params);
+    MvcResult jsonb = perform("/parity/jsonb", params);
+
+    assertThat(jpa.getResponse().getStatus()).as("JPA status for [%s]", label).isEqualTo(200);
+    assertThat(jsonb.getResponse().getStatus()).as("JSONB status for [%s]", label).isEqualTo(200);
+    assertThat(ids(jpa)).as("JPA ids for [%s]", label).isEqualTo(expected);
+    assertThat(ids(jsonb)).as("JSONB ids for [%s]", label).isEqualTo(expected);
+  }
+
+  @ParameterizedTest(name = "modifiedBy.regex={0}")
+  @MethodSource("regexOutsideSubsetCases")
+  @DisplayName(
+      "documented divergence: regex outside the LIKE subset is a 400 on JPA and real regex"
+          + " on JSONB")
+  void regexOutsideSubsetDivergenceIsPinned(String pattern, Set<String> jsonbExpected)
+      throws Exception {
+    seedRegexRows();
+    Map<String, List<String>> params = Map.of("modifiedBy.regex", List.of(pattern));
+    mockMvc
+        .perform(withParams(get("/parity/jpa"), params))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.message").value(containsString("Supported subset on JPA")));
     MvcResult jsonb = perform("/parity/jsonb", params);
     assertThat(jsonb.getResponse().getStatus()).isEqualTo(200);
-    assertThat(jsonb.getResponse().getContentAsString()).isEqualTo("[\"P1\",\"P4\"]");
+    assertThat(ids(jsonb)).isEqualTo(jsonbExpected);
+  }
+
+  @Test
+  @DisplayName("3.4.0: Part 6 =~ with || across two fields → same rows on both terminals")
+  void regexOrAcrossFieldsSameRowsOnBothTerminals() throws Exception {
+    seedRegexRows();
+    Map<String, List<String>> params =
+        Map.of("filter", List.of("$[?(@.modifiedBy =~ /.*t.*/i || @.status =~ /^TEST$/)]"));
+    MvcResult jpa = perform("/parity/jpa", params);
+    MvcResult jsonb = perform("/parity/jsonb", params);
+    Set<String> expected = Set.of("R1", "R8", "R9", "R10");
+
+    assertThat(jpa.getResponse().getStatus()).isEqualTo(200);
+    assertThat(jsonb.getResponse().getStatus()).isEqualTo(200);
+    assertThat(ids(jpa)).isEqualTo(expected);
+    assertThat(ids(jsonb)).isEqualTo(expected);
+  }
+
+  private Set<String> ids(MvcResult result) throws Exception {
+    String body = result.getResponse().getContentAsString();
+    String[] ids = objectMapper.readValue(body, String[].class);
+    return Set.of(ids);
   }
 
   static Stream<String> scopedTerminals() {

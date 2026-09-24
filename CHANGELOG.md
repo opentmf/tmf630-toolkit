@@ -2,6 +2,84 @@
 
 All notable changes to `tmf630-toolkit` are documented in this file.
 
+## [3.4.0] - 2026-09-24
+
+### Changed (regex on JPA roots renders the LIKE-expressible subset, rejects the rest)
+
+- **`.regex` / `.regexi` / Part 6 `=~` now work on `@Entity` roots for the subset SQL
+  `LIKE` can express, with the same rows as Mongo and JSONB.** A new translator in
+  `PredicateFactory` renders the pattern itself instead of handing it to querydsl-jpa's
+  `regexToLike`: literal characters (with `%`, `_` and the escape character escaped so
+  they match themselves), `\`-escaped metacharacters, `.` → `_`, `.*` and `.*?` → `%`, a
+  leading `^` and a trailing `$` as anchors, and the `i` flag as
+  `lower(column) LIKE lower(pattern)`. An unanchored side is padded with `%`, so
+  `name.regex=p` means *contains* `p` and `$[?(@.name =~ /^p$/)]` means *equals* `p`,
+  exactly as the regex does. Anything outside the subset (`+`, `?` other than in `.*?`,
+  `*` not after `.`, `[ ]`, `( )`, `{ }`, `|`, `\d`/`\w`/`\s`/back-references, `^`/`$`
+  away from the ends) is a `400` whose message names the supported subset and the JSONB /
+  Mongo escape. All three grammars are covered at once — attribute-side
+  `.regex`/`.regexi`, the Part 1 `%3D~` encoded form and the Part 6 `=~` literal share
+  the same factory path. Pinned by a three-backend battery over one seed:
+  `Tmf630PredicateSqlJpaRegexParityIT` (JPA), `Tmf630PredicateMongoRegexParityIT`
+  (Mongo) and `Tmf630JsonbUrlBindingParityIT#regexParityCases` (JPA + JSONB in one
+  context) assert identical id sets for every in-subset pattern, and the documented
+  remaining divergence — out-of-subset patterns are `400` on JPA and real regex on Mongo /
+  JSONB — in its own test. Motivation: dnms-config-ui needs one paged request for
+  *"id OR name OR legacyDocumentType contains term, case-insensitively"* against a
+  relational catalog, which only the Part 6 grammar can express and which had no
+  contains-capable operator on JPA.
+- **`opentmf.tmf630.attribute-filtering.regex.allow-jpa-like-semantics` is inert and
+  deprecated for removal.** Kept so existing configuration still binds (the record
+  component on `Tmf630FilterSettings` and the property remain), it no longer changes
+  behaviour; setting it logs one warning asking for it to be removed. It is not removed
+  outright in this minor because dropping the `Tmf630FilterSettings` component and the
+  `PredicateFactory` constructor parameter would break source compatibility for callers
+  that construct either by hand; removal is a 4.0.0 item.
+- **Adopter note.** Since 3.0.0, `.regex` on a JPA root was a `400` unless the flag was
+  set. An adopter test that pins `.regex` → `400` on a JPA endpoint (dnms-catalog's
+  `AuthoringFilterIT` is one) will go red on this bump and must be re-pinned to the new
+  behaviour: `200` with the LIKE-subset rows, or `400` naming the subset for an
+  out-of-subset pattern.
+
+### Fixed (JSONB `filter=` with `=~` was a `500`)
+
+- **`=~` inside a JSONB `filter=` now lowers to Postgres `like_regex`.** The README has
+  promised `=~ /pattern/i` on the JSONB backend since 3.0.0, but `JsonbJsonPathTranslator`
+  passed the operator through verbatim into the SQL/JSON path, Postgres rejected it
+  (`syntax error at or near "=" of jsonpath input`) and the caller received a
+  `BadSqlGrammarException` as a `500`. The translator now emits
+  `@.field like_regex "pattern"` (plus `flag "i"`), which Postgres evaluates with the
+  same POSIX engine as the `~` operator behind the attribute-side `.regex`, so both grammars
+  return the same rows; it is gated by `regex.enabled` and accepts only the `i` flag, exactly
+  like the core builder. `JsonbJsonPathTranslator` gained a third constructor argument
+  (`regexEnabled`); the two-argument constructor keeps regex disabled.
+
+### Fixed (`tmf630-toolkit-attribute-filtering-autoconfigure` shipped no configuration metadata)
+
+- **`spring-configuration-metadata.json` is generated again for the attribute-filtering
+  starter.** The module compiles with an explicit annotation-processor path and
+  `-processor` list for querydsl's Q-class generation, which replaces javac's classpath
+  discovery, so Boot's `ConfigurationMetadataAnnotationProcessor` never ran and no release
+  up to 3.3.0 carried metadata for the 20 `opentmf.tmf630.attribute-filtering.*`
+  properties (no IDE completion, no deprecation hints). The processor is now on that path
+  and in that list; the metadata marks `regex.allow-jpa-like-semantics` as deprecated
+  since 3.4.0 with the reason above.
+
+### Fixed (`500` on `^`, `[...]` and `\d` regex patterns under the compat flag)
+
+- **Regex patterns that querydsl could not convert no longer surface as an unmapped
+  exception.** With `allow-jpa-like-semantics=true` (3.0.0 – 3.3.0), a pattern containing
+  `^`, `[`, `]` or a class escape such as `\d` reached querydsl-jpa's `regexToLike` at
+  JPQL serialization, inside the repository call and past the argument resolver, where it
+  threw `QueryException: '…' can't be converted to like form`. The toolkit's exception
+  handler maps only `TmfFilteringException`, so the caller received whatever the
+  application's catch-all produced — a `500` by default. Every such pattern is now
+  rejected at parse time with a `TmfFilteringException` (`400`). In the same window
+  `%` and `_` typed by the caller passed through `regexToLike` uninterpreted and acted as
+  SQL wildcards (`/%p%/i` matched *contains p* on JPA and *nothing* on Mongo / JSONB,
+  where it is a real regex over literal percent signs); they are now escaped and match
+  literally on every backend.
+
 ## [3.3.0] - 2026-09-17
 
 ### Fixed (`500` with an empty body on any paged endpoint given one long query parameter)

@@ -10,6 +10,7 @@ import org.opentmf.query.tmf630.filtering.config.PredicateLimits;
 import org.opentmf.query.tmf630.filtering.config.Tmf630FilterSettings;
 import org.opentmf.query.tmf630.filtering.config.UnknownParamBehavior;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.DeprecatedConfigurationProperty;
 
 @ConfigurationProperties(prefix = "opentmf.tmf630.attribute-filtering")
 public class Tmf630AttributeFilteringProperties {
@@ -191,6 +192,18 @@ public class Tmf630AttributeFilteringProperties {
       this.maxLength = maxLength;
     }
 
+    /**
+     * Inert since 3.4.0: regex on JPA roots renders the LIKE-expressible subset faithfully and
+     * rejects the rest with 400, without an opt-in. Setting this only produces a one-time
+     * warning. Deprecated in the configuration metadata for removal in 4.0.0; not
+     * {@code @Deprecated} in Java so the one remaining reader (the auto-configuration, which
+     * exists to emit that warning) is not itself flagged.
+     */
+    @DeprecatedConfigurationProperty(
+        reason =
+            "No effect since 3.4.0: regex on JPA roots renders the LIKE-expressible subset"
+                + " faithfully and rejects the rest with 400.",
+        since = "3.4.0")
     public boolean isAllowJpaLikeSemantics() {
       return allowJpaLikeSemantics;
     }

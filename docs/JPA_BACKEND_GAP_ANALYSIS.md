@@ -364,6 +364,21 @@ cross-backend parity.
 
 ### 3.6 `.regex` / `.regexi` / `=~` semantic drift (gap #11)
 
+> **Resolved in 3.4.0 — option (d), not listed below when this was written.** JPA
+> roots no longer hand the pattern to querydsl's `regexToLike`; `PredicateFactory`
+> translates the LIKE-expressible subset itself (literals with `%`/`_` escaped,
+> `\`-escapes, `.` → `_`, `.*`/`.*?` → `%`, `^`/`$` anchors, `i` flag as
+> `lower() LIKE lower()`) and rejects everything else with a `400` naming the subset.
+> For the accepted subset the three backends return identical rows (three-backend IT
+> battery over one seed); outside it JPA says so instead of guessing. Measured on
+> querydsl-core 5.0.0 before the change: `regexToLike` rewrote only `.*` and `.`,
+> left `p$`, `p+`, `(p|q)` and the spec's own `Resol.*?` literal (silently wrong), let
+> `%` and `_` through as SQL wildcards (`/%p%/i` was *contains* on JPA and *nothing* on
+> Mongo/JSONB), and threw an unmapped `QueryException` on `^`, `[…]` and `\d` (a
+> `500`). The 3.0.0 option (a) rejection and its `allow-jpa-like-semantics` opt-in are
+> superseded; the flag is inert and deprecated for removal. The analysis below is kept
+> as the record of why.
+
 **Important framing.** The operators are **supported by QueryDSL on JPA** — they map
 `Ops.MATCHES` and `Ops.MATCHES_IC` and neither URL returns 400. The issue is *what
 those ops render to*.

@@ -1,6 +1,8 @@
 package org.opentmf.query.tmf630.filtering;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.hasItems;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -175,37 +177,56 @@ class Tmf630PredicateSqlIT {
   }
 
   @Test
-  @DisplayName("Phase (a.2): `.regex`/`.regexi` on JPA entity rejected with 400 by default")
-  void rejectsJpaRegexByDefault() throws Exception {
-    // See JPA_BACKEND_GAP_ANALYSIS.md §3.6 and V3_ROADMAP.md a.2. The default behavior
-    // in 3.0.0 rejects `.regex` on JPA at parse time because querydsl-jpa renders it as
-    // SQL LIKE, silently differing from Mongo/JSONB semantics. Compat flag
-    // opentmf.tmf630.attribute-filtering.regex.allow-jpa-like-semantics=true preserves
-    // the pre-3.0.0 behavior (see Tmf630PredicateSqlJpaRegexCompatIT).
+  @DisplayName("3.4.0: `.regex` on JPA entity renders the LIKE subset with an escape clause")
+  void jpaRegexRendersAsEscapedLike() throws Exception {
+    // See JPA_BACKEND_GAP_ANALYSIS.md §3.6. The translator replaces querydsl's regexToLike:
+    // `^a.*` → `a%` escape '!'. Result-set parity with Mongo/JSONB is pinned in
+    // Tmf630PredicateSqlJpaRegexParityIT and its siblings.
     mockMvc
         .perform(
             get("/sql-search")
-                .param("transformationId.regex", "a.*")
+                .param("transformationId.regex", "^a.*")
                 .contentType(MediaType.APPLICATION_JSON))
-        .andExpect(status().isBadRequest())
-        .andExpect(
-            jsonPath("$.message")
-                .value(org.hamcrest.Matchers.containsString("LIKE")))
-        .andExpect(
-            jsonPath("$.message")
-                .value(
-                    org.hamcrest.Matchers.containsString("allow-jpa-like-semantics")));
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.length()").value(1))
+        .andExpect(jsonPath("$[0].transformationId").value("abc"));
+
+    String sql = firstSelectSql();
+    assertThat(sql).contains(" where ").contains(" like ").contains(" escape ");
   }
 
   @Test
-  @DisplayName("Phase (a.2): `.regexi` on JPA entity rejected with 400 by default")
-  void rejectsJpaRegexIByDefault() throws Exception {
+  @DisplayName("3.4.0: `.regexi` on JPA entity lower-cases both sides in the database")
+  void jpaRegexIgnoreCaseRendersAsLowerLike() throws Exception {
     mockMvc
         .perform(
             get("/sql-search")
-                .param("transformationId.regexi", "A.*")
+                .param("transformationId.regexi", "^A.*")
                 .contentType(MediaType.APPLICATION_JSON))
-        .andExpect(status().isBadRequest());
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.length()").value(1))
+        .andExpect(jsonPath("$[0].transformationId").value("abc"));
+
+    String sql = firstSelectSql();
+    assertThat(sql).contains("lower(").contains(" like ").contains(" escape ");
+  }
+
+  @Test
+  @DisplayName("3.4.0: regex outside the LIKE subset is a 400 that names the subset, not a 500")
+  void jpaRegexOutsideSubsetIsRejected() throws Exception {
+    // Before 3.4.0 these reached querydsl's regexToLike under the compat flag: `^` threw an
+    // unmapped QueryException (500) and `p+` rendered as a literal plus sign (wrong rows).
+    for (String pattern : List.of("a+", "[ab]", "\\d", "(a|b)")) {
+      mockMvc
+          .perform(
+              get("/sql-search")
+                  .param("transformationId.regex", pattern)
+                  .contentType(MediaType.APPLICATION_JSON))
+          .andExpect(status().isBadRequest())
+          .andExpect(
+              jsonPath("$.message")
+                  .value(containsString("Supported subset on JPA")));
+    }
   }
 
   @Test
@@ -299,18 +320,38 @@ class Tmf630PredicateSqlIT {
   }
 
   @Test
-  @DisplayName("Phase (a.2): Part 6 =~ regex in JSONPath filter rejected on JPA by default")
-  void regexEqualsTildeInFilterRejectedOnJpaByDefault() throws Exception {
-    // 3.0.0: `=~` in JSONPath filter routes through the same `.regex`/`.regexi` operators,
-    // so the JPA regex rejection guards this path too. Compat flag
-    // opentmf.tmf630.attribute-filtering.regex.allow-jpa-like-semantics=true restores the
-    // pre-3.0.0 LIKE behavior (see Tmf630PredicateSqlJpaRegexCompatIT).
+  @DisplayName("3.4.0: Part 6 =~ in JSONPath filter renders through the same LIKE subset on JPA")
+  void regexEqualsTildeInFilterRendersOnJpa() throws Exception {
+    // `=~` routes through the same REGEX/REGEXI factory path as `.regex`/`.regexi`, so the
+    // translator applies to both grammars. `/D.*/i` is unanchored: contains 'd' or 'D'.
     mockMvc
         .perform(
             get("/sql-search")
                 .param("filter", "$[?(@.status =~ /D.*/i)]")
                 .contentType(MediaType.APPLICATION_JSON))
-        .andExpect(status().isBadRequest());
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.length()").value(2))
+        .andExpect(
+            jsonPath("$[*].status").value(hasItems("DONE", "FAILED")));
+
+    mockMvc
+        .perform(
+            get("/sql-search")
+                .param("filter", "$[?(@.status =~ /^D.*/i)]")
+                .contentType(MediaType.APPLICATION_JSON))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.length()").value(1))
+        .andExpect(jsonPath("$[0].status").value("DONE"));
+
+    mockMvc
+        .perform(
+            get("/sql-search")
+                .param("filter", "$[?(@.status =~ /D+/i)]")
+                .contentType(MediaType.APPLICATION_JSON))
+        .andExpect(status().isBadRequest())
+        .andExpect(
+            jsonPath("$.message")
+                .value(containsString("Supported subset on JPA")));
   }
 
   private static SqlSearchEntity entity(

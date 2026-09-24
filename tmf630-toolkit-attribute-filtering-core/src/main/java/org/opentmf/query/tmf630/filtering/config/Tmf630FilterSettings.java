@@ -1,5 +1,13 @@
 package org.opentmf.query.tmf630.filtering.config;
 
+/**
+ * Immutable view of the attribute-filtering configuration handed to the parser and predicate
+ * builders.
+ *
+ * <p>{@code allowJpaLikeRegexSemantics} is inert since 3.4.0 and deprecated for removal: regex
+ * on JPA roots is rendered for the LIKE-expressible subset and rejected outside it without any
+ * opt-in. The component stays so that existing constructor call sites keep compiling.
+ */
 public record Tmf630FilterSettings(
     boolean implicitEqEnabled,
     boolean implicitEqCsvOr,

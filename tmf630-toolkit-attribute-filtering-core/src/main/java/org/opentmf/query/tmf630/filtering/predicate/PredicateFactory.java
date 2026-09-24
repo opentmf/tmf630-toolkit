@@ -236,7 +236,11 @@ public class PredicateFactory {
   private Predicate regex(PathBuilder<?> root, String fieldPath, Class<?> type, String pattern) {
     validateRegex(fieldPath, type, pattern);
     guardPolymorphicOnJpa(root, type, fieldPath, "'.regex'");
-    guardJpaRegexSemantics(root, fieldPath, "regex");
+    if (isJpaRoot(root)) {
+      warnIfCompatFlagSet();
+      String like = JpaRegexLikeTranslator.translate(pattern, fieldPath);
+      return root.getString(fieldPath).like(like, JpaRegexLikeTranslator.ESCAPE);
+    }
     return root.getString(fieldPath).matches(pattern);
   }
 
@@ -244,7 +248,10 @@ public class PredicateFactory {
       PathBuilder<?> root, String fieldPath, Class<?> type, String pattern) {
     validateRegex(fieldPath, type, pattern);
     guardPolymorphicOnJpa(root, type, fieldPath, "'.regexi'");
-    guardJpaRegexSemantics(root, fieldPath, "regexi");
+    if (isJpaRoot(root)) {
+      warnIfCompatFlagSet();
+      return jpaLikeIgnoreCase(root, fieldPath, pattern);
+    }
     // Use Ops.MATCHES_IC directly rather than `lower().matches(lower(pattern))`.
     // QueryDSL's Mongo serializer translates MATCHES_IC into a $regex predicate
     // with $options:"i"; the old form emitted a standalone Ops.LOWER call which
@@ -260,41 +267,36 @@ public class PredicateFactory {
   }
 
   /**
-   * Guard against silently-different semantics for {@code .regex} / {@code .regexi} on JPA
-   * backends. querydsl-jpa's default templates render {@code Ops.MATCHES} / {@code Ops.MATCHES_IC}
-   * as SQL {@code LIKE} / {@code LOWER(x) LIKE LOWER(?)} — Hibernate does not translate regex
-   * metacharacters ({@code ^}, {@code $}, {@code .}, {@code *}, {@code ?}, character classes)
-   * into {@code LIKE} equivalents, so the same URL that produces a real regex on Mongo/JSONB
-   * silently matches by {@code LIKE} on JPA. Rejects by default with an actionable message;
-   * opt-in via {@code opentmf.tmf630.attribute-filtering.regex.allow-jpa-like-semantics=true}
-   * preserves the pre-3.0.0 behavior with a one-time deprecation warning at first use. See
+   * Case-insensitive LIKE on a JPA root, with both sides lower-cased by the database so the
+   * comparison happens under one collation. querydsl's {@code likeIgnoreCase} would do the same
+   * through its {@code _IC} template; this explicit form is dialect-neutral JPQL and keeps the
+   * escape clause visible.
+   */
+  private static Predicate jpaLikeIgnoreCase(
+      PathBuilder<?> root, String fieldPath, String pattern) {
+    String like = JpaRegexLikeTranslator.translate(pattern, fieldPath);
+    return root.getString(fieldPath)
+        .lower()
+        .like(
+            Expressions.stringOperation(Ops.LOWER, Expressions.constant(like)),
+            JpaRegexLikeTranslator.ESCAPE);
+  }
+
+  /**
+   * {@code opentmf.tmf630.attribute-filtering.regex.allow-jpa-like-semantics} has had no effect
+   * since 3.4.0: {@code .regex} / {@code .regexi} / {@code =~} on JPA roots are rendered by
+   * {@link JpaRegexLikeTranslator} for the LIKE-expressible subset and rejected outside it,
+   * without any opt-in. The flag is kept (inert, deprecated) so existing configuration keeps
+   * binding; a one-time warning tells the operator to drop it. See
    * {@code JPA_BACKEND_GAP_ANALYSIS.md} §3.6.
    */
-  @SuppressWarnings("java:S1872")
-  private void guardJpaRegexSemantics(PathBuilder<?> root, String fieldPath, String opSuffix) {
-    if (!isJpaRoot(root)) {
-      return;
-    }
-    if (!allowJpaLikeRegexSemantics) {
-      throw new TmfFilteringException(
-          "'."
-              + opSuffix
-              + "' on JPA backend renders as SQL LIKE, not real regex — metacharacters (^, $,"
-              + " ., *, ?, character classes) are matched literally, differing from Mongo/JSONB"
-              + " backends. Field: "
-              + fieldPath
-              + ". To acknowledge and use LIKE semantics, set opentmf.tmf630.attribute-filtering"
-              + ".regex.allow-jpa-like-semantics=true (deprecated, to be removed in a future"
-              + " release). For real-regex semantics on relational, use a JSONB-backed entity"
-              + " (see @Tmf630JsonbBacked) or switch to a MongoDB backend.");
-    }
-    if (JPA_REGEX_COMPAT_WARNED.compareAndSet(false, true)) {
+  private void warnIfCompatFlagSet() {
+    if (allowJpaLikeRegexSemantics && JPA_REGEX_COMPAT_WARNED.compareAndSet(false, true)) {
       log.warn(
-          "opentmf.tmf630.attribute-filtering.regex.allow-jpa-like-semantics=true is set — "
-              + "'.regex'/'.regexi' predicates on JPA entities render as SQL LIKE (metacharacters "
-              + "matched literally), NOT real regex. Result sets will differ from Mongo/JSONB "
-              + "backends. This compat flag is deprecated and will be removed in a future "
-              + "release; migrate to a document-shaped backend for real regex semantics.");
+          "opentmf.tmf630.attribute-filtering.regex.allow-jpa-like-semantics=true is set but has"
+              + " had no effect since tmf630-toolkit 3.4.0: regex on JPA roots now renders the"
+              + " LIKE-expressible subset faithfully and rejects the rest with 400. Remove the"
+              + " property; it is deprecated for removal.");
     }
   }
 
@@ -347,8 +349,7 @@ public class PredicateFactory {
 
   /**
    * On JPA roots, reject regex / LIKE-family on polymorphic ({@code Object}/{@code Serializable})
-   * fields regardless of the {@code allow-jpa-like-semantics} opt-in. Rationale: even with the
-   * compat flag set, the ORM would serialize the field as a JSON blob and the emitted
+   * fields. Rationale: the ORM would serialize the field as a JSON blob and the emitted
    * {@code field LIKE ?} would match against JSON quotes and structural characters, not the
    * value itself — silently wrong. The designed escape for polymorphic-value semantics on a
    * relational DB is a JSONB-backed entity ({@code @Tmf630JsonbBacked}).
