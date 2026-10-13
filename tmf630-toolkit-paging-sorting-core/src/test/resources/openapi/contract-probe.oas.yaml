@@ -1,0 +1,72 @@
+openapi: 3.0.3
+info:
+  title: contract probe
+  version: 1.0.0
+paths:
+  /templates/content:
+    get:
+      parameters:
+        - name: docId
+          in: query
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/Lang'
+        - name: If-None-Match
+          in: header
+          schema:
+            type: string
+  /templates/{templateId}:
+    parameters:
+      - name: templateId
+        in: path
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/Fields'
+    get:
+      parameters:
+        - $ref: '#/components/parameters/Version'
+  /history:
+    get:
+      parameters:
+        - name: offset
+          in: query
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+  /templates:
+    get:
+      parameters:
+        - name: name
+          in: query
+          schema:
+            type: string
+    post:
+      parameters:
+        - name: dryRun
+          in: query
+          schema:
+            type: boolean
+components:
+  parameters:
+    Lang:
+      $ref: '#/components/parameters/LangDefinition'
+    LangDefinition:
+      name: lang
+      in: query
+      schema:
+        type: string
+    Fields:
+      name: fields
+      in: query
+      schema:
+        type: string
+    Version:
+      name: version
+      in: query
+      schema:
+        type: string

@@ -73,6 +73,17 @@ public class Tmf630ResponseBodyAdvice implements ResponseBodyAdvice<Object> {
   public boolean supports(
       @NonNull MethodParameter returnType,
       @NonNull Class<? extends HttpMessageConverter<?>> converterType) {
+    return appliesTo(returnType);
+  }
+
+  /**
+   * Whether this advice runs — and so reads {@code fields} — for the handler owning {@code
+   * returnType}: {@link Tmf630Response} on the method or on its type. On a Spring MVC handler's
+   * return type both lookups are merged, so an annotation on the API interface counts as well as
+   * one on the implementing class. Shared with the undeclared-query-parameter guard, which
+   * declares {@code fields} exactly where the projection runs.
+   */
+  public static boolean appliesTo(MethodParameter returnType) {
     return AnnotatedElementUtils.hasAnnotation(
             returnType.getContainingClass(), Tmf630Response.class)
         || returnType.hasMethodAnnotation(Tmf630Response.class);
