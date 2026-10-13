@@ -4,7 +4,7 @@
   <parent>
     <groupId>org.opentmf.query</groupId>
     <artifactId>tmf630-toolkit</artifactId>
-    <version>3.4.1-SNAPSHOT</version>
+    <version>3.5.0-SNAPSHOT</version>
     <relativePath>../pom.xml</relativePath>
   </parent>
 
@@ -35,9 +35,23 @@
       <groupId>com.fasterxml.jackson.core</groupId>
       <artifactId>jackson-annotations</artifactId>
     </dependency>
+    <!-- Only for Tmf630QueryParameterContract.readYaml, a test-side helper; every Spring Boot
+         application already has it. -->
+    <dependency>
+      <groupId>org.yaml</groupId>
+      <artifactId>snakeyaml</artifactId>
+      <optional>true</optional>
+    </dependency>
     <dependency>
       <groupId>org.springframework</groupId>
       <artifactId>spring-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- Only for the filter-terminal fixtures of the undeclared-query-parameter tests: core
+         recognises Predicate by class name and must not depend on QueryDSL itself. -->
+    <dependency>
+      <groupId>com.querydsl</groupId>
+      <artifactId>querydsl-core</artifactId>
       <scope>test</scope>
     </dependency>
     <!-- Only for the real HeadersTooLargeException in the recovery resolver's tests. -->
@@ -52,4 +66,23 @@
       <scope>test</scope>
     </dependency>
   </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <executions>
+          <!-- The undeclared-query-parameter tests read compiled parameter names, as a Spring
+               Boot application (built with -parameters) does. Main code is unaffected. -->
+          <execution>
+            <id>default-testCompile</id>
+            <configuration>
+              <parameters>true</parameters>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
 </project>

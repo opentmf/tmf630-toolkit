@@ -2,6 +2,120 @@
 
 All notable changes to `tmf630-toolkit` are documented in this file.
 
+## [3.5.0] - 2026-10-13
+
+### Added (undeclared query-parameter guard — opt-in)
+
+- **`Tmf630UndeclaredQueryParameterInterceptor` judges every read against what its
+  handler declares.** Spring MVC silently ignores a query parameter no argument binds. On
+  a hand-written read that turns a typo into a confident wrong answer: `?variantKey=winback`
+  served the default variant (dnms-catalog, 2026-10-11), and `?rendtion=customer` served
+  the masked rendition (dnms-journal, 2026-08-26). The filter grammar already refused
+  unknown names on lists; this covers every other handler. It is switched by
+  `opentmf.tmf630.undeclared-query-params.on-undeclared`:
+  - `IGNORE` is the default and registers nothing.
+  - `WARN` serves the request, logs the names and counts them.
+  - `REJECT` answers `400` before any argument resolver or the handler runs.
+
+  Only `GET`/`HEAD` on Spring MVC `HandlerMethod`s are judged, and the interceptor is
+  ordered after the query-limits guard. Handbook [§17](README.md#17-undeclared-query-parameters-350).
+- **The declared set is read off the handler signature and cached per handler.** It
+  contains:
+  - every `@RequestParam` (`name`/`value`/compiled name), and a non-annotated
+    simple-typed argument (Spring's default binding);
+  - `offset`, `limit` and `sort` for a `Pageable`/`TmfRichPageable`;
+  - `sort` for a `Sort`/`TmfSort`;
+  - `version` for a `TmfVersionedId`;
+  - `fields` wherever `@Tmf630Response` runs (method or type, implementation or API
+    interface);
+  - the names of `@Tmf630PassThrough` and of the new `@Tmf630AcceptsQueryParameters`.
+
+  Path variables, headers, body, cookies, request/session attributes, the principal, the
+  response, `Locale` and similar arguments read nothing from the query.
+- **Some handlers are left unjudged (open).** These are:
+  - TMF-630 lists: `Predicate`, `@QuerydslPredicate`, `JsonbClause`,
+    `@Tmf630JsonbFilter`. They are matched by class name, so core pulls in neither
+    QueryDSL nor the jsonb module.
+  - Handlers with an argument the guard cannot see into: a catch-all
+    `@RequestParam Map`/`MultiValueMap`, the raw request, a model attribute, or an
+    unrecognised type. Such a handler is judged again once it names its vocabulary
+    with `@Tmf630AcceptsQueryParameters({...})`.
+  - Handlers annotated `@Tmf630AcceptsAnyQueryParameter`, for external callers such as
+    a gateway callback.
+
+  Arguments filled by an application resolver are made known through
+  `opentmf.tmf630.undeclared-query-params.non-query-arguments` (types or annotations
+  that read no query name) or a `Tmf630QueryArgumentClassifier` bean (what they do read).
+- **The refusal is `TmfUndeclaredQueryParameterException`, a
+  `ServletRequestBindingException`.** Its message, which is also its problem detail,
+  names the parameter(s), the route pattern and the declared set:
+  `unknown query parameter 'variantKey' — GET /templates/content takes only docId, lang, variant`.
+  `Tmf630UndeclaredQueryParameterExceptionHandler` renders it in the TMF-630 error shape
+  (`"reason": "Unknown query parameter."`). Set
+  `opentmf.tmf630.undeclared-query-params.exception-handler.enabled: false` to leave it to
+  the service's own `ProblemDetail` rendering.
+- **`WARN` logs and counts.** Each warned request logs one line at `WARN`, with control
+  characters neutralised. With a `MeterRegistry` present, the counter
+  `opentmf.tmf630.undeclared.query.params` is incremented, tagged `method`, `uri` and
+  `outcome`. Parameter names are never tags. `Tmf630UndeclaredQueryParameterListener`
+  beans receive every warned or refused request.
+- **Public API for contract tests.** `Tmf630DeclaredQueryParameters.of(HandlerMethod)` →
+  `Optional<Set<String>>` (empty = open), and `Tmf630QueryParameterContract`, which walks
+  the application's `RequestMappingHandlerMapping` and compares every judged GET route
+  with its OAS operation's `in: query` parameters. Path-item-level parameters are
+  included and local `$ref`s are resolved. It reports the drift and the open routes.
+  `Tmf630ResponseBodyAdvice.appliesTo(MethodParameter)` is now public, so the guard
+  declares `fields` exactly where the projection runs.
+- The behaviour is pinned by the cases of the two in-house precedents this replaces,
+  ported: dnms-catalog's `UndeclaredQueryParameterGuard` (CAT-UNKNOWN-QUERY-PARAM-400-1)
+  and dnms-journal's `UnknownQueryParameterConfiguration`. Where the two differed, the
+  rulings below apply. The tests are `Tmf630UndeclaredQueryParameterInterceptorTest`,
+  `Tmf630DeclaredQueryParametersTest`, `Tmf630QueryParameterContractTest`,
+  `Tmf630UndeclaredQueryParamsIT`, `Tmf630UndeclaredQueryParamsFilteringIT`, and the
+  pass-through / jsonb class-name pins in their own modules.
+- New optional dependencies: `org.yaml:snakeyaml` in core (only for
+  `Tmf630QueryParameterContract.readYaml`) and `io.micrometer:micrometer-core` in the
+  autoconfigure module (only for the counter). Both are BOM-managed.
+
+### Rulings (decided 2026-10-13)
+
+- **`fields` is declared wherever the `@Tmf630Response` projection runs, and only there.**
+  The contract-parity check requires the OAS to declare it there. The OAS gets fixed; the
+  guard is not relaxed.
+- **A `Pageable` declares what the paging resolvers read: `offset`, `limit`, `sort`.** The
+  OAS declares `sort` where it is accepted. Spring's `page`/`size` are not declared and
+  `REJECT` refuses them. The plain-`Pageable` resolver still honours them as a fallback
+  in 3.5.0, but that fallback is a Spring leftover, and a later major stops reading them.
+- **The refusal is a `ServletRequestBindingException`, so each service's ProblemDetail
+  handler can render it.** The toolkit's own handler can be switched off.
+- **No global allow-list.** Exemptions are per handler (`@Tmf630AcceptsQueryParameters`,
+  `@Tmf630AcceptsAnyQueryParameter`, `@Tmf630PassThrough`), for the reason
+  `@Tmf630PassThrough` has no global form.
+
+### Adopter notes
+
+- **The bump changes no request.** `on-undeclared` defaults to `IGNORE`, which registers
+  no interceptor and no exception handler. The only new bean is
+  `Tmf630DeclaredQueryParameters`, which the contract helper reads.
+- **Switch it on per service: `WARN` for one release, then `REJECT`.** `WARN` is the caller
+  audit: the log and the counter show by route every caller still sending a name the route
+  does not take. Annotate the legitimate exceptions (pass-through vocabularies, external
+  callbacks), then flip to `REJECT`. `REJECT` as the default is a later major.
+- **Under `REJECT`, run the contract parity.** Every judged read's declared set must equal
+  its OAS operation's query parameters. In practice the OAS must declare `fields` on every
+  `@Tmf630Response` read and `sort` on every `Pageable` read that does not yet document
+  them.
+- **Services that render ProblemDetail** set `exception-handler.enabled: false`.
+- **Services with their own argument resolvers** list the non-query ones under
+  `non-query-arguments` (dnms-catalog: `OptionalJsonBody`). Otherwise those handlers stay
+  open, and the contract helper's `openRoutes()` lists them.
+- **Replacing the in-house guards.** dnms-catalog deletes `UndeclaredQueryParameterGuard`;
+  note that `sort` is now accepted on its `Pageable` reads, which the OAS must document.
+  dnms-journal deletes `UnknownQueryParameterConfiguration` and moves its
+  `@ForwardedQueryParameters` lists to `@Tmf630AcceptsQueryParameters`. Journal's "always
+  allowed" `offset`/`limit`/`fields`/`sort` no longer exist. Each name is accepted only
+  where a handler reads it, so a catch-all's vocabulary must list e.g. `limit` itself.
+
 ## [3.4.0] - 2026-09-24
 
 ### Changed (regex on JPA roots renders the LIKE-expressible subset, rejects the rest)

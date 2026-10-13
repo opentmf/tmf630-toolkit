@@ -1,0 +1,82 @@
+openapi: 3.0.3
+info:
+  title: undeclared-query-params probe
+  version: 1.0.0
+paths:
+  /single/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      parameters:
+        - name: version
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: variant
+          in: query
+          schema:
+            type: string
+  /projected/{itemId}:
+    get:
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/Fields'
+  /history:
+    get:
+      parameters:
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Sort'
+  /forward:
+    get:
+      parameters:
+        - name: incidentType
+          in: query
+          schema:
+            type: string
+  /body-like/{id}:
+    get:
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+  /tenant:
+    get:
+      parameters:
+        - name: tenant
+          in: query
+          schema:
+            type: string
+components:
+  parameters:
+    Fields:
+      name: fields
+      in: query
+      schema:
+        type: string
+    Offset:
+      name: offset
+      in: query
+      schema:
+        type: integer
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+    Sort:
+      name: sort
+      in: query
+      schema:
+        type: string
