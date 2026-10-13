@@ -88,6 +88,16 @@ class Tmf630DeclaredQueryParametersTest {
     @Tmf630AcceptsQueryParameters({"x"})
     public void annotatedListAccepting(Predicate predicate) {}
 
+    public void listWithSize(@RequestParam("size") String size, Predicate predicate) {}
+
+    @Tmf630AcceptsQueryParameters({"page", "size"})
+    public void listAcceptingPaging(Predicate predicate) {}
+
+    public void listRaw(Predicate predicate, HttpServletRequest request) {}
+
+    @Tmf630AcceptsQueryParameters({"page"})
+    public void listRawAccepting(Predicate predicate, HttpServletRequest request) {}
+
     public void catchAll(@RequestParam Map<String, String> query) {}
 
     public void catchAllMulti(@RequestParam MultiValueMap<String, String> query) {}
@@ -308,6 +318,44 @@ class Tmf630DeclaredQueryParametersTest {
     }
   }
 
+  /** 3.5.1: a TMF-630 list refuses Spring's page/size, which its filter grammar lets pass. */
+  @Nested
+  class ListRefusals {
+
+    private Set<String> refusals(String name) {
+      return new Tmf630DeclaredQueryParameters(List.of())
+          .listRefusals(handler(new Probe(), name));
+    }
+
+    @Test
+    void aListRefusesSpringsPageAndSize_andStaysOpenForEverythingElse() {
+      assertEquals(Set.of("page", "size"), refusals("list"));
+      assertEquals(Set.of("page", "size"), refusals("annotatedList"));
+      assertEquals(Set.of("page", "size"), refusals("annotatedListAccepting"));
+      assertTrue(declared("list").isEmpty());
+    }
+
+    @Test
+    void aListKeepsAPagingNameItBindsItself() {
+      assertEquals(Set.of("page"), refusals("listWithSize"));
+      assertEquals(Set.of(), refusals("listAcceptingPaging"));
+    }
+
+    @Test
+    void aListWithAnArgumentTheGuardCannotSeeIntoRefusesNothing_unlessItStatesItsVocabulary() {
+      assertEquals(Set.of(), refusals("listRaw"));
+      assertEquals(Set.of("size"), refusals("listRawAccepting"));
+    }
+
+    @Test
+    void aHandlerThatIsNotAListHasNoListRefusals() {
+      assertEquals(Set.of(), refusals("named"));
+      assertEquals(Set.of(), refusals("catchAll"));
+      assertEquals(Set.of(), refusals("raw"));
+      assertEquals(Set.of(), refusals("anything"));
+    }
+  }
+
   @Nested
   class Classifiers {
 
@@ -352,7 +400,8 @@ class Tmf630DeclaredQueryParametersTest {
     void theDerivationIsCachedPerHandler() {
       Tmf630DeclaredQueryParameters declared = new Tmf630DeclaredQueryParameters(List.of());
       HandlerMethod named = handler(new Probe(), "named");
-      assertSame(declared.declaredBy(named), declared.declaredBy(named));
+      Set<String> first = declared.declaredBy(named).orElseThrow();
+      assertSame(first, declared.declaredBy(named).orElseThrow());
     }
   }
 

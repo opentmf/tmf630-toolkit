@@ -2,6 +2,7 @@ package org.opentmf.query.tmf630.filtering;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
+import static org.hamcrest.Matchers.startsWith;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -26,7 +27,9 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * The undeclared-query-parameter guard beside the filter grammar, under REJECT on both sides: a
  * TMF-630 list is left to the grammar (which refuses its own unknown names in its own words),
- * while a single read beside it is judged by the guard — {@code @Tmf630PassThrough} included.
+ * except for Spring's {@code page}/{@code size}, which the grammar skips as reserved and the guard
+ * refuses (3.5.1); a single read beside it is judged by the guard — {@code @Tmf630PassThrough}
+ * included.
  *
  * <p>{@code Item}'s fields are bound reflectively by the predicate resolver (Sonar S1068 does not
  * model that).
@@ -67,6 +70,36 @@ class Tmf630UndeclaredQueryParamsFilteringIT {
   }
 
   @Test
+  void aListRefusesSpringsPageAndSize_whichTheGrammarWouldLetPass() throws Exception {
+    mockMvc
+        .perform(get("/items").param("status.eq", "active").param("page", "0").param("size", "10"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.reason").value("Unknown query parameter."))
+        .andExpect(
+            jsonPath("$.message")
+                .value(
+                    "unknown query parameters 'page', 'size' — GET /items is a TMF-630 list,"
+                        + " which pages with offset and limit"));
+  }
+
+  @Test
+  void aFieldNamedSizeIsStillAFilterWithAnExplicitOperator() throws Exception {
+    mockMvc
+        .perform(get("/items").param("size.eq", "M"))
+        .andExpect(status().isOk())
+        .andExpect(content().string(containsString("size")));
+  }
+
+  @Test
+  void aListThatBindsSizeItselfKeepsIt_andStillRefusesPage() throws Exception {
+    mockMvc.perform(get("/sized-items").param("size", "M")).andExpect(status().isOk());
+    mockMvc
+        .perform(get("/sized-items").param("size", "M").param("page", "1"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.message").value(startsWith("unknown query parameter 'page' —")));
+  }
+
+  @Test
   void aSingleReadTakesItsParamsAndPassThroughNames_andRefusesAnythingElse() throws Exception {
     mockMvc
         .perform(get("/items/1").param("lang", "de").param("version", "main"))
@@ -94,6 +127,13 @@ class Tmf630UndeclaredQueryParamsFilteringIT {
       return String.valueOf(predicate);
     }
 
+    @GetMapping("/sized-items")
+    public String sized(
+        @RequestParam(name = "size", required = false) String size,
+        @QuerydslPredicate(root = Item.class) Predicate predicate) {
+      return size + "|" + predicate;
+    }
+
     @GetMapping("/items/{id}")
     @Tmf630Response
     @Tmf630PassThrough({"version"})
@@ -105,5 +145,6 @@ class Tmf630UndeclaredQueryParamsFilteringIT {
   static class Item {
     private String name;
     private String status;
+    private String size;
   }
 }

@@ -208,15 +208,42 @@ class Tmf630UndeclaredQueryParameterInterceptorTest {
     }
 
     @Test
-    void aListAMapAndARawRequestAreNotJudged_norIsAnythingButARead() throws Exception {
-      assertTrue(pass(probe("list"), request("GET", "/list", "version", "v", "name", "x")));
-      assertTrue(pass(probe("map"), request("GET", "/map", "anything", "x")));
-      assertTrue(pass(probe("raw"), request("GET", "/raw", "anything", "x")));
+    void aListTakesItsFiltersAndTheTmfNames_aMapAndARawRequestAnything_aPostIsNotJudged()
+        throws Exception {
+      assertTrue(
+          pass(
+              probe("list"),
+              request(
+                  "GET", "/list", "version", "v", "name", "x", "offset", "0", "limit", "5",
+                  "sort", "-id", "fields", "name", "page.eq", "2")));
+      assertTrue(pass(probe("map"), request("GET", "/map", "anything", "x", "page", "1")));
+      assertTrue(pass(probe("raw"), request("GET", "/raw", "anything", "x", "size", "5")));
       assertTrue(pass(probe("single"), request("POST", "/single/{id}", "anything", "x")));
       assertTrue(
           reject.preHandle(
               request("GET", "/static", "x", "1"), new MockHttpServletResponse(), new Object()));
       assertTrue(heard.isEmpty());
+    }
+
+    /** 3.5.1: the filter grammar skips page/size as reserved, so the list would serve them. */
+    @Test
+    void aListRefusesSpringsPageAndSize_namingHowItPages() {
+      TmfUndeclaredQueryParameterException ex =
+          refused(probe("list"), request("GET", "/list", "name", "x", "page", "0", "size", "10"));
+
+      assertEquals(
+          "unknown query parameters 'page', 'size' — GET /list is a TMF-630 list, which pages"
+              + " with offset and limit",
+          ex.getMessage());
+      assertEquals(ex.getMessage(), ex.getBody().getDetail());
+      assertTrue(ex.isListRoute());
+      assertEquals(Set.of("page", "size"), ex.getUndeclared());
+      assertTrue(ex.getDeclared().isEmpty());
+      assertEquals(List.of("GET /list [page, size] REJECT"), heard);
+      assertEquals(
+          "unknown query parameter 'size' — GET /list is a TMF-630 list, which pages with offset"
+              + " and limit",
+          refused(probe("list"), request("GET", "/list", "size", "10")).getMessage());
     }
 
     @Test
@@ -298,6 +325,18 @@ class Tmf630UndeclaredQueryParameterInterceptorTest {
     }
 
     @Test
+    void aListServesPageAndSizeButReportsThem() throws Exception {
+      Tmf630UndeclaredQueryParameterInterceptor warn = guard(UndeclaredQueryParamBehavior.WARN);
+
+      assertTrue(
+          warn.preHandle(
+              request("GET", "/list", "name", "x", "size", "10"),
+              new MockHttpServletResponse(),
+              probe("list")));
+      assertEquals(List.of("GET /list [size] WARN"), heard);
+    }
+
+    @Test
     void aDeclaredRequestIsNotReported() throws Exception {
       Tmf630UndeclaredQueryParameterInterceptor warn = guard(UndeclaredQueryParamBehavior.WARN);
 
@@ -323,6 +362,9 @@ class Tmf630UndeclaredQueryParameterInterceptorTest {
               request("GET", "/bare", "anything", "x"),
               new MockHttpServletResponse(),
               probe("bare")));
+      assertTrue(
+          ignore.preHandle(
+              request("GET", "/list", "page", "1"), new MockHttpServletResponse(), probe("list")));
       assertTrue(heard.isEmpty());
     }
   }

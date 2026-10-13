@@ -2,6 +2,7 @@ package org.opentmf.query.tmf630.advice;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -31,6 +32,23 @@ class Tmf630UndeclaredQueryParameterExceptionHandlerTest {
   }
 
   @Test
+  void aListRefusalAnswersInTheSameShape() {
+    TmfUndeclaredQueryParameterException onList =
+        TmfUndeclaredQueryParameterException.onList("GET /sampleRecord", Set.of("page"));
+
+    ErrorMessage body =
+        new Tmf630UndeclaredQueryParameterExceptionHandler().handle(onList).getBody();
+
+    assertEquals("Unknown query parameter.", body.reason());
+    assertEquals(
+        "unknown query parameter 'page' — GET /sampleRecord is a TMF-630 list, which pages with"
+            + " offset and limit",
+        body.message());
+    assertArrayEquals(
+        new Object[] {"page", "GET /sampleRecord", ""}, onList.getDetailMessageArguments());
+  }
+
+  @Test
   void theProblemDetailNamesTheParameter_forAServicesOwnRenderer() {
     assertEquals(400, refusal.getStatusCode().value());
     assertEquals(refusal.getMessage(), refusal.getBody().getDetail());
@@ -40,5 +58,6 @@ class Tmf630UndeclaredQueryParameterExceptionHandlerTest {
     assertArrayEquals(
         new Object[] {"variantKey", "GET /templates/content", "docId, variant"},
         refusal.getDetailMessageArguments());
+    assertFalse(refusal.isListRoute());
   }
 }
