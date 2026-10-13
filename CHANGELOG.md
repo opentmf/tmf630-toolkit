@@ -2,6 +2,50 @@
 
 All notable changes to `tmf630-toolkit` are documented in this file.
 
+## [3.5.1] - 2026-10-13
+
+### Fixed (TMF-630 lists let Spring's `page`/`size` pass under `WARN`/`REJECT`)
+
+- **A TMF-630 list now refuses (or, under `WARN`, reports) Spring's bare `page` and `size`.**
+  The 3.5.0 guard left every list handler unjudged, because a filter terminal owns its
+  query string through the filter grammar. But `Tmf630FilterParser` skips `page` and `size`
+  as reserved names, so `?page=0&size=10` reached the paging resolver unjudged on exactly
+  the routes callers page the most. A `TmfRichPageable` list ignores both and serves its
+  default limit; a plain-`Pageable` list reads them through Spring's fallback, a grammar
+  the TMF-630 contract does not declare. This was found by the template's gate against
+  3.5.0 (`GET /sampleRecord?page=0&size=10` → `200`).
+- The refusal on a list names how the list pages:
+  `unknown query parameters 'page', 'size' — GET /sampleRecord is a TMF-630 list, which pages with offset and limit`.
+  It is the same `TmfUndeclaredQueryParameterException` (`isListRoute()` is `true`),
+  rendered by the same handler and counted under the same tags.
+- **What stays untouched:**
+  - `page.eq=2` / `size.eq=M`: the reserved check is exact-key, so a field named `size` is
+    still filterable with an explicit operator;
+  - a list that binds the name itself (`@RequestParam("size")`, `@Tmf630PassThrough`,
+    `@Tmf630AcceptsQueryParameters`, a classifier);
+  - a list with an argument the guard cannot see into, unless it names its vocabulary;
+  - every handler open for another reason: catch-all maps, such as the integration
+    adapters' pass-throughs, and `@Tmf630AcceptsAnyQueryParameter`.
+- Additions, binary-compatible with 3.5.0: `Tmf630DeclaredQueryParameters.listRefusals(HandlerMethod)`
+  and `SPRING_PAGING`; `TmfUndeclaredQueryParameterException.onList(...)`,
+  `describeOnList(...)` and `isListRoute()`. `declaredBy` / `of` still answer empty for a
+  list.
+- Pinned by the ported catalog/journal cases (`Tmf630UndeclaredQueryParameterInterceptorTest`,
+  which now asserts the list case), `Tmf630DeclaredQueryParametersTest$ListRefusals`, a
+  real QueryDSL list in `Tmf630UndeclaredQueryParamsFilteringIT`, and the
+  `@Tmf630PassThrough` / jsonb class-name pins.
+
+### Adopter notes
+
+- **`IGNORE` (the default) is still a no-op**, so the bump changes nothing for a service
+  that has not switched the guard on.
+- **A service on `WARN` or `REJECT`:** list callers sending `page`/`size` now show up in the
+  `WARN` log and counter, or get a `400` under `REJECT`. They must page with
+  `offset`/`limit`. If a list legitimately takes a name `size` (a real query parameter, not
+  paging), bind it on the handler, and the guard keeps it.
+- The plain-`Pageable` resolver's `page`/`size` fallback remains a Spring leftover that a
+  later major stops reading.
+
 ## [3.5.0] - 2026-10-13
 
 ### Added (undeclared query-parameter guard — opt-in)

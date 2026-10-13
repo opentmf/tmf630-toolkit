@@ -8,6 +8,7 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.regex.Pattern;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 import org.opentmf.query.tmf630.exception.TmfUndeclaredQueryParameterException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,8 +27,10 @@ import org.springframework.web.servlet.HandlerMapping;
  * request against {@link Tmf630DeclaredQueryParameters} — the handler's own signature.
  *
  * <p>Only {@code GET} and {@code HEAD} are judged, and only {@link HandlerMethod} handlers (not
- * static resources, not functional endpoints). Open handlers — TMF-630 lists, catch-alls without
- * a stated vocabulary, {@link Tmf630AcceptsAnyQueryParameter} — pass untouched.
+ * static resources, not functional endpoints). A TMF-630 list is judged for Spring's {@code
+ * page}/{@code size} alone, which its filter grammar would let pass ({@link
+ * Tmf630DeclaredQueryParameters#listRefusals}, 3.5.1). Other open handlers — catch-alls without a
+ * stated vocabulary, {@link Tmf630AcceptsAnyQueryParameter} — pass untouched.
  *
  * <p>Under {@link UndeclaredQueryParamBehavior#WARN} the request is served and the undeclared
  * names are logged and reported to the {@link Tmf630UndeclaredQueryParameterListener}; under
@@ -66,27 +69,46 @@ public class Tmf630UndeclaredQueryParameterInterceptor implements HandlerInterce
         || !isRead(request.getMethod())) {
       return true;
     }
+    Set<String> sent = request.getParameterMap().keySet();
     Optional<Set<String>> declared = declaredQueryParameters.declaredBy(handlerMethod);
-    if (declared.isEmpty()) {
-      return true;
+    if (declared.isPresent()) {
+      Set<String> undeclared = new TreeSet<>(sent);
+      undeclared.removeAll(declared.get());
+      judge(request, undeclared, declared.get());
+    } else {
+      Set<String> refused = new TreeSet<>(sent);
+      refused.retainAll(declaredQueryParameters.listRefusals(handlerMethod));
+      judge(request, refused, null);
     }
-    Set<String> undeclared = new TreeSet<>(request.getParameterMap().keySet());
-    undeclared.removeAll(declared.get());
+    return true;
+  }
+
+  /**
+   * Reports, then warns about or refuses, the undeclared names of one request.
+   *
+   * @param declared the judged handler's declared names, or {@code null} for a TMF-630 list
+   */
+  private void judge(
+      HttpServletRequest request, Set<String> undeclared, @Nullable Set<String> declared)
+      throws TmfUndeclaredQueryParameterException {
     if (undeclared.isEmpty()) {
-      return true;
+      return;
     }
     String pattern = pattern(request);
     listener.undeclared(request.getMethod(), pattern, undeclared, behavior);
     String route = request.getMethod() + " " + pattern;
     if (behavior == UndeclaredQueryParamBehavior.REJECT) {
-      throw new TmfUndeclaredQueryParameterException(route, undeclared, declared.get());
+      throw declared == null
+          ? TmfUndeclaredQueryParameterException.onList(route, undeclared)
+          : new TmfUndeclaredQueryParameterException(route, undeclared, declared);
     }
     if (log.isWarnEnabled()) {
       String message =
-          TmfUndeclaredQueryParameterException.describe(route, undeclared, declared.get());
+          declared == null
+              ? TmfUndeclaredQueryParameterException.describeOnList(route, undeclared)
+              : TmfUndeclaredQueryParameterException.describe(route, undeclared, declared);
       log.warn("{}", CONTROL.matcher(message).replaceAll("?"));
     }
-    return true;
   }
 
   private static boolean isRead(String httpMethod) {

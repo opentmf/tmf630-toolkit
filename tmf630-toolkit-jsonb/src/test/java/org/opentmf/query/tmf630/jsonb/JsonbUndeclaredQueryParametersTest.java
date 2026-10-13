@@ -3,6 +3,7 @@ package org.opentmf.query.tmf630.jsonb;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -39,19 +40,26 @@ class JsonbUndeclaredQueryParametersTest {
     }
   }
 
-  private static Optional<Set<String>> declared(String name) throws NoSuchMethodException {
+  private static HandlerMethod handler(String name) throws NoSuchMethodException {
     for (var method : OrderController.class.getMethods()) {
       if (method.getName().equals(name)) {
-        return Tmf630DeclaredQueryParameters.of(new HandlerMethod(new OrderController(), method));
+        return new HandlerMethod(new OrderController(), method);
       }
     }
     throw new NoSuchMethodException(name);
   }
 
+  private static Optional<Set<String>> declared(String name) throws NoSuchMethodException {
+    return Tmf630DeclaredQueryParameters.of(handler(name));
+  }
+
   @Test
-  void aJsonbFilterListIsOpen() throws Exception {
+  void aJsonbFilterListIsOpen_butRefusesSpringsPageAndSize() throws Exception {
     assertTrue(declared("list").isEmpty());
     assertTrue(declared("bareClause").isEmpty());
+    Tmf630DeclaredQueryParameters guard = new Tmf630DeclaredQueryParameters(List.of());
+    assertEquals(Set.of("page", "size"), guard.listRefusals(handler("list")));
+    assertEquals(Set.of("page", "size"), guard.listRefusals(handler("bareClause")));
   }
 
   @Test

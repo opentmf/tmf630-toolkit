@@ -2903,18 +2903,33 @@ Three rulings are built in:
 - **`fields` is declared wherever the `@Tmf630Response` projection runs**, and only
   there. A read without the annotation refuses `fields=`.
 - **A `Pageable` declares what the paging resolvers read: `offset`, `limit` and `sort`.**
-  Spring's `page`/`size` are *not* declared, and `REJECT` refuses them. The plain-`Pageable`
-  resolver still honours them as a fallback, but that fallback is a Spring leftover and a
-  later major stops reading them. TMF-630 contracts page with `offset`/`limit` only.
+  Spring's `page`/`size` are *not* declared, and `REJECT` refuses them, on TMF-630 lists
+  too since 3.5.1 (below). The plain-`Pageable` resolver still honours them as a fallback,
+  but that fallback is a Spring leftover and a later major stops reading them. TMF-630
+  contracts page with `offset`/`limit` only.
 - **Nothing is allowed globally.** There is no property that exempts a name everywhere,
   for the same reason `@Tmf630PassThrough` has none. Exemptions are per handler.
 
 #### Handlers that are not judged (open)
 
-- **TMF-630 lists.** A handler with a filter terminal (`Predicate`, `@QuerydslPredicate`,
-  `JsonbClause`, `@Tmf630JsonbFilter`) owns its whole query string through the filter
-  grammar, which refuses unknown names in its own words. These are detected by class
-  name, so core depends on neither QueryDSL nor the jsonb module.
+- **TMF-630 lists, except for `page` and `size` (3.5.1).** A handler with a filter
+  terminal (`Predicate`, `@QuerydslPredicate`, `JsonbClause`, `@Tmf630JsonbFilter`) owns
+  its query string through the filter grammar, which refuses unknown names in its own
+  words. These are detected by class name, so core depends on neither QueryDSL nor the
+  jsonb module. The grammar skips Spring's bare `page` and `size` as reserved, though, so
+  they reach the paging resolver unjudged, on exactly the routes callers page the most. A
+  `TmfRichPageable` list ignores both and serves its default limit. A plain-`Pageable` list
+  reads them through Spring's fallback, a grammar the TMF-630 contract does not declare.
+  The guard therefore refuses those two names on a list, by name (`WARN` logs and counts
+  them). Neither is a TMF-630 name, and
+  neither is a filter without an explicit operator: `size.eq=M` stays a filter on a field
+  named `size`. A list that binds one of them itself (`@RequestParam("size")`,
+  `@Tmf630PassThrough({"size"})`, `@Tmf630AcceptsQueryParameters`) keeps it. A list with
+  an argument the guard cannot see into is left alone unless it names its vocabulary:
+
+  ```
+  unknown query parameters 'page', 'size' — GET /sampleRecord is a TMF-630 list, which pages with offset and limit
+  ```
 - **Arguments the guard cannot see into.** These are a catch-all `@RequestParam Map` /
   `MultiValueMap` (no name), the raw `HttpServletRequest`/`WebRequest`, a
   `@ModelAttribute` object, and any argument type the guard does not recognise. Each of
@@ -2926,7 +2941,8 @@ Three rulings are built in:
   List<Incident> incidents(@RequestParam MultiValueMap<String, String> query);
   ```
 
-  The annotation never closes a TMF-630 list.
+  The annotation never closes a TMF-630 list. On a list it only decides which of `page` /
+  `size` the handler keeps.
 - **`@Tmf630AcceptsAnyQueryParameter`** on a method or type. This is for callers the
   service does not control, such as a gateway's delivery-report callback.
 
@@ -3491,8 +3507,9 @@ Since 2.1.5, sort/paging errors also return the TMF `ErrorMessage` body (via
 - **Any query parameter the handler does not declare (3.5.0, opt-in)**: under
   `undeclared-query-params.on-undeclared: REJECT`, a judged read refuses it with *"unknown
   query parameter `<name>` — GET `<route>` takes only …"*. This includes `page`/`size` on a
-  `Pageable` read and `fields` on a read without `@Tmf630Response`. See
-  [handbook §17](#17-undeclared-query-parameters-350).
+  `Pageable` read and `fields` on a read without `@Tmf630Response`. Since 3.5.1, a TMF-630
+  list refuses bare `page`/`size` too (*"… is a TMF-630 list, which pages with offset and
+  limit"*). See [handbook §17](#17-undeclared-query-parameters-350).
 
 **`fields=`** errors — unknown field names in the request are silently skipped (per
 TMF-630 Part 1 §4.3 convention). Reflection catastrophes inside `FieldSelectionUtil`

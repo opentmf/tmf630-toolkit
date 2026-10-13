@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.querydsl.core.types.Predicate;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -27,6 +28,9 @@ class Tmf630PassThroughDeclaredQueryParametersTest {
 
     @Tmf630PassThrough({"version"})
     String scopedList(@RequestParam("version") String version, Predicate predicate);
+
+    @Tmf630PassThrough({"size"})
+    String sizedList(@QuerydslPredicate(root = Object.class) Predicate predicate);
   }
 
   static class ReadController implements ReadApi {
@@ -44,15 +48,28 @@ class Tmf630PassThroughDeclaredQueryParametersTest {
     public String scopedList(String version, Predicate predicate) {
       return version;
     }
+
+    @Override
+    public String sizedList(Predicate predicate) {
+      return String.valueOf(predicate);
+    }
   }
 
-  private static Optional<Set<String>> declared(String name) throws NoSuchMethodException {
+  private static HandlerMethod handler(String name) throws NoSuchMethodException {
     for (var method : ReadController.class.getMethods()) {
       if (method.getName().equals(name)) {
-        return Tmf630DeclaredQueryParameters.of(new HandlerMethod(new ReadController(), method));
+        return new HandlerMethod(new ReadController(), method);
       }
     }
     throw new NoSuchMethodException(name);
+  }
+
+  private static Optional<Set<String>> declared(String name) throws NoSuchMethodException {
+    return Tmf630DeclaredQueryParameters.of(handler(name));
+  }
+
+  private static Set<String> listRefusals(String name) throws NoSuchMethodException {
+    return new Tmf630DeclaredQueryParameters(List.of()).listRefusals(handler(name));
   }
 
   @Test
@@ -64,5 +81,12 @@ class Tmf630PassThroughDeclaredQueryParametersTest {
   void aQuerydslListIsOpen_withOrWithoutPassThrough() throws Exception {
     assertTrue(declared("list").isEmpty());
     assertTrue(declared("scopedList").isEmpty());
+  }
+
+  @Test
+  void aQuerydslListRefusesPageAndSize_unlessItPassesOneThrough() throws Exception {
+    assertEquals(Set.of("page", "size"), listRefusals("list"));
+    assertEquals(Set.of("page", "size"), listRefusals("scopedList"));
+    assertEquals(Set.of("page"), listRefusals("sizedList"));
   }
 }

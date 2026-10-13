@@ -81,14 +81,20 @@ import org.springframework.web.method.HandlerMethod;
  * <ul>
  *   <li>a TMF-630 list — a handler with a filter terminal ({@code Predicate}, {@code
  *       @QuerydslPredicate}, {@code JsonbClause}, {@code @Tmf630JsonbFilter}), whose unknown
- *       filters the filter grammar refuses itself. Matched by class name, so this module pulls
- *       neither QueryDSL nor the jsonb module;
+ *       filters the filter grammar refuses itself (but see {@link #listRefusals}). Matched by
+ *       class name, so this module pulls neither QueryDSL nor the jsonb module;
  *   <li>a handler with an argument that may read names the guard cannot see — a catch-all
  *       {@code @RequestParam Map}/{@code MultiValueMap}, the raw request, a model attribute, an
  *       argument of an unrecognised type — unless it states its vocabulary with {@link
  *       Tmf630AcceptsQueryParameters};
  *   <li>a handler annotated {@link Tmf630AcceptsAnyQueryParameter}.
  * </ul>
+ *
+ * <p><b>A TMF-630 list is judged for Spring's {@code page} and {@code size} only (3.5.1):</b> the
+ * filter grammar skips those two names as reserved, so a list would otherwise serve them silently
+ * — neither is a TMF-630 name, and neither is a filter without an explicit operator ({@code
+ * page.eq=2} stays a filter). {@link #listRefusals(HandlerMethod)} names them, minus any the
+ * handler binds itself.
  *
  * <p>The derivation is cached per handler method. {@link #of(HandlerMethod)} applies the built-in
  * rules alone; the auto-configured instance also consults the application's classifiers and
@@ -99,6 +105,12 @@ public final class Tmf630DeclaredQueryParameters {
 
   /** The paging names a {@link Pageable} argument reads. */
   public static final List<String> PAGING = List.of("offset", "limit", "sort");
+
+  /**
+   * Spring Data's paging names. Never declared by a {@code Pageable} — the TMF-630 contract pages
+   * with {@code offset}/{@code limit} — and refused on a TMF-630 list that does not bind them.
+   */
+  public static final List<String> SPRING_PAGING = List.of("page", "size");
 
   /** The sort name a {@link Sort} or {@link TmfSort} argument reads. */
   public static final String SORT = "sort";
@@ -158,7 +170,7 @@ public final class Tmf630DeclaredQueryParameters {
       new Tmf630DeclaredQueryParameters(List.of());
 
   private final List<Tmf630QueryArgumentClassifier> classifiers;
-  private final Map<HandlerKey, Optional<Set<String>>> cache = new ConcurrentHashMap<>();
+  private final Map<HandlerKey, Derivation> cache = new ConcurrentHashMap<>();
 
   /**
    * @param classifiers consulted in order before the built-in rules; the first non-null answer
@@ -186,42 +198,69 @@ public final class Tmf630DeclaredQueryParameters {
    *     and no {@code -parameters} compiler flag
    */
   public Optional<Set<String>> declaredBy(HandlerMethod handler) {
+    return Optional.ofNullable(derivation(handler).declared());
+  }
+
+  /**
+   * The names a TMF-630 list refuses although its filter grammar would let them pass: {@link
+   * #SPRING_PAGING}, minus any the handler binds itself ({@code @RequestParam}, {@code
+   * @Tmf630PassThrough}, {@link Tmf630AcceptsQueryParameters}, a classifier). Empty for every
+   * handler that is not a list, and for a list with an argument the guard cannot see into unless
+   * it states its vocabulary.
+   *
+   * @throws IllegalStateException when a query binding has no name to read — no annotation name
+   *     and no {@code -parameters} compiler flag
+   */
+  public Set<String> listRefusals(HandlerMethod handler) {
+    return derivation(handler).listRefusals();
+  }
+
+  private Derivation derivation(HandlerMethod handler) {
     return cache.computeIfAbsent(
         new HandlerKey(handler.getBeanType(), handler.getMethod()), key -> derive(handler));
   }
 
-  private Optional<Set<String>> derive(HandlerMethod handler) {
+  private Derivation derive(HandlerMethod handler) {
     if (hasHandlerAnnotation(handler, Tmf630AcceptsAnyQueryParameter.class)) {
-      return Optional.empty();
+      return Derivation.OPEN;
     }
-    SortedSet<String> declared = new TreeSet<>();
+    Signature signature = readSignature(handler);
+    Optional<List<String>> accepted = acceptedNames(handler);
+    if (signature.unseen() && accepted.isEmpty()) {
+      return Derivation.OPEN;
+    }
+    SortedSet<String> declared = new TreeSet<>(signature.named());
+    accepted.ifPresent(declared::addAll);
+    declared.addAll(passThroughNames(handler));
+    if (signature.filter()) {
+      return Derivation.list(declared);
+    }
+    if (Tmf630ResponseBodyAdvice.appliesTo(handler.getReturnType())) {
+      declared.add(FIELDS);
+    }
+    return Derivation.closed(declared);
+  }
+
+  /** What the handler's arguments read, one classification per argument. */
+  private Signature readSignature(HandlerMethod handler) {
+    SortedSet<String> named = new TreeSet<>();
     boolean unseen = false;
+    boolean filter = false;
     for (MethodParameter shared : handler.getMethodParameters()) {
       // a copy: the handler's own parameters are shared with every request's invocation
       MethodParameter parameter = shared.clone();
       parameter.initParameterNameDiscovery(NAMES);
       Tmf630QueryArgument argument = classify(parameter);
       switch (argument.kind()) {
-        case FILTER -> {
-          return Optional.empty();
-        }
+        case FILTER -> filter = true;
         case UNKNOWN -> unseen = true;
-        case NAMED -> declared.addAll(argument.names());
+        case NAMED -> named.addAll(argument.names());
         case NONE -> {
           // reads nothing from the query string
         }
       }
     }
-    Optional<List<String>> accepted = acceptedNames(handler);
-    if (unseen && accepted.isEmpty()) {
-      return Optional.empty();
-    }
-    accepted.ifPresent(declared::addAll);
-    declared.addAll(passThroughNames(handler));
-    if (Tmf630ResponseBodyAdvice.appliesTo(handler.getReturnType())) {
-      declared.add(FIELDS);
-    }
-    return Optional.of(Collections.unmodifiableSortedSet(declared));
+    return new Signature(named, unseen, filter);
   }
 
   private Tmf630QueryArgument classify(MethodParameter parameter) {
@@ -382,4 +421,32 @@ public final class Tmf630DeclaredQueryParameters {
 
   /** The cache key: a method inherited by two controllers may differ by type-level annotation. */
   private record HandlerKey(Class<?> beanType, Method method) {}
+
+  /**
+   * @param named the names the arguments bind
+   * @param unseen an argument may read names the guard cannot see
+   * @param filter an argument is a TMF-630 filter terminal
+   */
+  private record Signature(Set<String> named, boolean unseen, boolean filter) {}
+
+  /**
+   * One handler's judgement.
+   *
+   * @param declared the declared names of a judged handler, sorted; {@code null} when it is open
+   * @param listRefusals the names a TMF-630 list refuses; empty for every other handler
+   */
+  private record Derivation(@Nullable Set<String> declared, Set<String> listRefusals) {
+
+    static final Derivation OPEN = new Derivation(null, Set.of());
+
+    static Derivation closed(SortedSet<String> declared) {
+      return new Derivation(Collections.unmodifiableSortedSet(declared), Set.of());
+    }
+
+    static Derivation list(Set<String> bound) {
+      SortedSet<String> refused = new TreeSet<>(SPRING_PAGING);
+      refused.removeAll(bound);
+      return new Derivation(null, Collections.unmodifiableSortedSet(refused));
+    }
+  }
 }
