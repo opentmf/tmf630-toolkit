@@ -2,6 +2,22 @@
 
 All notable changes to `tmf630-toolkit` are documented in this file.
 
+## [3.5.2] - 2026-11-04
+
+### Fixed
+
+- **No more `BeanPostProcessorChecker` warning at startup.** `Tmf630AttributeFilteringAutoConfiguration`
+  declared its resolver-ordering `BeanPostProcessor` through a non-static `@Bean` method, so Spring
+  created the auto-configuration while it was still registering post-processors, and every
+  application logged that the bean "is not eligible for getting processed by all
+  BeanPostProcessors". The method `tmf630ResolverOrderingPostProcessor` is now `static`. Behaviour
+  is unchanged. Code that called it on an instance must now call it on the class.
+
+### Changed
+
+- Spring Boot 4.1.2 (was 4.1.1); maven-surefire/failsafe 3.6.1, jacoco 0.8.16, maven-enforcer
+  3.7.0, central-publishing 0.12.0.
+
 ## [3.5.1] - 2026-10-13
 
 ### Fixed (TMF-630 lists let Spring's `page`/`size` pass under `WARN`/`REJECT`)

@@ -42,17 +42,19 @@ class Tmf630ResolverOrderingPostProcessorTest {
 
   @Test
   void returnsSameBeanForNonAdapterTypes() {
-    Tmf630AttributeFilteringAutoConfiguration config = new Tmf630AttributeFilteringAutoConfiguration();
-    BeanPostProcessor bpp = config.tmf630ResolverOrderingPostProcessor(providerOf(newResolver()));
+    BeanPostProcessor bpp =
+        Tmf630AttributeFilteringAutoConfiguration.tmf630ResolverOrderingPostProcessor(
+            providerOf(newResolver()));
     Object bean = new Object();
     assertSame(bean, bpp.postProcessAfterInitialization(bean, "x"));
   }
 
   @Test
   void setsCustomResolversWhenAdapterHasNoResolvers() {
-    Tmf630AttributeFilteringAutoConfiguration config = new Tmf630AttributeFilteringAutoConfiguration();
     Tmf630PredicateArgumentResolver resolver = newResolver();
-    BeanPostProcessor bpp = config.tmf630ResolverOrderingPostProcessor(providerOf(resolver));
+    BeanPostProcessor bpp =
+        Tmf630AttributeFilteringAutoConfiguration.tmf630ResolverOrderingPostProcessor(
+            providerOf(resolver));
     RequestMappingHandlerAdapter adapter = new RequestMappingHandlerAdapter();
 
     bpp.postProcessAfterInitialization(adapter, "adapter");
@@ -63,9 +65,10 @@ class Tmf630ResolverOrderingPostProcessorTest {
 
   @Test
   void prependsResolverAndRemovesDuplicatesWhenResolverListExists() {
-    Tmf630AttributeFilteringAutoConfiguration config = new Tmf630AttributeFilteringAutoConfiguration();
     Tmf630PredicateArgumentResolver resolver = newResolver();
-    BeanPostProcessor bpp = config.tmf630ResolverOrderingPostProcessor(providerOf(resolver));
+    BeanPostProcessor bpp =
+        Tmf630AttributeFilteringAutoConfiguration.tmf630ResolverOrderingPostProcessor(
+            providerOf(resolver));
     RequestMappingHandlerAdapter adapter = new RequestMappingHandlerAdapter();
     HandlerMethodArgumentResolver other =
         new HandlerMethodArgumentResolver() {

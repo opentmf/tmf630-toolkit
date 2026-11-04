@@ -139,8 +139,12 @@ public class Tmf630AttributeFilteringAutoConfiguration {
     return new FilterRootSortKeyValidator(pathResolver, rootLocators.orderedStream().toList());
   }
 
+  /**
+   * Puts the {@link Tmf630PredicateArgumentResolver} first among the adapter's argument
+   * resolvers. {@code static}, so registering it does not create this configuration early.
+   */
   @Bean
-  public BeanPostProcessor tmf630ResolverOrderingPostProcessor(
+  public static BeanPostProcessor tmf630ResolverOrderingPostProcessor(
       ObjectProvider<Tmf630PredicateArgumentResolver> resolverProvider) {
     return new BeanPostProcessor() {
       @Override
