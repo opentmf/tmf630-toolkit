@@ -14,9 +14,18 @@ All notable changes to `tmf630-toolkit` are documented in this file.
   translator now emits the operator `payload @? ?::jsonpath`. The JDBC text reads
   `payload @?? ?::jsonpath`; the driver turns `??` into `?`. The same form now covers the root
   filter, `&&` and `||`, the split-collection `EXISTS` subquery and the `COUNT` query.
-  - A filter with at least one equality uses the index (a Bitmap Index Scan).
-  - A filter with no equality (ranges only, `=~`, `!`) still scans the table, because the
-    index has no key for it.
+  - The index serves a filter when every `||` branch carries an equality; inside `&&`, one
+    equality is enough. That covers `@.a == 'x'`, `@.a == 'x' || @.a == 'y'`,
+    `@.a == 'x' && @.n > 5`, and an array correlation on an equality. The plan shows a Bitmap
+    Index Scan.
+  - The index has no key for a filter with no equality (ranges only, `=~`, `!(...)`), nor for
+    one where a `||` branch has none (`@.a == 'x' || @.n > 5`). With a plan made for the
+    actual path, PostgreSQL scans the table, as before.
+  - With a generic plan, PostgreSQL cannot see the path, so it always picks the index. It
+    switches a server-prepared statement to a generic plan after its first five executions,
+    and every `filter=`-only query on a table shares one SQL text. Such a filter then reads the
+    whole index and rechecks every row. Measured on 20,000 rows: 903 buffers, against 690 for
+    the scan.
   - Both forms return the same rows. No adopter action is needed: an existing GIN index starts
     being used, and nothing else changes.
 - **What the operator answers differently.** The operator suppresses errors that the function
