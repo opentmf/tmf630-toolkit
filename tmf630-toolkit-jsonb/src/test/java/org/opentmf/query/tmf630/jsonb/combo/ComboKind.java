@@ -19,9 +19,11 @@ import java.util.Optional;
  * null). The key absent is every row of another field.
  */
 enum ComboKind {
+  // "a_ph%_o" holds the text operators' values literally, and each also finds a decoy when its
+  // % or _ is read as a wildcard: startswith a_ (alpha), contains %_o and endswith _o (bravo).
   STRING("s", "String", Shape.TEXT,
-      List.of("\"alpha\"", "\"bravo\"", "\"Charlie\"", "\"50%_off\""), List.of("42", "true"), List.of(),
-      new Probe("alpha", "bravo", "alpha", "bravo", "alpha", "Charlie", "al", "%_o", "vo")),
+      List.of("\"alpha\"", "\"bravo\"", "\"Charlie\"", "\"a_ph%_o\""), List.of("42", "true"), List.of(),
+      new Probe("alpha", "bravo", "alpha", "bravo", "alpha", "Charlie", "a_", "%_o", "_o")),
   INTEGER("i", "Integer", Shape.NUMBER,
       List.of("1", "5", "9", "5.0"), List.of("\"5\""), List.of(),
       new Probe("5", "4", "2", "8", "1", "9", "5", "5", "5")),
