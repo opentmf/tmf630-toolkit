@@ -42,6 +42,39 @@ public enum JsonbCast {
   }
 
   /**
+   * {@code text}, a SQL text expression, read as this type. The date and time types read only
+   * text PostgreSQL's input function accepts, {@code CASE WHEN pg_input_is_valid(text, 'date')
+   * THEN (text)::date END}, so a stored value no cast reads is {@code NULL} (no match, and a null
+   * in a sort) instead of an error that fails the whole query. Needs PostgreSQL 16 or later; the
+   * module refuses to start below it ({@link Tmf630JsonbPostgresVersionCheck}). {@code text}
+   * appears twice in the result. The number and boolean casts are plain casts for now.
+   */
+  public String read(String text) {
+    return switch (this) {
+      case TEXT -> text;
+      case DATE, TIME, TIMESTAMP, TIMESTAMPTZ ->
+          "CASE WHEN pg_input_is_valid(" + text + ", '" + suffix.substring(2) + "') THEN ("
+              + text + ")" + suffix + " END";
+      default -> "(" + text + ")" + suffix;
+    };
+  }
+
+  /**
+   * As {@link #read}, for a text expression that is already parenthesized: the plain casts add no
+   * second pair of parentheses, so their SQL stays as it was.
+   */
+  public String readParenthesized(String parenthesizedText) {
+    return readRepeatsText() || this == TEXT
+        ? read(parenthesizedText)
+        : parenthesizedText + suffix;
+  }
+
+  /** Whether {@link #read} repeats its text expression (so a bind parameter in it repeats too). */
+  public boolean readRepeatsText() {
+    return this == DATE || this == TIME || this == TIMESTAMP || this == TIMESTAMPTZ;
+  }
+
+  /**
    * Maps a Java type to its Postgres cast. Returns {@link #TEXT} for {@code String},
    * {@code CharSequence}, {@code Enum} subtypes, and any type the mapping doesn't
    * recognize — the safe default is text-vs-text comparison, which matches the raw

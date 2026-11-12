@@ -154,7 +154,7 @@ public class JsonbPredicateFactory {
     // Parenthesise the extraction before applying the cast — Postgres's :: binds
     // tighter than the ->> / #>> operators, so payload->>'x'::bigint would try to
     // cast the literal string 'x' to bigint instead of the extracted value.
-    String castedLhs = cast == JsonbCast.TEXT ? text : "(" + text + ")" + cast.suffix();
+    String castedLhs = cast.read(text);
     return switch (operator) {
       case EQ -> JsonbClause.of(castedLhs + " = ?" + cast.suffix(), value);
       case NE -> JsonbClause.of(castedLhs + " <> ?" + cast.suffix(), value);
@@ -254,7 +254,7 @@ public class JsonbPredicateFactory {
   }
 
   private JsonbClause inClause(String text, JsonbCast cast, List<Object> values, boolean negate) {
-    String lhs = cast == JsonbCast.TEXT ? text : "(" + text + ")" + cast.suffix();
+    String lhs = cast.read(text);
     StringBuilder sb = new StringBuilder(lhs);
     sb.append(negate ? " NOT IN (" : " IN (");
     for (int i = 0; i < values.size(); i++) {
@@ -271,7 +271,7 @@ public class JsonbPredicateFactory {
       throw new TmfFilteringException(
           "BETWEEN requires exactly two values for field: " + fieldPath);
     }
-    String casted = cast == JsonbCast.TEXT ? text : "(" + text + ")" + cast.suffix();
+    String casted = cast.read(text);
     return JsonbClause.of(
         casted + " BETWEEN ?" + cast.suffix() + " AND ?" + cast.suffix(),
         values.get(0),

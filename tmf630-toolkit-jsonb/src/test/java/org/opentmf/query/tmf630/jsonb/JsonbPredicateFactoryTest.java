@@ -162,7 +162,9 @@ class JsonbPredicateFactoryTest {
             factory
                 .buildOnObjectPath(TmfOperator.EQ, "ld", LocalDate.class, LocalDate.of(2025, 1, 1))
                 .sql())
-        .isEqualTo("(payload->>'ld')::date = ?::date");
+        .isEqualTo(
+            "CASE WHEN pg_input_is_valid(payload->>'ld', 'date') THEN (payload->>'ld')::date END"
+                + " = ?::date");
     assertThat(
             factory
                 .buildOnObjectPath(TmfOperator.EQ, "u", UUID.class, UUID.randomUUID())
@@ -231,12 +233,14 @@ class JsonbPredicateFactoryTest {
   }
 
   @Test
-  @DisplayName("GT on OffsetDateTime — casts to ::timestamptz with parenthesised extraction")
+  @DisplayName("GT on OffsetDateTime — read as timestamptz only where pg_input_is_valid says so")
   void rangeOperatorsDatetime() {
     OffsetDateTime when = OffsetDateTime.parse("2026-01-01T00:00:00Z");
     JsonbClause gt = factory.build(TmfOperator.GT, "createdAt", OffsetDateTime.class, when);
     assertThat(gt.sql())
-        .isEqualTo("(payload->>'createdAt')::timestamptz > ?::timestamptz");
+        .isEqualTo(
+            "CASE WHEN pg_input_is_valid(payload->>'createdAt', 'timestamptz')"
+                + " THEN (payload->>'createdAt')::timestamptz END > ?::timestamptz");
     assertThat(gt.params()).containsExactly(when);
   }
 
