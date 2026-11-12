@@ -24,7 +24,7 @@ record JsonbFieldPath(List<String> segments, List<Boolean> arrays) {
   }
 
   boolean leafIsCollection() {
-    return arrays.get(size() - 1);
+    return Boolean.TRUE.equals(arrays.get(size() - 1));
   }
 
   /**
@@ -34,7 +34,7 @@ record JsonbFieldPath(List<String> segments, List<Boolean> arrays) {
   int firstArray(boolean intoLeaf) {
     int last = intoLeaf ? size() : size() - 1;
     for (int i = 0; i < last; i++) {
-      if (arrays.get(i)) {
+      if (Boolean.TRUE.equals(arrays.get(i))) {
         return i;
       }
     }
@@ -62,7 +62,7 @@ record JsonbFieldPath(List<String> segments, List<Boolean> arrays) {
   boolean[] arrayFlags() {
     boolean[] flags = new boolean[size()];
     for (int i = 0; i < flags.length; i++) {
-      flags[i] = arrays.get(i);
+      flags[i] = Boolean.TRUE.equals(arrays.get(i));
     }
     return flags;
   }

@@ -376,7 +376,7 @@ class Tmf630JsonbSplitCollectionIT {
   @Test
   @DisplayName(
       "URL attribute operator on a split item field: the child EXISTS, any item (3.6.0)")
-  void urlOperatorOnSplitItemsUsesTheChildExists() throws Exception {
+  void urlOperatorOnSplitItemsUsesTheChildExists() {
     SplitOrderDomain o1 = new SplitOrderDomain();
     o1.setId("U1");
     o1.setStatus("OPEN");
