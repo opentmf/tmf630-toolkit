@@ -261,6 +261,41 @@ class JsonbJsonPathTranslatorTest {
         .containsExactly("$ ? (@.s == \"x in [y]\")");
   }
 
+  @ParameterizedTest(name = "{0}")
+  @ValueSource(
+      strings = {
+        "in ['a']", "nin ['a']", "size 2", "empty true", "contains 'a'", "anyof ['a']",
+        "noneof ['a']", "subsetof ['a']", "all ['a']", "exists true", "type 'string'",
+        "matches 'x'", "IN ['a']", "Size 2"
+      })
+  @DisplayName("every Jayway operator word the toolkit does not support is the core's 400")
+  void jaywayOperatorWordsAreTheCores400(String operatorAndValue) {
+    assertThatThrownBy(() -> translator.translate("$[?(@.tags " + operatorAndValue + ")]"))
+        .isInstanceOf(TmfFilteringException.class)
+        .hasMessage("Unsupported token in jsonPath filter near: " + operatorAndValue);
+  }
+
+  @ParameterizedTest(name = "{0}")
+  @ValueSource(strings = {"===", "!=="})
+  @DisplayName("Jayway's type-safe equality operators are the core's 400")
+  void jaywayTypeSafeEqualityIsTheCores400(String operator) {
+    assertThatThrownBy(() -> translator.translate("$[?(@.s " + operator + " 'a')]"))
+        .isInstanceOf(TmfFilteringException.class)
+        .hasMessage("Unsupported token in jsonPath filter near: = 'a'");
+  }
+
+  @Test
+  @DisplayName("an operator word inside a literal, as a field name, or as a jsonpath function is no operator")
+  void operatorWordsSpareLiteralsFieldNamesAndFunctions() {
+    assertThat(translator.translate("$[?(@.s == 'size matters' && @.type == 'x')]").params())
+        .containsExactly("$ ? (@.s == \"size matters\" && @.type == \"x\")");
+    assertThat(translator.translate("$[?(@.contains == 'empty' || @.all.size == 1)]").params())
+        .containsExactly("$ ? (@.contains == \"empty\" || @.all.size == 1)");
+    // PostgreSQL's own exists(...) is a function here, not Jayway's exists operator (row 4 rules on it)
+    assertThat(translator.translate("$[?(exists(@.s))]").params())
+        .containsExactly("$ ? (exists(@.s))");
+  }
+
   @Test
   @DisplayName("the in / nin refusal does not fire inside a literal or on a field named like them")
   void inRefusalSparesLiteralsAndFieldNames() {
