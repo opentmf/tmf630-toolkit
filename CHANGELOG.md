@@ -2,7 +2,52 @@
 
 All notable changes to `tmf630-toolkit` are documented in this file.
 
-## [3.5.3] - 2026-11-12
+## [3.6.0] - 2026-11-12
+
+### Changed (JSONB equality is served by the GIN index)
+
+- **On JSONB, `EQ` and `IN` on an object path are now a containment test, which a GIN index
+  on the payload serves.**
+  - Before: a URL equality such as `?receiver.postalAddress.city=Berlin` or `?status.in=A,B` was
+    emitted as an extraction, `payload#>>'{receiver,postalAddress,city}' = ?`, cast by the
+    field's type. No GIN index serves that, so every equality filter read the whole table
+    unless the field had its own expression index.
+  - Now, when every step of the path is an object field (no collection on the way, no
+    positional `[N]`) and the field is a String or CharSequence, an enum, an integer or decimal
+    type, or a Boolean:
+    - `EQ` is `payload @> ?::jsonb`, with the value nested under the path:
+      `{"receiver":{"postalAddress":{"city":"Berlin"}}}`;
+    - `IN` is an `OR` of such fragments.
+- **Containment is type-exact, as on the Mongo backend.** A row whose stored JSON type differs
+  from the field's declared type is no longer found. `Tmf630JsonbEqualityParityIT` pins each
+  case with both row sets:
+  - a String field holding the number `42`, the boolean `true` or the number `42.0`:
+    `?s=42`, `?s=true` and `?s=42.0` found it, and no longer do;
+  - an Integer field holding the string `"42"` or `" 42"`: no longer found by `?n=42`;
+  - a BigDecimal field holding the string `"1.5"`: no longer found by `?d=1.5`;
+  - a Boolean field holding `"true"`, `"yes"` or `1`: no longer found by `?b=true`.
+- **Unchanged:**
+  - a value stored in the declared type is found as before; a decimal compares by value, so
+    `1.5` finds `1.50`;
+  - a JSON `null`, or an array where the path expects an object, was found neither before nor
+    now.
+- **The 500 goes away.** If any row of an Integer field held a value the `bigint` cast cannot
+  read (`"abc"`, or `42.0`), every equality on that field failed with HTTP 500. Containment
+  reads no row's text, so `?n=42` now finds the rows holding `42` and `42.0`, and passes over
+  `"abc"`.
+- **These keep the extraction, unchanged:**
+  - the date-time types: they are strings in the payload, so containment would compare text
+    and miss `…+02:00` or `.000Z` forms of the same instant; they still match by instant;
+  - every other type (`UUID`, `Object`, `Map`, …);
+  - a path through a collection or with `[N]`;
+  - `NE`, `NIN`, the ranges, the case-insensitive and the pattern operators;
+  - the factory's own `build` and `buildMulti`. The new methods are `buildOnObjectPath` and
+    `buildMultiOnObjectPath`, and the URL grammar uses them.
+- **An expression index created for an equality no longer serves it.** Take
+  `((payload->>'status'))`: it still serves the forms that extract (ranges, `NE`,
+  case-insensitive), but not `?status=X`, which now needs the GIN index on the payload. A
+  service that indexed equality fields only with expression indexes will scan for those
+  filters after this change. Create `GIN (payload jsonb_path_ops)`.
 
 ### Fixed (JSONB `filter=` and the GIN index)
 

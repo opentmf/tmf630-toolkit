@@ -171,6 +171,37 @@ class Tmf630JsonbIndexPlanIT {
     }
   }
 
+  static Stream<Arguments> indexServedEqualities() {
+    return Stream.of(
+        Arguments.of(
+            "String equality on a three-level path",
+            "receiver.postalAddress.city",
+            "City42",
+            (IntPredicate) g -> g % 500 == 42),
+        Arguments.of(
+            "Integer equality", "priority", "42", (IntPredicate) g -> g % 300 == 42),
+        Arguments.of(
+            "IN on a three-level path",
+            "receiver.postalAddress.city.in",
+            "City42,City43",
+            (IntPredicate) g -> g % 500 == 42 || g % 500 == 43));
+  }
+
+  @ParameterizedTest(name = "{0}")
+  @MethodSource("indexServedEqualities")
+  @DisplayName("attribute equality: SELECT and COUNT use a Bitmap Index Scan on the GIN index")
+  void attributeEqualityIsServedByTheGinIndex(
+      String name, String param, String value, IntPredicate expected) {
+    List<Explained> plans = runAndExplain(Map.of(param, new String[] {value}), expected);
+
+    assertThat(plans).hasSize(2);
+    for (Explained plan : plans) {
+      assertThat(bitmapIndexScansOn(plan.plan(), GIN_INDEX))
+          .as("plan of %s%n%s", plan.sql(), plan.plan())
+          .isPositive();
+    }
+  }
+
   @Test
   @DisplayName("filter= with only a range is not served by the GIN index: a sequential scan")
   void rangeOnlyFilterStillScans() {
@@ -190,10 +221,15 @@ class Tmf630JsonbIndexPlanIT {
   /**
    * Runs {@code filter} through the adopter path, asserts the exact rows, and explains every
    * statement the executor prepared against the table, with the WHERE clause's bind parameters.
+   * Logs the rows found against those of the seed formula on a mismatch.
    */
   private List<Explained> runAndExplain(String filter, IntPredicate expected) {
-    JsonbClause where =
-        clauseBuilder.build(JsonbIndexedDomain.class, Map.of("filter", new String[] {filter}));
+    return runAndExplain(Map.of("filter", new String[] {filter}), expected);
+  }
+
+  /** As {@link #runAndExplain(String, IntPredicate)}, for any query parameters. */
+  private List<Explained> runAndExplain(Map<String, String[]> params, IntPredicate expected) {
+    JsonbClause where = clauseBuilder.build(JsonbIndexedDomain.class, params);
     prepared.clear();
 
     Page<JsonbIndexedDomain> page =

@@ -75,6 +75,16 @@ public final class JsonbPathExtractor {
     return payloadColumn + " ?? '" + segments[0] + "'";
   }
 
+  /** The payload column the fragments read. */
+  public String payloadColumn() {
+    return payloadColumn;
+  }
+
+  /** The validated segments of {@code dottedPath}, as the extraction fragments use them. */
+  String[] segments(String dottedPath) {
+    return validateAndSplit(dottedPath);
+  }
+
   private static String[] validateAndSplit(String dottedPath) {
     if (dottedPath == null || dottedPath.isBlank()) {
       throw new IllegalArgumentException("dottedPath must not be blank");

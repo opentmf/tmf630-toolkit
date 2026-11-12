@@ -1,6 +1,7 @@
 package org.opentmf.query.tmf630.jsonb;
 
 import java.util.List;
+import java.util.Optional;
 import org.opentmf.query.tmf630.filtering.TmfFilteringException;
 import org.opentmf.query.tmf630.filtering.TmfOperator;
 import org.opentmf.query.tmf630.filtering.config.IsnullSemantics;
@@ -28,6 +29,11 @@ import tools.jackson.databind.json.JsonMapper;
  * {@code toString()} by default ({@code EnumFeature.WRITE_ENUMS_USING_TO_STRING}), which equals
  * {@link Enum#name()} unless the enum overrides it.
  *
+ * <p>{@link #buildOnObjectPath} / {@link #buildMultiOnObjectPath} emit {@code EQ} / {@code IN} on
+ * an object path as containment, {@code payload @> ?::jsonb}, which a GIN index on the payload
+ * serves (since 3.6.0; the URL grammar uses them). {@link #build} / {@link #buildMulti} keep the
+ * extraction for every operator.
+ *
  * <p>{@link IsnullSemantics#NULLISH} widens {@code IS_NULL}/{@code IS_NOT_NULL} to
  * include explicit JSON {@code null} values in addition to missing-key checks — per
  * §5.1 of the design doc, using an AND-of-complements form on the {@code IS_NOT_NULL}
@@ -41,7 +47,7 @@ public class JsonbPredicateFactory {
   private final JsonbPathExtractor extractor;
   private final IsnullSemantics isnullSemantics;
   private final boolean regexEnabled;
-  private final ObjectMapper mapper;
+  private final JsonbContainment containment;
 
   /** A factory that writes enum values with a default {@link JsonMapper}. */
   public JsonbPredicateFactory(
@@ -63,7 +69,48 @@ public class JsonbPredicateFactory {
     this.extractor = extractor;
     this.isnullSemantics = isnullSemantics == null ? IsnullSemantics.MISSING_ONLY : isnullSemantics;
     this.regexEnabled = regexEnabled;
-    this.mapper = mapper == null ? DEFAULT_MAPPER : mapper;
+    this.containment = new JsonbContainment(mapper == null ? DEFAULT_MAPPER : mapper);
+  }
+
+  /**
+   * {@link #build} for a field whose every path step is an object field: no array on the way and
+   * no positional index. {@code EQ} on a String, CharSequence, Enum, integer, decimal or Boolean
+   * field is emitted as containment, {@code payload @> ?::jsonb}, with the value nested under the
+   * path in the JSON type the field declares; a GIN index on the payload serves it.
+   *
+   * <p>Containment is type-exact, as on the Mongo backend: it finds the value stored in the JSON
+   * type the field declares, not one stored in another (a String field holding the number
+   * {@code 42} is not found by {@code "42"}; an Integer field holding the string {@code "42"} is not
+   * found by {@code 42}), and a value no cast can read no longer fails the query. Every other
+   * operator, the date-time types, any other type and a {@code null} value are exactly
+   * {@link #build}.
+   */
+  public JsonbClause buildOnObjectPath(
+      TmfOperator operator, String fieldPath, Class<?> targetType, Object value) {
+    if (operator == TmfOperator.EQ) {
+      Optional<JsonbClause> contained = containment(fieldPath, targetType, value);
+      if (contained.isPresent()) {
+        return contained.get();
+      }
+    }
+    return build(operator, fieldPath, targetType, value);
+  }
+
+  /**
+   * {@link #buildMulti} for a field whose every path step is an object field: {@code IN} is an
+   * {@code OR} of containment fragments, one per value, when every value has one (see
+   * {@link #buildOnObjectPath}); otherwise, and for every other operator, exactly
+   * {@link #buildMulti}.
+   */
+  public JsonbClause buildMultiOnObjectPath(
+      TmfOperator operator, String fieldPath, Class<?> targetType, List<Object> values) {
+    if (operator == TmfOperator.IN && values != null && !values.isEmpty()) {
+      Optional<JsonbClause> anyOf = containmentAnyOf(fieldPath, targetType, values);
+      if (anyOf.isPresent()) {
+        return anyOf.get();
+      }
+    }
+    return buildMulti(operator, fieldPath, targetType, values);
   }
 
   /** Single-value operator (EQ/NE/EQI/NEI/GT/GTE/LT/LTE/LIKE/LIKEI/CONTAINS/CONTAINSI/ */
@@ -151,8 +198,27 @@ public class JsonbPredicateFactory {
     if (!(value instanceof Enum<?> constant)) {
       return value;
     }
-    JsonNode written = mapper.valueToTree(constant);
-    return written.isValueNode() && !written.isNull() ? written.asString() : constant.name();
+    return containment.writtenEnum(constant).map(JsonNode::asString).orElse(constant.name());
+  }
+
+  private Optional<JsonbClause> containment(String fieldPath, Class<?> targetType, Object value) {
+    String payloadColumn = extractor.payloadColumn();
+    return containment
+        .fragment(extractor.segments(fieldPath), targetType, value)
+        .map(fragment -> JsonbClause.of(payloadColumn + " @> ?::jsonb", fragment));
+  }
+
+  private Optional<JsonbClause> containmentAnyOf(
+      String fieldPath, Class<?> targetType, List<Object> values) {
+    JsonbClause anyOf = JsonbClause.alwaysFalse();
+    for (Object value : values) {
+      Optional<JsonbClause> one = containment(fieldPath, targetType, value);
+      if (one.isEmpty()) {
+        return Optional.empty();
+      }
+      anyOf = anyOf.or(one.get());
+    }
+    return Optional.of(anyOf);
   }
 
   private JsonbClause inClause(String text, JsonbCast cast, List<Object> values, boolean negate) {

@@ -32,6 +32,11 @@ import org.opentmf.query.tmf630.filtering.predicate.ValueConverter;
  *       {@code filter.combineWithAttributes}.
  * </ul>
  *
+ * <p>On an object path (every step an object field: no collection on the way, no positional
+ * index), {@code EQ} and {@code IN} go through {@link JsonbPredicateFactory#buildOnObjectPath} /
+ * {@link JsonbPredicateFactory#buildMultiOnObjectPath}, so a GIN index on the payload serves them
+ * (since 3.6.0).
+ *
  * <p>Field paths resolve against the <em>domain type</em> (the payload POJO, not the row
  * entity) with the same {@link FieldPathResolver} the QueryDSL terminal uses — identical
  * unknown-field detection and {@code List}-element type resolution — and values coerce
@@ -116,36 +121,54 @@ public class Tmf630JsonbClauseBuilder {
     if (operator.isNoValueOperator()) {
       return predicateFactory.buildNoValue(operator, resolvedField.fieldPath());
     }
+    boolean objectPath = isObjectPath(domainType, clause.fieldPath());
     if (operator.isMultiValueOperator()) {
-      return buildMultiValueClause(clause, resolvedField);
+      return buildMultiValueClause(clause, resolvedField, objectPath);
     }
-    return buildRepeatedValueClause(clause, resolvedField);
+    return buildRepeatedValueClause(clause, resolvedField, objectPath);
+  }
+
+  /**
+   * Whether every step of {@code fieldPath} is an object field: no positional index and no prefix
+   * of the path (itself included) resolving to a collection.
+   */
+  private boolean isObjectPath(Class<?> domainType, String fieldPath) {
+    if (fieldPath.indexOf('[') >= 0) {
+      return false;
+    }
+    int dot = -1;
+    do {
+      dot = fieldPath.indexOf('.', dot + 1);
+      String prefix = dot < 0 ? fieldPath : fieldPath.substring(0, dot);
+      if (fieldPathResolver.resolve(domainType, prefix, true).leafIsCollection()) {
+        return false;
+      }
+    } while (dot >= 0);
+    return true;
   }
 
   private JsonbClause buildMultiValueClause(
-      Tmf630AttributeClause clause, ResolvedField resolvedField) {
+      Tmf630AttributeClause clause, ResolvedField resolvedField, boolean objectPath) {
     List<Object> typedValues = new ArrayList<>();
     for (List<String> group : clause.valueGroups()) {
       for (String element : group) {
         typedValues.add(convert(element, resolvedField));
       }
     }
-    return predicateFactory.buildMulti(
-        clause.operator(), resolvedField.fieldPath(), resolvedField.javaType(), typedValues);
+    return objectPath
+        ? predicateFactory.buildMultiOnObjectPath(
+            clause.operator(), resolvedField.fieldPath(), resolvedField.javaType(), typedValues)
+        : predicateFactory.buildMulti(
+            clause.operator(), resolvedField.fieldPath(), resolvedField.javaType(), typedValues);
   }
 
   private JsonbClause buildRepeatedValueClause(
-      Tmf630AttributeClause clause, ResolvedField resolvedField) {
+      Tmf630AttributeClause clause, ResolvedField resolvedField, boolean objectPath) {
     JsonbClause perKey = null;
     for (List<String> group : clause.valueGroups()) {
       JsonbClause perValue = null;
       for (String element : group) {
-        JsonbClause elementClause =
-            predicateFactory.build(
-                clause.operator(),
-                resolvedField.fieldPath(),
-                resolvedField.javaType(),
-                convert(element, resolvedField));
+        JsonbClause elementClause = elementClause(clause, resolvedField, objectPath, element);
         perValue = perValue == null ? elementClause : perValue.or(elementClause);
       }
       if (perValue == null) {
@@ -161,6 +184,15 @@ public class Tmf630JsonbClauseBuilder {
       }
     }
     return perKey;
+  }
+
+  private JsonbClause elementClause(
+      Tmf630AttributeClause clause, ResolvedField field, boolean objectPath, String element) {
+    Object value = convert(element, field);
+    return objectPath
+        ? predicateFactory.buildOnObjectPath(
+            clause.operator(), field.fieldPath(), field.javaType(), value)
+        : predicateFactory.build(clause.operator(), field.fieldPath(), field.javaType(), value);
   }
 
   private Object convert(String element, ResolvedField resolvedField) {
