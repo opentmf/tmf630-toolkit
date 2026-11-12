@@ -75,7 +75,7 @@ class Tmf630EnumWireValueMongoIT {
     mockMvc
         .perform(get("/mongo-enum").param(param, value))
         .andExpect(status().isOk())
-        .andExpect(content().json(expectedIds, true));
+        .andExpect(content().string(expectedIds));
   }
 
   @ParameterizedTest(name = "{0}={1} -> 400")
