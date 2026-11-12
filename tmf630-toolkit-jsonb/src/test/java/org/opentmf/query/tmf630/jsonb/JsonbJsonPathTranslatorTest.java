@@ -16,10 +16,10 @@ class JsonbJsonPathTranslatorTest {
       new JsonbJsonPathTranslator(extractor, "payload");
 
   @Test
-  @DisplayName("simple equality filter wraps in jsonb_path_exists with converted quotes")
+  @DisplayName("simple equality filter is tested with the @? operator, quotes converted")
   void simpleEquality() {
     JsonbClause c = translator.translate("$[?(@.status == 'Pending')]");
-    assertThat(c.sql()).isEqualTo("jsonb_path_exists(payload, ?::jsonpath)");
+    assertThat(c.sql()).isEqualTo("payload @?? ?::jsonpath");
     assertThat(c.params()).containsExactly("$ ? (@.status == \"Pending\")");
   }
 

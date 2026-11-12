@@ -1,0 +1,258 @@
+package org.opentmf.query.tmf630.jsonb;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
+import java.sql.Connection;
+import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.IntPredicate;
+import java.util.stream.IntStream;
+import java.util.stream.Stream;
+import javax.sql.DataSource;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.opentmf.query.tmf630.jsonb.it.JsonbIndexedDomain;
+import org.opentmf.query.tmf630.jsonb.it.JsonbIndexedRow;
+import org.opentmf.query.tmf630.jsonb.it.JsonbTestRow;
+import org.opentmf.query.tmf630.paging.TmfSort;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Bean;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.jdbc.datasource.DelegatingDataSource;
+import org.springframework.test.context.ActiveProfiles;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+
+/**
+ * Proves by PLAN that the {@code filter=} queries the toolkit sends are served by the {@code GIN
+ * (payload jsonb_path_ops)} index an adopter is told to create.
+ *
+ * <p>The table holds {@value #ROWS} rows seeded server-side and is analysed, and no planner
+ * setting is touched, so the planner's own choice is what is tested. The WHERE clause is built
+ * through the adopter path ({@link Tmf630JsonbClauseBuilder} with a {@code filter} parameter) and
+ * run through a {@link Tmf630JsonbFilterExecutor} whose connections record every statement it
+ * prepares; each recorded statement (the page SELECT and the COUNT) is then explained with the
+ * same bind parameters. An index-served filter must show a Bitmap Index Scan on {@value
+ * #GIN_INDEX} itself, so neither a sequential scan nor a primary-key plan can pass. Every case
+ * also returns exactly the rows the seed formula demands.
+ */
+@SpringBootTest(
+    classes = Tmf630JsonbIndexPlanIT.TestApp.class,
+    properties = {
+      "spring.jpa.hibernate.ddl-auto=create-drop",
+      "spring.jpa.show-sql=false",
+      "spring.datasource.url=${tmf630.sql.it.datasource.url:jdbc:tc:postgresql:18.1-alpine:///db}",
+      "spring.datasource.driver-class-name=org.testcontainers.jdbc.ContainerDatabaseDriver"
+    })
+@ActiveProfiles("test")
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
+class Tmf630JsonbIndexPlanIT {
+
+  private static final int ROWS = 20_000;
+  private static final String TABLE = JsonbIndexedRow.TABLE;
+  private static final String GIN_INDEX = TABLE + "_payload_gin";
+  private static final String CITY = "@.receiver.postalAddress.city";
+
+  /**
+   * Row {@code g} (1..ROWS) has id {@code r<g>}, city {@code City<g % 500>}, priority {@code g %
+   * 300} and two characteristics: {@code {k<g % 7>, v<g % 1000>}} and {@code {z, w<g % 3>}}.
+   */
+  private static final String SEED_SQL =
+      """
+      INSERT INTO jsonb_indexed_row (id, payload)
+      SELECT 'r' || g, jsonb_build_object(
+          'id', 'r' || g,
+          'status', (ARRAY['NEW', 'DONE', 'FAILED', 'OPEN'])[1 + g % 4],
+          'priority', g % 300,
+          'receiver', jsonb_build_object('postalAddress',
+              jsonb_build_object('city', 'City' || (g % 500), 'houseNumber', g % 1000)),
+          'characteristic', jsonb_build_array(
+              jsonb_build_object('name', 'k' || (g % 7), 'value', 'v' || (g % 1000)),
+              jsonb_build_object('name', 'z', 'value', 'w' || (g % 3))))
+      FROM generate_series(1, ?) AS g
+      """;
+
+  @Autowired private DataSource dataSource;
+  @Autowired private Tmf630JsonbClauseBuilder clauseBuilder;
+  @Autowired private JsonbEntityRegistry registry;
+  @Autowired private JsonbSortBuilder sortBuilder;
+  @Autowired private ObjectMapper objectMapper;
+
+  private final List<String> prepared = new CopyOnWriteArrayList<>();
+  private JdbcClient jdbc;
+  private Tmf630JsonbFilterExecutor recordingExecutor;
+
+  @BeforeAll
+  void seedIndexAndAnalyse() {
+    jdbc = JdbcClient.create(dataSource);
+    jdbc.sql("TRUNCATE " + TABLE).update();
+    jdbc.sql(SEED_SQL).param(ROWS).update();
+    jdbc.sql("CREATE INDEX IF NOT EXISTS " + GIN_INDEX + " ON " + TABLE
+            + " USING gin (payload jsonb_path_ops)")
+        .update();
+    jdbc.sql("ANALYZE " + TABLE).update();
+    recordingExecutor =
+        new Tmf630JsonbFilterExecutor(
+            JdbcClient.create(new RecordingDataSource(dataSource, prepared)),
+            objectMapper,
+            registry,
+            sortBuilder);
+  }
+
+  static Stream<Arguments> indexServedFilters() {
+    return Stream.of(
+        Arguments.of(
+            "equality on a three-level path",
+            "$[?(" + CITY + " == 'City42')]",
+            (IntPredicate) g -> g % 500 == 42),
+        Arguments.of(
+            "|| of two equalities",
+            "$[?(" + CITY + " == 'City42' || " + CITY + " == 'City43')]",
+            (IntPredicate) g -> g % 500 == 42 || g % 500 == 43),
+        Arguments.of(
+            "&& of an equality and a range",
+            "$[?(" + CITY + " == 'City42' && @.priority > 250)]",
+            (IntPredicate) g -> g % 500 == 42 && g % 300 > 250));
+  }
+
+  @ParameterizedTest(name = "{0}")
+  @MethodSource("indexServedFilters")
+  @DisplayName("filter= with an equality: SELECT and COUNT use a Bitmap Index Scan on the GIN index")
+  void filterWithAnEqualityIsServedByTheGinIndex(
+      String name, String filter, IntPredicate expected) {
+    List<Explained> plans = runAndExplain(filter, expected);
+
+    assertThat(plans).hasSize(2);
+    for (Explained plan : plans) {
+      assertThat(bitmapIndexScansOn(plan.plan(), GIN_INDEX))
+          .as("plan of %s%n%s", plan.sql(), plan.plan())
+          .isPositive();
+    }
+  }
+
+  @Test
+  @DisplayName("filter= with only a range is not served by the GIN index: a sequential scan")
+  void rangeOnlyFilterStillScans() {
+    List<Explained> plans = runAndExplain("$[?(@.priority > 290)]", g -> g % 300 > 290);
+
+    assertThat(plans).hasSize(2);
+    for (Explained plan : plans) {
+      assertThat(bitmapIndexScansOn(plan.plan(), GIN_INDEX))
+          .as("plan of %s%n%s", plan.sql(), plan.plan())
+          .isZero();
+      assertThat(seqScansOn(plan.plan(), TABLE))
+          .as("plan of %s%n%s", plan.sql(), plan.plan())
+          .isPositive();
+    }
+  }
+
+  /**
+   * Runs {@code filter} through the adopter path, asserts the exact rows, and explains every
+   * statement the executor prepared against the table, with the WHERE clause's bind parameters.
+   */
+  private List<Explained> runAndExplain(String filter, IntPredicate expected) {
+    JsonbClause where =
+        clauseBuilder.build(JsonbIndexedDomain.class, Map.of("filter", new String[] {filter}));
+    prepared.clear();
+
+    Page<JsonbIndexedDomain> page =
+        recordingExecutor.findAll(
+            JsonbIndexedDomain.class, where, TmfSort.empty(), Pageable.unpaged(), f -> String.class);
+
+    List<String> expectedIds =
+        IntStream.rangeClosed(1, ROWS).filter(expected).mapToObj(g -> "r" + g).toList();
+    assertThat(page.getContent())
+        .extracting(JsonbIndexedDomain::id)
+        .containsExactlyInAnyOrderElementsOf(expectedIds);
+    assertThat(page.getTotalElements()).isEqualTo(expectedIds.size());
+
+    List<Explained> plans = new ArrayList<>();
+    for (String sql : prepared) {
+      if (sql.contains(" FROM " + TABLE + " ")) {
+        String json =
+            jdbc.sql("EXPLAIN (FORMAT JSON) " + sql)
+                .params(where.params())
+                .query(String.class)
+                .single();
+        plans.add(new Explained(sql, objectMapper.readTree(json).get(0).path("Plan")));
+      }
+    }
+    return plans;
+  }
+
+  private static long bitmapIndexScansOn(JsonNode plan, String indexName) {
+    return nodes(plan)
+        .filter(n -> "Bitmap Index Scan".equals(n.path("Node Type").asString()))
+        .filter(n -> indexName.equals(n.path("Index Name").asString()))
+        .count();
+  }
+
+  private static long seqScansOn(JsonNode plan, String tableName) {
+    return nodes(plan)
+        .filter(n -> "Seq Scan".equals(n.path("Node Type").asString()))
+        .filter(n -> tableName.equals(n.path("Relation Name").asString()))
+        .count();
+  }
+
+  private static Stream<JsonNode> nodes(JsonNode plan) {
+    Stream<JsonNode> children =
+        plan.path("Plans").valueStream().flatMap(Tmf630JsonbIndexPlanIT::nodes);
+    return Stream.concat(Stream.of(plan), children);
+  }
+
+  private record Explained(String sql, JsonNode plan) {}
+
+  /** Records the SQL of every statement prepared on its connections. */
+  private static final class RecordingDataSource extends DelegatingDataSource {
+
+    private final List<String> sink;
+
+    RecordingDataSource(DataSource target, List<String> sink) {
+      super(target);
+      this.sink = sink;
+    }
+
+    @Override
+    public Connection getConnection() throws SQLException {
+      Connection target = super.getConnection();
+      return (Connection)
+          Proxy.newProxyInstance(
+              Connection.class.getClassLoader(),
+              new Class<?>[] {Connection.class},
+              (proxy, method, args) -> {
+                if ("prepareStatement".equals(method.getName())
+                    && args != null
+                    && args[0] instanceof String sql) {
+                  sink.add(sql);
+                }
+                try {
+                  return method.invoke(target, args);
+                } catch (InvocationTargetException e) {
+                  throw e.getCause();
+                }
+              });
+    }
+  }
+
+  @SpringBootApplication(scanBasePackageClasses = JsonbTestRow.class)
+  static class TestApp {
+    @Bean
+    ObjectMapper objectMapper() {
+      return new ObjectMapper();
+    }
+  }
+}

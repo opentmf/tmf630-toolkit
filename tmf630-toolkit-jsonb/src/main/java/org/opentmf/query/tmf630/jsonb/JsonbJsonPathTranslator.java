@@ -5,9 +5,18 @@ import org.opentmf.query.tmf630.filtering.TmfFilteringException;
 
 /**
  * Phase (b.3) — translates the toolkit's Jayway-flavour JsonPath {@code filter=}
- * expression into a Postgres SQL/JSON path expression, wrapped in a
- * {@code jsonb_path_exists(payload, ...)} call. Emits a {@link JsonbClause} the b.5
- * executor can compose into a full WHERE clause.
+ * expression into a Postgres SQL/JSON path expression, tested with the {@code @?} operator:
+ * {@code payload @? ?::jsonpath}. Emits a {@link JsonbClause} the b.5 executor can compose into
+ * a full WHERE clause.
+ *
+ * <p>The operator, not the equivalent {@code jsonb_path_exists(payload, ...)} function, because
+ * PostgreSQL serves a GIN index ({@code jsonb_path_ops} or {@code jsonb_ops}) only through the
+ * operators {@code @>}, {@code @?} and {@code @@}, never through a function call.
+ * The JDBC text carries the operator as {@code @??}: the PostgreSQL driver turns {@code ??} into
+ * a literal {@code ?}, so the server receives {@code payload @? $1::jsonpath} (the same escape
+ * {@link JsonbPathExtractor#hasTopLevelKey} uses). The operator suppresses the errors the
+ * function raises; for the lax {@code $ ? (...)} path this class emits, that differs only when a
+ * wrapper body continues outside the filter.
  *
  * <p>Translation rules:
  *
@@ -77,8 +86,8 @@ public class JsonbJsonPathTranslator {
    *
    * <ol>
    *   <li>{@code length()} equality — special-cased to {@code jsonb_array_length}.
-   *   <li>Everything else — translated to Postgres SQL/JSON path and wrapped in
-   *       {@code jsonb_path_exists}.
+   *   <li>Everything else — translated to Postgres SQL/JSON path and tested with
+   *       {@code payload @? ?::jsonpath}.
    * </ol>
    */
   public JsonbClause translate(String filterExpression) {
@@ -96,14 +105,14 @@ public class JsonbJsonPathTranslator {
       return translateLengthEquality(
           lengthEquality.get().field(), Integer.parseInt(lengthEquality.get().literal()));
     }
-    return translateAsJsonbPathExists(body);
+    return translateAsPathMatch(body);
   }
 
-  private JsonbClause translateAsJsonbPathExists(String body) {
+  private JsonbClause translateAsPathMatch(String body) {
     String jsonPath = "$ ? (" + translatePredicate(body) + ")";
-    // JDBC parameter for the jsonpath text — Postgres will cast the text to jsonpath.
-    return JsonbClause.of(
-        "jsonb_path_exists(" + payloadColumn + ", ?::jsonpath)", jsonPath);
+    // JDBC parameter for the jsonpath text — Postgres will cast the text to jsonpath. "@??" is
+    // the driver's escape for the "@?" operator, so the index can serve the test.
+    return JsonbClause.of(payloadColumn + " @?? ?::jsonpath", jsonPath);
   }
 
   private JsonbClause translateLengthEquality(String dottedField, int expectedLength) {

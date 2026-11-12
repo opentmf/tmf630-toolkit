@@ -28,7 +28,7 @@ class JsonbSplitAwareFilterTranslatorTest {
   @DisplayName("parent-only filter delegates unchanged when domain has no splits")
   void parentOnlyNoSplits() {
     JsonbClause c = translator.translate(NoSplitsDomain.class, "$[?(@.status == 'X')]");
-    assertThat(c.sql()).isEqualTo("jsonb_path_exists(payload, ?::jsonpath)");
+    assertThat(c.sql()).isEqualTo("payload @?? ?::jsonpath");
     assertThat(c.params()).containsExactly("$ ? (@.status == \"X\")");
   }
 
@@ -36,7 +36,7 @@ class JsonbSplitAwareFilterTranslatorTest {
   @DisplayName("parent-only filter delegates unchanged when domain HAS splits (no split ref)")
   void parentOnlyWithSplitsPresent() {
     JsonbClause c = translator.translate(OrderDomain.class, "$[?(@.status == 'X')]");
-    assertThat(c.sql()).isEqualTo("jsonb_path_exists(payload, ?::jsonpath)");
+    assertThat(c.sql()).isEqualTo("payload @?? ?::jsonpath");
   }
 
   @Test
@@ -48,7 +48,7 @@ class JsonbSplitAwareFilterTranslatorTest {
     assertThat(c.sql())
         .isEqualTo(
             "EXISTS (SELECT 1 FROM order_item WHERE parent_id = order_row.id AND"
-                + " jsonb_path_exists(payload, ?::jsonpath))");
+                + " payload @?? ?::jsonpath)");
     assertThat(c.params()).containsExactly("$ ? (@.state == \"PENDING\")");
   }
 
@@ -74,7 +74,7 @@ class JsonbSplitAwareFilterTranslatorTest {
             OrderDomain.class, "$[?(@.status == 'X' && @.items[?(@.state == 'Y')])]");
     // Combined shape: (parentJsonpath AND EXISTS(...))
     assertThat(c.sql())
-        .contains("jsonb_path_exists(payload, ?::jsonpath)")
+        .contains("payload @?? ?::jsonpath")
         .contains("EXISTS (SELECT 1 FROM order_item");
     assertThat(c.sql()).contains(" AND ");
     // Both params flow through: parent jsonpath first, then child jsonpath.
@@ -90,7 +90,7 @@ class JsonbSplitAwareFilterTranslatorTest {
         translator.translate(
             OrderDomain.class, "$[?(@.status == 'X' || @.items[?(@.state == 'Y')])]");
     assertThat(c.sql())
-        .contains("jsonb_path_exists(payload, ?::jsonpath)")
+        .contains("payload @?? ?::jsonpath")
         .contains("EXISTS (SELECT 1 FROM order_item")
         .contains(" OR ");
     assertThat(c.params()).hasSize(2);

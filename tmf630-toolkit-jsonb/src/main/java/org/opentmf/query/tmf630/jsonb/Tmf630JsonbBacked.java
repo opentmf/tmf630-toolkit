@@ -9,7 +9,7 @@ import java.lang.annotation.Target;
  * Marks a JPA row entity as PostgreSQL-with-JSONB-backed for the purposes of the tmf630
  * toolkit's attribute-filtering and sort pipelines. When present, the toolkit routes
  * URL-parameter predicates and sort terms targeting this entity's <em>domain-model</em>
- * fields into JSONB SQL (e.g. {@code payload->>'field'}, {@code jsonb_path_exists},
+ * fields into JSONB SQL (e.g. {@code payload->>'field'}, {@code payload @? jsonpath},
  * {@code jsonb_array_length}) against the annotated row's {@code payload} column, rather
  * than through the standard {@code querydsl-jpa} path against normalized entity columns.
  *

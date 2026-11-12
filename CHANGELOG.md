@@ -2,6 +2,35 @@
 
 All notable changes to `tmf630-toolkit` are documented in this file.
 
+## [3.5.3] - 2026-11-12
+
+### Fixed (JSONB `filter=` and the GIN index)
+
+- **On a JSONB-backed entity, a GIN index on the payload can now serve `filter=`.** The
+  translator emitted the function `jsonb_path_exists(payload, ?::jsonpath)`. PostgreSQL serves
+  a `GIN (payload jsonb_path_ops)` (or `jsonb_ops`) index only through the operators `@>`, `@?`
+  and `@@`, never through a function call. So every `filter=` query read the whole table,
+  including on services that had created the index the design document recommends. The
+  translator now emits the operator `payload @? ?::jsonpath`. The JDBC text reads
+  `payload @?? ?::jsonpath`; the driver turns `??` into `?`. The same form now covers the root
+  filter, `&&` and `||`, the split-collection `EXISTS` subquery and the `COUNT` query.
+  - A filter with at least one equality uses the index (a Bitmap Index Scan).
+  - A filter with no equality (ranges only, `=~`, `!`) still scans the table, because the
+    index has no key for it.
+  - Both forms return the same rows. No adopter action is needed: an existing GIN index starts
+    being used, and nothing else changes.
+- **What the operator answers differently.** The operator suppresses errors that the function
+  raises. The path the toolkit emits is always the lax `$ ? (<filter>)`, and inside that filter
+  both forms already treat an error as no match. Measured, with the same answer in both forms:
+  - a missing key, a value of another type, arithmetic on text, division by zero;
+  - an unparseable date-time, `.double()` on text, an out-of-range subscript.
+
+  Both forms still raise an error for a date-time comparison that needs a time zone, for an
+  undefined `$variable`, and for a jsonpath syntax error. The only difference is a body that
+  closes the wrapper and goes on outside the filter, such as `$[?(@.a == 1) + (1)]` or
+  `$[?(@.a == 1).double()]`. The function raised an error (HTTP 500); the operator matches no
+  row.
+
 ## [3.5.2] - 2026-11-04
 
 ### Fixed

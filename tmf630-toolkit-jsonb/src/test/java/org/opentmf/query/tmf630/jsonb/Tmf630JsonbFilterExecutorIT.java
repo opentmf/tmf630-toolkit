@@ -156,7 +156,7 @@ class Tmf630JsonbFilterExecutorIT {
 
   @Test
   @DisplayName(
-      "Phase (b.3): JsonPath filter=$[?(...)] compiles to jsonb_path_exists at runtime")
+      "Phase (b.3): JsonPath filter=$[?(...)] compiles to payload @? jsonpath at runtime")
   void jsonPathFilterEqualityWorksAgainstPostgres() {
     JsonbClause where = jsonPathTranslator.translate("$[?(@.status == 'NEW')]");
     Page<JsonbTestDomain> page =
