@@ -753,14 +753,14 @@ JSONB path (single-hop or dotted); `?` is a JDBC parameter binding.
 | `NIN` | `payload->>'<field>' != ALL(?)` | — | |
 | `IS_NULL` | `NOT (payload ? '<field>')` (missing) OR `payload->'<field>' IS NULL` (explicit null) | — | Widening decision: NULLISH semantics widen to `NOT (payload ? '<field>') OR payload->'<field>' = 'null'::jsonb` (see §5.1) |
 | `IS_NOT_NULL` | `payload ? '<field>' AND payload->'<field>' IS NOT NULL` | — | |
-| `LIKE` | `payload->>'<field>' LIKE ?` | — | |
+| `LIKE` | `payload->>'<field>' LIKE ?` | — | The value is the pattern: `%` and `_` are wildcards |
 | `LIKEI` | `payload->>'<field>' ILIKE ?` | — | Postgres `ILIKE` is native; no `LOWER(...)` wrap |
-| `CONTAINS` | `payload->>'<field>' LIKE '%' \|\| ? \|\| '%'` | — | Escape `%` / `_` from the value at parameter-binding time |
-| `CONTAINSI` | `payload->>'<field>' ILIKE '%' \|\| ? \|\| '%'` | — | |
-| `STARTS_WITH` | `payload->>'<field>' LIKE ? \|\| '%'` | — | |
-| `STARTS_WITHI` | `payload->>'<field>' ILIKE ? \|\| '%'` | — | |
-| `ENDS_WITH` | `payload->>'<field>' LIKE '%' \|\| ?` | — | |
-| `ENDS_WITHI` | `payload->>'<field>' ILIKE '%' \|\| ?` | — | |
+| `CONTAINS` | `payload->>'<field>' LIKE '%' \|\| ? \|\| '%' ESCAPE '!'` | — | The value is bound with `%`, `_` and `!` escaped by `!` (as the QueryDSL terminal does), so it matches literally; a backslash is a plain character (since 3.6.0) |
+| `CONTAINSI` | `payload->>'<field>' ILIKE '%' \|\| ? \|\| '%' ESCAPE '!'` | — | Value escaped as for `CONTAINS` |
+| `STARTS_WITH` | `payload->>'<field>' LIKE ? \|\| '%' ESCAPE '!'` | — | Value escaped as for `CONTAINS` |
+| `STARTS_WITHI` | `payload->>'<field>' ILIKE ? \|\| '%' ESCAPE '!'` | — | Value escaped as for `CONTAINS` |
+| `ENDS_WITH` | `payload->>'<field>' LIKE '%' \|\| ? ESCAPE '!'` | — | Value escaped as for `CONTAINS` |
+| `ENDS_WITHI` | `payload->>'<field>' ILIKE '%' \|\| ? ESCAPE '!'` | — | Value escaped as for `CONTAINS` |
 | `REGEX` | `payload->>'<field>' ~ ?` | — | **Native regex** — closes JPA gap #11 |
 | `REGEXI` | `payload->>'<field>' ~* ?` | — | **Native regex** |
 

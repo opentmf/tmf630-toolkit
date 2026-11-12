@@ -244,6 +244,28 @@ All notable changes to `tmf630-toolkit` are documented in this file.
     Before, it read the parent payload, which no longer holds the items.
   - A positional path (`?items[0].state=X`) keeps the extraction.
 
+### Fixed (JSONB `contains`, `startswith` and `endswith` match their value literally)
+
+- **On JSONB, `%` and `_` in the value of `contains`, `startswith`, `endswith` and their `i`
+  forms are no longer wildcards.** Since 3.0.0, `?name.contains=50%` also found "500 off" and
+  `?code.startswith=a_` found "abc". The QueryDSL terminal (JPA and Mongo) matches them
+  literally.
+- **Now the value is bound with `%`, `_` and `!` escaped by `!`, under an explicit
+  `ESCAPE '!'`**, the escaping the QueryDSL terminal uses:
+  `payload->>'name' LIKE '%' || ? || '%' ESCAPE '!'`. The same holds on every position (nested,
+  inside an array, in a split collection).
+- `like` and `likei` are unchanged: their value is the pattern.
+
+### Changed (JSONB: a backslash in a `contains` value is a plain character)
+
+- **On JSONB, a backslash in the value of `contains`, `startswith`, `endswith` or an `i` form now
+  matches a backslash.** Before, it was PostgreSQL's implicit LIKE escape: `?note.contains=50\%`
+  found "50%", and `?code.contains=x\y` found "xy".
+- A caller who escaped a `%` or `_` by hand with a backslash now gets no match for it. Send the
+  value as it is (`?note.contains=50%`), which now matches literally.
+- This is how the QueryDSL terminal has always read a backslash. `like` / `likei` patterns keep
+  PostgreSQL's backslash escape.
+
 ## [3.5.2] - 2026-11-04
 
 ### Fixed

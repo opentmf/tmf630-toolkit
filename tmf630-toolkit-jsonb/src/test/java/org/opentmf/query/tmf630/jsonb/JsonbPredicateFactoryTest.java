@@ -291,17 +291,38 @@ class JsonbPredicateFactoryTest {
     assertThat(factory.build(TmfOperator.LIKEI, "n", String.class, "a%").sql())
         .isEqualTo("payload->>'n' ILIKE ?");
     assertThat(factory.build(TmfOperator.CONTAINS, "n", String.class, "ow").sql())
-        .isEqualTo("payload->>'n' LIKE '%' || ? || '%'");
+        .isEqualTo("payload->>'n' LIKE '%' || ? || '%' ESCAPE '!'");
     assertThat(factory.build(TmfOperator.CONTAINSI, "n", String.class, "OW").sql())
-        .isEqualTo("payload->>'n' ILIKE '%' || ? || '%'");
+        .isEqualTo("payload->>'n' ILIKE '%' || ? || '%' ESCAPE '!'");
     assertThat(factory.build(TmfOperator.STARTS_WITH, "n", String.class, "D").sql())
-        .isEqualTo("payload->>'n' LIKE ? || '%'");
+        .isEqualTo("payload->>'n' LIKE ? || '%' ESCAPE '!'");
     assertThat(factory.build(TmfOperator.STARTS_WITHI, "n", String.class, "d").sql())
-        .isEqualTo("payload->>'n' ILIKE ? || '%'");
+        .isEqualTo("payload->>'n' ILIKE ? || '%' ESCAPE '!'");
     assertThat(factory.build(TmfOperator.ENDS_WITH, "n", String.class, "e").sql())
-        .isEqualTo("payload->>'n' LIKE '%' || ?");
+        .isEqualTo("payload->>'n' LIKE '%' || ? ESCAPE '!'");
     assertThat(factory.build(TmfOperator.ENDS_WITHI, "n", String.class, "E").sql())
-        .isEqualTo("payload->>'n' ILIKE '%' || ?");
+        .isEqualTo("payload->>'n' ILIKE '%' || ? ESCAPE '!'");
+  }
+
+  @Test
+  @DisplayName("substring operators bind their value escaped for LIKE, like/likei as the pattern")
+  void substringOperatorsEscapeTheValue() {
+    for (TmfOperator op :
+        List.of(
+            TmfOperator.CONTAINS,
+            TmfOperator.CONTAINSI,
+            TmfOperator.STARTS_WITH,
+            TmfOperator.STARTS_WITHI,
+            TmfOperator.ENDS_WITH,
+            TmfOperator.ENDS_WITHI)) {
+      assertThat(factory.build(op, "n", String.class, "x%_\\!y").params())
+          .as(op.suffix())
+          .containsExactly("x!%!_\\!!y");
+    }
+    assertThat(factory.build(TmfOperator.LIKE, "n", String.class, "x%_").params())
+        .containsExactly("x%_");
+    assertThat(factory.build(TmfOperator.LIKEI, "n", String.class, "x%_").params())
+        .containsExactly("x%_");
   }
 
   @Test
@@ -331,7 +352,7 @@ class JsonbPredicateFactoryTest {
             factory
                 .build(TmfOperator.CONTAINS, "characteristic.value", Object.class, "Giga")
                 .sql())
-        .isEqualTo("payload#>>'{characteristic,value}' LIKE '%' || ? || '%'");
+        .isEqualTo("payload#>>'{characteristic,value}' LIKE '%' || ? || '%' ESCAPE '!'");
   }
 
   @Test

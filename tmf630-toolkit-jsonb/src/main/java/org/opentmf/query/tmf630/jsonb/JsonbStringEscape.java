@@ -1,15 +1,39 @@
 package org.opentmf.query.tmf630.jsonb;
 
 /**
- * Shared string escape helpers for JsonPath → SQL/JSON translation. Both
- * {@link JsonbJsonPathTranslator} (filter-side) and {@link JsonbCorrelatedSortTranslator}
- * (sort-side) rewrap single-quoted JsonPath string literals into double-quoted
- * SQL/JSON literals and need identical backslash/quote escaping — extracted here so
- * the two translators do not carry duplicated copies.
+ * Shared string escape helpers. Both {@link JsonbJsonPathTranslator} (filter-side) and
+ * {@link JsonbCorrelatedSortTranslator} (sort-side) rewrap single-quoted JsonPath string literals
+ * into double-quoted SQL/JSON literals and need identical backslash/quote escaping — extracted here
+ * so the two translators do not carry duplicated copies. {@link JsonbPredicateFactory} escapes the
+ * value of the substring operators for {@code LIKE} with {@link #escapeLikeValue}.
  */
 final class JsonbStringEscape {
 
+  /**
+   * The {@code LIKE} escape character, as the QueryDSL terminal's ({@code like ? escape '!'}) and
+   * the core's JPA regex translation use it.
+   */
+  static final char LIKE_ESCAPE = '!';
+
   private JsonbStringEscape() {}
+
+  /**
+   * A value that {@code LIKE ... ESCAPE '!'} matches literally: {@code %}, {@code _} and {@code !}
+   * are each preceded by {@code !}; everything else, a backslash too, is a plain character. The
+   * same escaping as the QueryDSL terminal's {@code contains} ({@code x%_\!y} is bound as
+   * {@code x!%!_\!!y}).
+   */
+  static String escapeLikeValue(String s) {
+    StringBuilder out = new StringBuilder(s.length() + 8);
+    for (int i = 0; i < s.length(); i++) {
+      char c = s.charAt(i);
+      if (c == '%' || c == '_' || c == LIKE_ESCAPE) {
+        out.append(LIKE_ESCAPE);
+      }
+      out.append(c);
+    }
+    return out.toString();
+  }
 
   /**
    * Escapes the interior of a JSON double-quoted string: doubles backslashes and
