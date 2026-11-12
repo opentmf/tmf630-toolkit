@@ -136,5 +136,13 @@
       <classifier>jakarta</classifier>
       <scope>test</scope>
     </dependency>
+    <!-- The combination suite runs the QueryDSL terminal in memory as its acceptance reference;
+         array correlation there builds a Mongo elemMatch, which needs this module. -->
+    <dependency>
+      <groupId>com.querydsl</groupId>
+      <artifactId>querydsl-mongodb</artifactId>
+      <version>${querydsl.version}</version>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 </project>
