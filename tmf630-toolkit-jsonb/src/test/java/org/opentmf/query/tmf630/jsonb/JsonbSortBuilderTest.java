@@ -47,11 +47,43 @@ class JsonbSortBuilderTest {
   }
 
   @Test
-  @DisplayName("plain ASC OffsetDateTime — casts to ::timestamptz")
+  @DisplayName("correlated date-time sort: the guarded read repeats the jsonpath, bound twice")
+  void correlatedDateTimeSortBindsTheJsonpathTwice() {
+    TmfSort sort =
+        new TmfSort(
+            List.of(
+                new TmfSortTerm(
+                    Sort.Direction.ASC,
+                    TmfSortTerm.Kind.SIMPLE_RICH,
+                    "relatedParty[role=owner].createdAt")));
+    JsonbClause c = builderNullsLast.buildOrderByClause(sort, f -> OffsetDateTime.class);
+    String first = "((jsonb_path_query_first(payload, ?::jsonpath)) #>> '{}')";
+    assertThat(c.sql())
+        .isEqualTo(
+            "CASE WHEN pg_input_is_valid(" + first + ", 'timestamptz') THEN (" + first
+                + ")::timestamptz END ASC NULLS LAST");
+    assertThat(c.params()).hasSize(2).containsOnly(c.params().get(0));
+  }
+
+  @Test
+  @DisplayName("LocalDate, LocalTime and LocalDateTime read through pg_input_is_valid as well")
+  void otherDateAndTimeTypesAreGuarded() {
+    assertThat(JsonbCast.DATE.read("t")).isEqualTo("CASE WHEN pg_input_is_valid(t, 'date') THEN (t)::date END");
+    assertThat(JsonbCast.TIME.read("t")).isEqualTo("CASE WHEN pg_input_is_valid(t, 'time') THEN (t)::time END");
+    assertThat(JsonbCast.TIMESTAMP.read("t"))
+        .isEqualTo("CASE WHEN pg_input_is_valid(t, 'timestamp') THEN (t)::timestamp END");
+    assertThat(JsonbCast.BIGINT.read("t")).isEqualTo("(t)::bigint");
+    assertThat(JsonbCast.TEXT.read("t")).isEqualTo("t");
+  }
+
+  @Test
+  @DisplayName("plain ASC OffsetDateTime — read as timestamptz only where pg_input_is_valid says so")
   void plainAscDateTime() {
     TmfSort sort = plain(Sort.Direction.ASC, "createdAt");
     assertThat(builderNullsLast.buildOrderByClause(sort, type(OffsetDateTime.class)).sql())
-        .isEqualTo("(payload->>'createdAt')::timestamptz ASC NULLS LAST");
+        .isEqualTo(
+            "CASE WHEN pg_input_is_valid(payload->>'createdAt', 'timestamptz')"
+                + " THEN (payload->>'createdAt')::timestamptz END ASC NULLS LAST");
   }
 
   @Test
@@ -130,7 +162,8 @@ class JsonbSortBuilderTest {
     assertThat(c.sql())
         .isEqualTo(
             "((jsonb_path_query_first(payload, ?::jsonpath)) #>> '{}') ASC NULLS LAST, "
-                + "(payload->>'createdAt')::timestamptz DESC NULLS LAST");
+                + "CASE WHEN pg_input_is_valid(payload->>'createdAt', 'timestamptz')"
+                + " THEN (payload->>'createdAt')::timestamptz END DESC NULLS LAST");
     assertThat(c.params())
         .containsExactly("$.characteristics[*] ? (@.name == \"price\").value");
   }
