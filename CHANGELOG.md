@@ -161,6 +161,29 @@ All notable changes to `tmf630-toolkit` are documented in this file.
   none. `jackson-databind` is an optional dependency of `tmf630-toolkit-attribute-filtering-core`
   and `-autoconfigure`; without Jackson on the classpath, the reader is simply absent.
 
+### Fixed (JSONB URL operators on a field inside an array)
+
+- **On JSONB, a URL attribute operator on a field inside an array, or on a collection field,
+  now answers for ANY element, as the Mongo and JPA backends and `filter=` already did.**
+  Before, the toolkit emitted an extraction such as `payload#>>'{characteristic,name}' = ?`,
+  which reads nothing through an array. Every value operator matched no row; `isnull` matched
+  every row and `isnotnull` none. A field of a list of strings (`?tags=x`) compared the list's
+  text and missed `["x","y"]`. This affected every operator on such a path, on every type, since
+  3.0.0. TMF resources are full of such arrays (`characteristic`, `relatedParty`, items).
+- **What the toolkit emits now:**
+  - `EQ` and `IN` on a type with a containment fragment: containment through the array,
+    `payload @> '{"characteristic":[{"name":"x"}]}'` (and `{"tags":["x"]}`, or
+    `{"item":[{"tag":[{"code":"x"}]}]}` for an array inside an array). The GIN index on the
+    payload serves it.
+  - Every other operator: one `EXISTS (SELECT 1 FROM jsonb_array_elements(…) AS e1 WHERE …)`
+    per array step, with the operator's usual form on the element. A value stored where an
+    array is declared (an object, a scalar) holds no element, and raises no error.
+  - `isnotnull`: some element holds the field. `isnull`: no element does.
+  - A path into a split collection (`?items.state=PENDING`) is answered in the child table, as
+    `filter=` already was: `EXISTS (SELECT 1 FROM <child> WHERE parent_id = <parent>.id AND …)`.
+    Before, it read the parent payload, which no longer holds the items.
+  - A positional path (`?items[0].state=X`) keeps the extraction.
+
 ## [3.5.2] - 2026-11-04
 
 ### Fixed

@@ -44,6 +44,15 @@ final class JsonbContainment {
   }
 
   /**
+   * The fragment for a path whose steps flagged in {@code arrays} are arrays: each such step holds
+   * an array with one element, so containment finds the value in ANY element ({@code arr.s = 'x'}
+   * → {@code {"arr":[{"s":"x"}]}}; a list leaf {@code ls = 'x'} → {@code {"ls":["x"]}}).
+   */
+  Optional<String> fragment(String[] segments, boolean[] arrays, Class<?> type, Object value) {
+    return leaf(type, value).map(leaf -> mapper.writeValueAsString(nest(segments, arrays, leaf)));
+  }
+
+  /**
    * The JSON value the mapper writes for {@code constant} when it is a scalar ({@code @JsonValue},
    * {@code @JsonProperty}, {@code toString()} or the name, as the mapper is configured), else empty.
    */
@@ -101,6 +110,17 @@ final class JsonbContainment {
   private static JsonNode nest(String[] segments, JsonNode leaf) {
     JsonNode node = leaf;
     for (int i = segments.length - 1; i >= 0; i--) {
+      node = NODES.objectNode().set(segments[i], node);
+    }
+    return node;
+  }
+
+  private static JsonNode nest(String[] segments, boolean[] arrays, JsonNode leaf) {
+    JsonNode node = leaf;
+    for (int i = segments.length - 1; i >= 0; i--) {
+      if (arrays[i]) {
+        node = NODES.arrayNode().add(node);
+      }
       node = NODES.objectNode().set(segments[i], node);
     }
     return node;

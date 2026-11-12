@@ -37,7 +37,7 @@ import tools.jackson.databind.ObjectMapper;
  * legacy {@link JsonbPredicateFactory#build} still emits ({@code payload->>'x' = ?}, cast by the
  * domain type), and what the URL grammar now emits on an object path ({@code payload @> ?::jsonb}
  * for String, Enum, the integer and decimal types and Boolean; the extraction for the date-time
- * types and for any path through an array).
+ * types and for a positional path; any element of an array since 3.6.0).
  *
  * <p>Containment is type-exact, as on the Mongo backend: a value stored in another JSON type than
  * the field declares is no longer found. Each such case is a cell with both row sets pinned. The
@@ -165,10 +165,10 @@ class Tmf630JsonbEqualityParityIT {
             "2025-01-01T08:00:00Z",
             Set.of("T1", "T2", "T3"),
             Set.of("T1", "T2", "T3")),
-        // ---- unchanged: a path through an array keeps the extraction ----
-        cell("path through an array", "items.b", "x", Set.of(), Set.of()),
+        // ---- through an array: any element (3.6.0); the factory's own extraction finds none ----
+        cell("path through an array", "items.b", "x", Set.of("I1", "I2"), Set.of()),
         cell("positional index", "items[0].b", "x", Set.of("I1"), Set.of("I1")),
-        cell("array leaf", "tags", "x", Set.of(), Set.of()));
+        cell("array leaf", "tags", "x", Set.of("G1"), Set.of()));
   }
 
   private static Arguments cell(

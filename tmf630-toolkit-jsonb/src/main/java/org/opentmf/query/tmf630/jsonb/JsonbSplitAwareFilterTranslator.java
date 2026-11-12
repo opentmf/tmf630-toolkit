@@ -65,6 +65,11 @@ public class JsonbSplitAwareFilterTranslator {
     this.registry = registry;
   }
 
+  /** The registry the translator resolves split collections with. */
+  JsonbEntityRegistry registry() {
+    return registry;
+  }
+
   /**
    * Translates a {@code filter=} expression into a {@link JsonbClause}, applying
    * split-awareness for the given parent type. When the parent has no split

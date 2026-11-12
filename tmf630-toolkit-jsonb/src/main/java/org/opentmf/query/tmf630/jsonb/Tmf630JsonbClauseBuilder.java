@@ -15,6 +15,7 @@ import org.opentmf.query.tmf630.filtering.config.UnknownParamBehavior;
 import org.opentmf.query.tmf630.filtering.predicate.FieldPathResolver;
 import org.opentmf.query.tmf630.filtering.predicate.ResolvedField;
 import org.opentmf.query.tmf630.filtering.predicate.ValueConverter;
+import org.opentmf.query.tmf630.jsonb.JsonbPathPredicates.SplitChild;
 
 /**
  * JSONB terminal of the TMF-630 attribute-filter URL grammar — the counterpart of the
@@ -52,6 +53,7 @@ public class Tmf630JsonbClauseBuilder {
   private final ValueConverter valueConverter;
   private final JsonbPredicateFactory predicateFactory;
   private final JsonbSplitAwareFilterTranslator filterTranslator;
+  private final JsonbPathPredicates pathPredicates;
 
   public Tmf630JsonbClauseBuilder(
       Tmf630FilterParser filterParser,
@@ -66,6 +68,7 @@ public class Tmf630JsonbClauseBuilder {
     this.valueConverter = valueConverter;
     this.predicateFactory = predicateFactory;
     this.filterTranslator = filterTranslator;
+    this.pathPredicates = new JsonbPathPredicates(predicateFactory);
   }
 
   /**
@@ -118,57 +121,103 @@ public class Tmf630JsonbClauseBuilder {
       return null;
     }
     TmfOperator operator = clause.operator();
+    Target target = target(domainType, clause.fieldPath());
     if (operator.isNoValueOperator()) {
-      return predicateFactory.buildNoValue(operator, resolvedField.fieldPath());
+      return target.anyElementForPresence()
+          ? pathPredicates.noValue(operator, target.path(), target.split())
+          : predicateFactory.buildNoValue(operator, resolvedField.fieldPath());
     }
-    boolean objectPath = isObjectPath(domainType, clause.fieldPath());
     if (operator.isMultiValueOperator()) {
-      return buildMultiValueClause(clause, resolvedField, objectPath);
+      return buildMultiValueClause(clause, resolvedField, target);
     }
-    return buildRepeatedValueClause(clause, resolvedField, objectPath);
+    return buildRepeatedValueClause(clause, resolvedField, target);
   }
 
   /**
-   * Whether every step of {@code fieldPath} is an object field: no positional index and no prefix
-   * of the path (itself included) resolving to a collection.
+   * Where a clause's field lives: its path shape ({@code null} for a positional path, which keeps
+   * the extraction) and, when it leads into a split collection, the child table.
    */
-  private boolean isObjectPath(Class<?> domainType, String fieldPath) {
-    if (fieldPath.indexOf('[') >= 0) {
-      return false;
+  private record Target(JsonbFieldPath path, SplitChild split) {
+
+    /** isnull / isnotnull answer per element: the path crosses an array or enters a split. */
+    boolean anyElementForPresence() {
+      return path != null && (split != null || path.crossesArray());
     }
-    int dot = -1;
-    do {
-      dot = fieldPath.indexOf('.', dot + 1);
-      String prefix = dot < 0 ? fieldPath : fieldPath.substring(0, dot);
-      if (fieldPathResolver.resolve(domainType, prefix, true).leafIsCollection()) {
-        return false;
-      }
-    } while (dot >= 0);
-    return true;
+
+    /** Value operators answer per element: also when the leaf is a collection. */
+    boolean anyElementForValues() {
+      return path != null && (split != null || path.crossesArray() || path.leafIsCollection());
+    }
+
+    boolean objectPath() {
+      return path != null && !anyElementForValues();
+    }
+  }
+
+  private Target target(Class<?> domainType, String fieldPath) {
+    if (fieldPath.indexOf('[') >= 0) {
+      return new Target(null, null);
+    }
+    List<String> segments = List.of(fieldPath.split("\\."));
+    List<Boolean> arrays = new ArrayList<>();
+    for (int i = 1; i <= segments.size(); i++) {
+      String prefix = String.join(".", segments.subList(0, i));
+      arrays.add(fieldPathResolver.resolve(domainType, prefix, true).leafIsCollection());
+    }
+    JsonbFieldPath path = new JsonbFieldPath(segments, arrays);
+    return new Target(path, splitChild(domainType, path));
+  }
+
+  /** The child table when the path's first step is a split collection of the domain type. */
+  private SplitChild splitChild(Class<?> domainType, JsonbFieldPath path) {
+    if (path.size() < 2) {
+      return null;
+    }
+    String first = path.segments().get(0);
+    return filterTranslator
+        .registry()
+        .forDomainType(domainType)
+        .flatMap(
+            metadata ->
+                metadata.splitCollections().stream()
+                    .filter(split -> split.fieldName().equals(first))
+                    .findFirst()
+                    .map(
+                        split ->
+                            new SplitChild(
+                                split.childTable(),
+                                split.parentIdColumn(),
+                                metadata.tableName(),
+                                split.payloadColumn())))
+        .orElse(null);
   }
 
   private JsonbClause buildMultiValueClause(
-      Tmf630AttributeClause clause, ResolvedField resolvedField, boolean objectPath) {
+      Tmf630AttributeClause clause, ResolvedField resolvedField, Target target) {
     List<Object> typedValues = new ArrayList<>();
     for (List<String> group : clause.valueGroups()) {
       for (String element : group) {
         typedValues.add(convert(element, resolvedField));
       }
     }
-    return objectPath
+    TmfOperator operator = clause.operator();
+    Class<?> type = resolvedField.javaType();
+    if (target.anyElementForValues()) {
+      return pathPredicates.multi(operator, target.path(), type, typedValues, target.split());
+    }
+    return target.objectPath()
         ? predicateFactory.buildMultiOnObjectPath(
-            clause.operator(), resolvedField.fieldPath(), resolvedField.javaType(), typedValues)
-        : predicateFactory.buildMulti(
-            clause.operator(), resolvedField.fieldPath(), resolvedField.javaType(), typedValues);
+            operator, resolvedField.fieldPath(), type, typedValues)
+        : predicateFactory.buildMulti(operator, resolvedField.fieldPath(), type, typedValues);
   }
 
   private JsonbClause buildRepeatedValueClause(
-      Tmf630AttributeClause clause, ResolvedField resolvedField, boolean objectPath) {
+      Tmf630AttributeClause clause, ResolvedField resolvedField, Target target) {
     JsonbClause perKey = null;
     for (List<String> group : clause.valueGroups()) {
       JsonbClause perValue = null;
       for (String element : group) {
-        JsonbClause elementClause = elementClause(clause, resolvedField, objectPath, element);
+        JsonbClause elementClause = elementClause(clause, resolvedField, target, element);
         perValue = perValue == null ? elementClause : perValue.or(elementClause);
       }
       if (perValue == null) {
@@ -187,12 +236,15 @@ public class Tmf630JsonbClauseBuilder {
   }
 
   private JsonbClause elementClause(
-      Tmf630AttributeClause clause, ResolvedField field, boolean objectPath, String element) {
+      Tmf630AttributeClause clause, ResolvedField field, Target target, String element) {
     Object value = convert(element, field);
-    return objectPath
-        ? predicateFactory.buildOnObjectPath(
-            clause.operator(), field.fieldPath(), field.javaType(), value)
-        : predicateFactory.build(clause.operator(), field.fieldPath(), field.javaType(), value);
+    TmfOperator operator = clause.operator();
+    if (target.anyElementForValues()) {
+      return pathPredicates.single(operator, target.path(), field.javaType(), value, target.split());
+    }
+    return target.objectPath()
+        ? predicateFactory.buildOnObjectPath(operator, field.fieldPath(), field.javaType(), value)
+        : predicateFactory.build(operator, field.fieldPath(), field.javaType(), value);
   }
 
   private Object convert(String element, ResolvedField resolvedField) {
