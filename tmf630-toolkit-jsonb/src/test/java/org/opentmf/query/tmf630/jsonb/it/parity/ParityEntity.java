@@ -1,6 +1,8 @@
 package org.opentmf.query.tmf630.jsonb.it.parity;
 
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
@@ -20,6 +22,15 @@ public class ParityEntity {
   private Integer priority;
   private String modifiedBy;
   private String createdOn;
+
+  @Enumerated(EnumType.STRING)
+  private ParityStage stage;
+
+  @Enumerated(EnumType.STRING)
+  private ParityPhase phase;
+
+  @Enumerated(EnumType.STRING)
+  private ParityClash clash;
 
   public String getId() {
     return id;
@@ -59,5 +70,29 @@ public class ParityEntity {
 
   public void setCreatedOn(String createdOn) {
     this.createdOn = createdOn;
+  }
+
+  public ParityStage getStage() {
+    return stage;
+  }
+
+  public void setStage(ParityStage stage) {
+    this.stage = stage;
+  }
+
+  public ParityPhase getPhase() {
+    return phase;
+  }
+
+  public void setPhase(ParityPhase phase) {
+    this.phase = phase;
+  }
+
+  public ParityClash getClash() {
+    return clash;
+  }
+
+  public void setClash(ParityClash clash) {
+    this.clash = clash;
   }
 }

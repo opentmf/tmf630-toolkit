@@ -129,10 +129,37 @@ All notable changes to `tmf630-toolkit` are documented in this file.
     `JsonbPredicateFactory(extractor, isnullSemantics, regexEnabled, ObjectMapper)`. With the
     old constructor, or without a mapper bean, a default `JsonMapper` decides: it honours the
     annotations, not the service's own configuration.
-- **What a URL can name.** A URL still names an enum by its constant (`?state=IN_PROGRESS`).
-  It can use the wire value (`?state=inProgress`) only when the enum has a public static
-  `String` factory, such as the `fromValue` that OpenAPI generators emit. Without one, the wire
-  value is a 400. This release does not change that.
+- **What a URL can name** is covered by the next entry.
+
+### Fixed (an enum filter value by its wire value, on every backend)
+
+- **A URL can now name an enum by its wire value on JPA, Mongo and JSONB.** Two shapes of enum
+  were affected: a `@JsonValue` enum without a public static `String` factory, and an enum with
+  `@JsonProperty` on its constants. Both could be named only by the Java constant
+  (`?state=IN_PROGRESS`). The value TMF documents and the payloads carry (`?state=inProgress`)
+  was a 400 `Field "state" (…) could not be parsed`. A client that knows only the wire values
+  could not filter on such a field.
+- `ValueConverter` keeps its order and adds one last step before the 400:
+  1. a public static `String` factory (an OpenAPI generator's `fromValue`);
+  2. the constant name;
+  3. **new:** the text as the service's `ObjectMapper` reads that enum (`@JsonValue`,
+     `@JsonProperty`, and Jackson 3's read-by-`toString()` default).
+
+  Every URL that worked keeps working. A text that is one constant's name and another
+  constant's wire value still resolves by the name.
+- **The mapper's answer counts only when it is exact.** The constant it reads must write back
+  as exactly the text. So a typo stays a 400 under a mapper with
+  `READ_UNKNOWN_ENUM_VALUES_USING_DEFAULT_VALUE` (which would map it to the
+  `@JsonEnumDefaultValue` constant) or `READ_UNKNOWN_ENUM_VALUES_AS_NULL`. Under a
+  case-insensitive mapper, only the spelling the payloads carry is accepted.
+- **New API:**
+  - the SPI `EnumTextReader`, and its Jackson implementation `JacksonEnumTextReader`;
+  - the constructor `ValueConverter(ConversionService, EnumTextReader)`; the old constructor
+    keeps the previous behaviour.
+- **Wiring:** the attribute-filtering auto-configuration (and the JSONB URL binding when it
+  builds its own converter) passes the context's mapper, or a default `JsonMapper` when there is
+  none. `jackson-databind` is an optional dependency of `tmf630-toolkit-attribute-filtering-core`
+  and `-autoconfigure`; without Jackson on the classpath, the reader is simply absent.
 
 ## [3.5.2] - 2026-11-04
 

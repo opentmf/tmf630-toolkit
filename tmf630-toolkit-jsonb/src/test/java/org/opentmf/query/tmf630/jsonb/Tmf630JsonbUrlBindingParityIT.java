@@ -21,12 +21,15 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.opentmf.query.tmf630.jsonb.it.parity.ParityClash;
 import org.opentmf.query.tmf630.jsonb.it.parity.ParityController;
 import org.opentmf.query.tmf630.jsonb.it.parity.ParityDomain;
 import org.opentmf.query.tmf630.jsonb.it.parity.ParityEntity;
 import org.opentmf.query.tmf630.jsonb.it.parity.ParityEntityRepository;
+import org.opentmf.query.tmf630.jsonb.it.parity.ParityPhase;
 import org.opentmf.query.tmf630.jsonb.it.parity.ParityRow;
 import org.opentmf.query.tmf630.jsonb.it.parity.ParityRowRepository;
+import org.opentmf.query.tmf630.jsonb.it.parity.ParityStage;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -154,7 +157,36 @@ class Tmf630JsonbUrlBindingParityIT {
             Map.of(
                 "status", List.of("DONE"),
                 "filter", List.of("$[?(@.priority > 2)]")),
-            "[]"));
+            "[]"),
+        // ---- enum wire values in a URL (3.6.0: the wire value was a 400 on both terminals) ----
+        Arguments.of(
+            "@JsonValue enum without a factory, by its wire value",
+            Map.of("stage", List.of("inProgress")),
+            "[\"P1\",\"P3\"]"),
+        Arguments.of(
+            "@JsonValue enum without a factory, by its constant name (as before)",
+            Map.of("stage", List.of("IN_PROGRESS")),
+            "[\"P1\",\"P3\"]"),
+        Arguments.of(
+            "@JsonValue enum, IN over wire values",
+            Map.of("stage.in", List.of("inProgress,done")),
+            "[\"P1\",\"P2\",\"P3\",\"P4\"]"),
+        Arguments.of(
+            "@JsonValue enum, NE by wire value",
+            Map.of("stage.ne", List.of("done")),
+            "[\"P1\",\"P3\"]"),
+        Arguments.of(
+            "@JsonProperty enum, by its wire value",
+            Map.of("phase", List.of("phase-one")),
+            "[\"P1\",\"P4\"]"),
+        Arguments.of(
+            "@JsonProperty enum, by its constant name (as before)",
+            Map.of("phase", List.of("ONE")),
+            "[\"P1\",\"P4\"]"),
+        Arguments.of(
+            "a text that is one constant's name and another's wire value resolves by the name",
+            Map.of("clash", List.of("LEFT")),
+            "[\"P1\",\"P3\"]"));
   }
 
   @ParameterizedTest(name = "{0}")
@@ -187,6 +219,12 @@ class Tmf630JsonbUrlBindingParityIT {
                 "status", List.of("NEW"),
                 "filter", List.of("$[?(@.priority > 2)]"),
                 "filter.combineWithAttributes", List.of("BOGUS"))),
+        Arguments.of(
+            "an enum text that is neither a constant nor a wire value",
+            Map.of("stage", List.of("bogus"))),
+        Arguments.of(
+            "an enum wire value in another case",
+            Map.of("stage", List.of("INPROGRESS"))),
         // a filter= body that closes its $[?(...)] wrapper early (3.5.3: JSONB answered 500)
         Arguments.of(
             "filter= body balanced by count but closing the wrapper",
@@ -456,8 +494,20 @@ class Tmf630JsonbUrlBindingParityIT {
     return builder;
   }
 
+  /** Stage, phase and clash per seeded id: P1 and P3 IN_PROGRESS/LEFT, P1 and P4 phase ONE. */
+  private static final Map<String, Object[]> ENUMS =
+      Map.of(
+          "P1", new Object[] {ParityStage.IN_PROGRESS, ParityPhase.ONE, ParityClash.LEFT},
+          "P2", new Object[] {ParityStage.DONE, ParityPhase.TWO, ParityClash.RIGHT},
+          "P3", new Object[] {ParityStage.IN_PROGRESS, ParityPhase.TWO, ParityClash.LEFT},
+          "P4", new Object[] {ParityStage.DONE, ParityPhase.ONE, ParityClash.RIGHT});
+
   private void save(String id, String status, int priority, String modifiedBy, String createdOn) {
+    Object[] enums = ENUMS.getOrDefault(id, new Object[3]);
     ParityEntity entity = new ParityEntity();
+    entity.setStage((ParityStage) enums[0]);
+    entity.setPhase((ParityPhase) enums[1]);
+    entity.setClash((ParityClash) enums[2]);
     entity.setId(id);
     entity.setStatus(status);
     entity.setPriority(priority);
@@ -466,6 +516,9 @@ class Tmf630JsonbUrlBindingParityIT {
     entityRepository.save(entity);
 
     ParityDomain domain = new ParityDomain();
+    domain.setStage((ParityStage) enums[0]);
+    domain.setPhase((ParityPhase) enums[1]);
+    domain.setClash((ParityClash) enums[2]);
     domain.setId(id);
     domain.setStatus(status);
     domain.setPriority(priority);

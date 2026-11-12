@@ -13,6 +13,7 @@ import org.opentmf.query.tmf630.filtering.Tmf630FilterParser;
 import org.opentmf.query.tmf630.filtering.Tmf630FilterRootLocator;
 import org.opentmf.query.tmf630.filtering.config.Tmf630FilterSettings;
 import org.opentmf.query.tmf630.filtering.predicate.FieldPathResolver;
+import org.opentmf.query.tmf630.filtering.predicate.JacksonEnumTextReader;
 import org.opentmf.query.tmf630.filtering.predicate.ValueConverter;
 import org.opentmf.query.tmf630.paging.config.Tmf630PagingSettings;
 import org.slf4j.Logger;
@@ -206,6 +207,7 @@ public class Tmf630JsonbAutoConfiguration {
         ObjectProvider<FieldAllowlistProvider> allowlistProvider,
         ObjectProvider<FieldPathResolver> fieldPathResolver,
         ObjectProvider<ValueConverter> valueConverter,
+        ObjectProvider<ObjectMapper> objectMapper,
         JsonbPredicateFactory predicateFactory,
         JsonbSplitAwareFilterTranslator filterTranslator) {
       Tmf630FilterParser parser =
@@ -219,7 +221,10 @@ public class Tmf630JsonbAutoConfiguration {
           settings,
           fieldPathResolver.getIfAvailable(FieldPathResolver::new),
           valueConverter.getIfAvailable(
-              () -> new ValueConverter(new DefaultFormattingConversionService())),
+              () ->
+                  new ValueConverter(
+                      new DefaultFormattingConversionService(),
+                      new JacksonEnumTextReader(objectMapper.getIfAvailable()))),
           predicateFactory,
           filterTranslator);
     }
