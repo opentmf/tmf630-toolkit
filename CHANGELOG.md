@@ -161,6 +161,27 @@ All notable changes to `tmf630-toolkit` are documented in this file.
   none. `jackson-databind` is an optional dependency of `tmf630-toolkit-attribute-filtering-core`
   and `-autoconfigure`; without Jackson on the classpath, the reader is simply absent.
 
+### Fixed (JSONB `filter=` null tests, `in` and `nin`)
+
+- **`filter=$[?(!@.field)]` now answers on JSONB.** It reached PostgreSQL as a jsonpath syntax
+  error (HTTP 500) on every type and position. It is now the `isnull` test, as the README
+  documents and the other backends do: `!(exists(@.field))`.
+- **`@.field == null` and `@.field != null` now mean "no value" and "a value", as on the other
+  backends.** Before, JSONB compared with a stored JSON `null`. So under the default
+  `MISSING_ONLY`, `== null` found only rows storing an explicit `null`, and never the rows
+  without the field, which the documented meaning (and Mongo's `$exists: false`) selects.
+  - Now `!@.field` and `== null` are the field absent, and `!= null` is the field present (an
+    explicit `null` is present).
+  - Under `isnull-semantics: NULLISH`, a JSON `null` counts as no value too:
+    `exists(@.field ? (@ != null))`.
+  - The translator now takes the configured setting
+    (`JsonbJsonPathTranslator(extractor, column, regexEnabled, IsnullSemantics)`).
+- **`in` and `nin` in `filter=` are now a 400 on JSONB (was a 500)**, with the core's message
+  `Unsupported token in jsonPath filter near: in […]`. As the README states, they are not part
+  of the `filter=` grammar on any backend; use the attribute operators `.in` / `.nin`.
+- **A negated array match, `!@.arr[?(…)]`, is now a 400 on JSONB (was a 500)**, with the core's
+  message `Negation of array-match expressions is not supported in jsonPath filter.`
+
 ### Fixed (JSONB URL operators on a field inside an array)
 
 - **On JSONB, a URL attribute operator on a field inside an array, or on a collection field,
