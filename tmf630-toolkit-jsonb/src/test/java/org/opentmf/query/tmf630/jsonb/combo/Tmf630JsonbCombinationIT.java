@@ -5,7 +5,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.jayway.jsonpath.JsonPath;
 import com.querydsl.core.types.Predicate;
 import java.io.IOException;
+import java.io.InputStream;
 import java.lang.reflect.Method;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -59,6 +61,10 @@ import tools.jackson.databind.node.ObjectNode;
  * type, unreadable text, JSON null, the key absent) × the 23 {@link TmfOperator}s × the entry (URL
  * attribute operator, {@code filter=} JsonPath) × the position ({@link ComboPosition}) × the entity
  * shape (not split, split); plus sort ascending and descending on each field.
+ *
+ * <p>Findings listed in {@code combination/expected.tsv} are EXPECTED: a behaviour held for a
+ * ruling or kept by one, with its reason. Each must keep failing exactly as listed; an
+ * unexpected finding, or a listed one that passes or answers differently, fails the test.
  *
  * <p>Two verdicts per cell: (1) the answer is rows or the toolkit's own 400, never a driver error,
  * and the toolkit refuses exactly what the QueryDSL terminal refuses for the same URL; (2) the
@@ -178,8 +184,48 @@ class Tmf630JsonbCombinationIT {
       everyOperator(true, ComboPosition.SPLIT, kind);
     }
     double seconds = (System.nanoTime() - start) / 1e9;
-    String summary = writeReport(seconds);
-    assertThat(findings).as(summary).isEmpty();
+    Map<String, String[]> expected = loadExpected();
+    List<Finding> unexpected = new ArrayList<>();
+    Map<String, Integer> expectedByReason = new TreeMap<>();
+    for (Finding f : findings) {
+      String[] pinned = expected.remove(key(f));
+      if (pinned != null && pinned[0].equals(f.detail())) {
+        expectedByReason.merge(pinned[1], 1, Integer::sum);
+      } else {
+        unexpected.add(f);
+      }
+    }
+    String summary = writeReport(seconds, unexpected, expectedByReason, expected.keySet());
+    assertThat(unexpected).as(summary).isEmpty();
+    assertThat(expected.keySet())
+        .as("EXPECTED findings that no longer fail as listed (the behaviour changed): " + summary)
+        .isEmpty();
+  }
+
+  /** {@code verdict|shape|position|kind|entry|operator|request} of a finding. */
+  private static String key(Finding f) {
+    return String.join("|", f.verdict(), f.shape(), f.position().name(), f.kind().name(),
+        f.entry(), f.operator(), f.request());
+  }
+
+  /** The EXPECTED findings: key to {detail, reason}. */
+  private static Map<String, String[]> loadExpected() throws IOException {
+    Map<String, String[]> expected = new LinkedHashMap<>();
+    try (InputStream in =
+        Tmf630JsonbCombinationIT.class.getResourceAsStream("/combination/expected.tsv")) {
+      if (in == null) {
+        return expected;
+      }
+      for (String line : new String(in.readAllBytes(), StandardCharsets.UTF_8).split("\n")) {
+        if (line.isBlank() || line.startsWith("#")) {
+          continue;
+        }
+        String[] c = line.split("\t", -1);
+        expected.put(String.join("|", c[0], c[1], c[2], c[3], c[4], c[5], c[6]),
+            new String[] {c[7], c[8]});
+      }
+    }
+    return expected;
   }
 
   private void everyOperator(boolean split, ComboPosition position, ComboKind kind) {
@@ -585,7 +631,12 @@ class Tmf630JsonbCombinationIT {
 
   // ---- report -----------------------------------------------------------------------------
 
-  private String writeReport(double seconds) throws IOException {
+  private String writeReport(
+      double seconds,
+      List<Finding> unexpected,
+      Map<String, Integer> expectedByReason,
+      Set<String> gone)
+      throws IOException {
     Files.createDirectories(REPORT_DIR);
     StringBuilder tsv =
         new StringBuilder("verdict\tshape\tposition\tkind\tentry\toperator\trequest\tsql\tdetail\tgroup\n");
@@ -598,14 +649,21 @@ class Tmf630JsonbCombinationIT {
     }
     Files.writeString(REPORT_DIR.resolve("findings.tsv"), tsv);
     Map<String, List<Finding>> groups =
-        findings.stream().collect(Collectors.groupingBy(Tmf630JsonbCombinationIT::signature,
+        unexpected.stream().collect(Collectors.groupingBy(Tmf630JsonbCombinationIT::signature,
             TreeMap::new, Collectors.toList()));
     StringBuilder md = new StringBuilder("# JSONB combination suite\n\n");
     String summary =
         String.format(
-            "%d cells in %.1f s, %d findings in %d groups, skipped by rule %s",
-            cells, seconds, findings.size(), groups.size(), skipped);
-    md.append(summary).append("\n\n");
+            "%d cells in %.1f s; %d unexpected findings in %d groups; %d expected; %d expected but"
+                + " no longer failing as listed; skipped by rule %s",
+            cells, seconds, unexpected.size(), groups.size(),
+            expectedByReason.values().stream().mapToInt(Integer::intValue).sum(), gone.size(),
+            skipped);
+    md.append(summary).append("\n\n## EXPECTED, by reason\n\n");
+    expectedByReason.forEach((reason, n) -> md.append("- ").append(n).append(" · ").append(reason).append('\n'));
+    md.append("\n## EXPECTED but no longer failing as listed\n\n");
+    gone.forEach(g -> md.append("- `").append(g).append("`\n"));
+    md.append("\n## UNEXPECTED\n\n");
     groups.forEach((signature, members) -> appendGroup(md, signature, members));
     Files.writeString(REPORT_DIR.resolve("findings.md"), md);
     return summary;
