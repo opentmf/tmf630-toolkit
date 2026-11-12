@@ -30,6 +30,21 @@ All notable changes to `tmf630-toolkit` are documented in this file.
   closes the wrapper and goes on outside the filter, such as `$[?(@.a == 1) + (1)]` or
   `$[?(@.a == 1).double()]`. The function raised an error (HTTP 500); the operator matches no
   row.
+- **`filter=` array correlation now works on a JSONB-backed entity without split collections.**
+  `$[?(@.characteristic[?(@.name == 'k3' && @.value == 'v10')])]` was translated to
+  `$ ? (@.characteristic[*] ? (...))`. That is not a predicate in SQL/JSON path, so PostgreSQL
+  rejected it with `syntax error at or near ")" of jsonpath input`. The request failed with an
+  unhandled `BadSqlGrammarException` (HTTP 500, unless the service maps that exception). The
+  defect has been there since 3.0.0. It affected every place an array filter stands as a
+  predicate: alone, next to `&&` / `||` / `!`, and nested
+  (`$[?(@.item[?(@.tag[?(@.code == 't7')])])]`).
+  - Such a filter is now emitted as `exists(@.characteristic[*] ? (...))`, one `exists` per
+    level. It matches within one array element, as on the other backends, and a GIN index on
+    the payload serves it.
+  - An array filter used as an operand, such as `@.items[?(@.state == 'Y')].id == 'i1'`, already
+    worked and keeps its form.
+  - Split collections were never affected: their decomposer strips the wrapper before
+    translation.
 
 ## [3.5.2] - 2026-11-04
 

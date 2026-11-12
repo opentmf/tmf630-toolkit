@@ -6,8 +6,9 @@ import java.util.List;
 
 /**
  * Domain POJO of {@link JsonbIndexedRow}: a nested three-level path ({@code
- * receiver.postalAddress.city}) and an array of name/value pairs ({@code characteristic}), the
- * two shapes whose {@code filter=} queries the GIN index must serve.
+ * receiver.postalAddress.city}), an array of name/value pairs ({@code characteristic}) and an
+ * array of arrays ({@code item[].tag[]}), the shapes whose {@code filter=} queries the GIN index
+ * must serve.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -16,7 +17,8 @@ public record JsonbIndexedDomain(
     String status,
     Integer priority,
     Receiver receiver,
-    List<Characteristic> characteristic) {
+    List<Characteristic> characteristic,
+    List<Item> item) {
 
   /** The receiver of the resource. */
   @JsonIgnoreProperties(ignoreUnknown = true)
@@ -29,4 +31,12 @@ public record JsonbIndexedDomain(
   /** One name/value pair. */
   @JsonIgnoreProperties(ignoreUnknown = true)
   public record Characteristic(String name, String value) {}
+
+  /** One item, carrying its own array of tags. */
+  @JsonIgnoreProperties(ignoreUnknown = true)
+  public record Item(String state, List<Tag> tag) {}
+
+  /** One tag of an item. */
+  @JsonIgnoreProperties(ignoreUnknown = true)
+  public record Tag(String code) {}
 }

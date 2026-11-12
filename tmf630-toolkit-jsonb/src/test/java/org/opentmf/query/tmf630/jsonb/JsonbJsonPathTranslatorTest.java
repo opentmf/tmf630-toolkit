@@ -55,14 +55,40 @@ class JsonbJsonPathTranslatorTest {
   }
 
   @Test
-  @DisplayName("array correlation @.arr[?(...)] rewrites to @.arr[*] ? (...)")
+  @DisplayName("array correlation @.arr[?(...)] as a predicate rewrites to exists(@.arr[*] ? (...))")
   void arrayCorrelation() {
     JsonbClause c =
         translator.translate(
             "$[?(@.externalReference[?(@.name == 'REF' && @.id == 'X')])]");
     assertThat(c.params())
         .containsExactly(
-            "$ ? (@.externalReference[*] ? (@.name == \"REF\" && @.id == \"X\"))");
+            "$ ? (exists(@.externalReference[*] ? (@.name == \"REF\" && @.id == \"X\")))");
+  }
+
+  @Test
+  @DisplayName("array correlation next to &&, || and ! is wrapped in exists(...) at each place")
+  void arrayCorrelationInsideBooleanOperators() {
+    assertThat(
+            translator
+                .translate("$[?(@.status == 'X' || @.items[?(@.state == 'Y')] && @.p > 1)]")
+                .params())
+        .containsExactly(
+            "$ ? (@.status == \"X\" || exists(@.items[*] ? (@.state == \"Y\")) && @.p > 1)");
+    assertThat(translator.translate("$[?(!(@.items[?(@.state == 'Y')]))]").params())
+        .containsExactly("$ ? (!(exists(@.items[*] ? (@.state == \"Y\"))))");
+    assertThat(translator.translate("$[?(@.items[?(@.state == 'Y')] )]").params())
+        .containsExactly("$ ? (exists(@.items[*] ? (@.state == \"Y\")) )");
+  }
+
+  @Test
+  @DisplayName("array filter used as an operand (accessor + comparison after it) stays unwrapped")
+  void arrayFilterAsOperandIsNotWrapped() {
+    assertThat(translator.translate("$[?(@.items[?(@.state == 'Y')].id == 'i1')]").params())
+        .containsExactly("$ ? (@.items[*] ? (@.state == \"Y\").id == \"i1\")");
+    // a filter after the operand's accessor makes the whole chain a predicate again
+    assertThat(
+            translator.translate("$[?(@.items[?(@.state == 'Y')].tags[?(@ == 't')])]").params())
+        .containsExactly("$ ? (exists(@.items[*] ? (@.state == \"Y\").tags[*] ? (@ == \"t\")))");
   }
 
   @Test
@@ -142,13 +168,13 @@ class JsonbJsonPathTranslatorTest {
   }
 
   @Test
-  @DisplayName("nested array-match inside array-match composes recursively")
+  @DisplayName("nested array-match inside array-match composes recursively, one exists per level")
   void nestedArrayCorrelation() {
     JsonbClause c =
         translator.translate(
             "$[?(@.a[?(@.b[?(@.c == 'X')])])]");
     assertThat(c.params())
-        .containsExactly("$ ? (@.a[*] ? (@.b[*] ? (@.c == \"X\")))");
+        .containsExactly("$ ? (exists(@.a[*] ? (exists(@.b[*] ? (@.c == \"X\")))))");
   }
 
   @Test
@@ -201,7 +227,7 @@ class JsonbJsonPathTranslatorTest {
             regex.translate("$[?(@.href =~ /\\/v4\\// || @.items[?(@.id =~ /^X/i)])]").params())
         .containsExactly(
             "$ ? (@.href like_regex \"\\\\/v4\\\\/\""
-                + " || @.items[*] ? (@.id like_regex \"^X\" flag \"i\"))");
+                + " || exists(@.items[*] ? (@.id like_regex \"^X\" flag \"i\")))");
   }
 
   @Test

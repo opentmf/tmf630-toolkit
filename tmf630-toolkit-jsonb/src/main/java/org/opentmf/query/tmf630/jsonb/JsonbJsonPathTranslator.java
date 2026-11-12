@@ -23,10 +23,16 @@ import org.opentmf.query.tmf630.filtering.TmfFilteringException;
  * <ul>
  *   <li>Wrapper: {@code $[?(<pred>)]} / {@code [?(<pred>)]} / {@code $.[?(<pred>)]}
  *       → {@code $ ? (<pred>)}
- *   <li>Array match nested inside a predicate: {@code @.arr[?(<inner>)]} →
- *       {@code @.arr[*] ? (<inner>)}. Postgres SQL/JSON path natively supports
- *       nested filters this way, so multi-level array correlation composes
- *       recursively.
+ *   <li>Array match standing as a predicate: {@code @.arr[?(<inner>)]} →
+ *       {@code exists(@.arr[*] ? (<inner>))}. A path with a filter is not a predicate in
+ *       SQL/JSON path, so {@code exists(...)} turns it into one (before 3.5.3 the bare form was
+ *       emitted and PostgreSQL rejected it as a jsonpath syntax error). "Standing as a
+ *       predicate" means it is followed by the end of its predicate, a {@code )}, {@code &&} or
+ *       {@code ||}. Multi-level correlation composes recursively, each level in its own
+ *       {@code exists(...)}.
+ *   <li>Array match used as an operand: {@code @.arr[?(<inner>)].field == 'X'} →
+ *       {@code @.arr[*] ? (<inner>).field == "X"}, the filter followed by an accessor and a
+ *       comparison, which is already a predicate.
  *   <li>Quote conversion: single-quoted string literals → double-quoted (Postgres
  *       requires double quotes for path-language string literals). Escapes preserved.
  *   <li>Logical operators {@code &&} / {@code ||} / unary {@code !} pass through
@@ -264,24 +270,30 @@ public class JsonbJsonPathTranslator {
    * </ul>
    */
   private String translatePredicate(String input) {
-    StringBuilder out = new StringBuilder(input.length() + 16);
+    PredicateText out = new PredicateText(input.length() + 16);
     int i = 0;
     while (i < input.length()) {
-      char c = input.charAt(i);
-      int consumed;
-      if (c == '\'' || c == '"') {
-        consumed = translateQuotedLiteral(input, i, out);
-      } else if (c == '=' && i + 1 < input.length() && input.charAt(i + 1) == '~') {
-        consumed = translateRegexOperator(input, i, out);
-      } else if (c == '[' && looksLikeFilterOpen(input, i)) {
-        consumed = translateFilterExpression(input, i, out);
-      } else {
-        out.append(c);
-        consumed = 1;
-      }
-      i += consumed;
+      i += translateAt(input, i, out);
     }
     return out.toString();
+  }
+
+  /** Translates the token starting at {@code i} and returns how many characters it consumed. */
+  private int translateAt(String input, int i, PredicateText out) {
+    char c = input.charAt(i);
+    if (c == '\'' || c == '"') {
+      out.endPath();
+      return translateQuotedLiteral(input, i, out.text());
+    }
+    if (c == '=' && i + 1 < input.length() && input.charAt(i + 1) == '~') {
+      out.endPath();
+      return translateRegexOperator(input, i, out.text());
+    }
+    if (c == '[' && looksLikeFilterOpen(input, i)) {
+      return translateFilterExpression(input, i, out);
+    }
+    out.append(c);
+    return 1;
   }
 
   private int translateQuotedLiteral(String input, int i, StringBuilder out) {
@@ -344,13 +356,29 @@ public class JsonbJsonPathTranslator {
    * Consumes {@code [?(...)]} at position {@code i} and appends its SQL/JSON form. The
    * inner-filter body is at {@code [i+3, filterEnd-1)} — from just past {@code [?(} up
    * to but not including the closing {@code )}; {@code filterEnd} points at the closing
-   * {@code ]}, so the {@code )} sits one character before it.
+   * {@code ]}, so the {@code )} sits one character before it. When the filtered path stands as a
+   * predicate, the path and its filter are wrapped in {@code exists(...)}.
    */
-  private int translateFilterExpression(String input, int i, StringBuilder out) {
+  private int translateFilterExpression(String input, int i, PredicateText out) {
     int filterEnd = findMatchingFilterClose(input, i);
     String innerFilter = input.substring(i + 3, filterEnd - 1);
-    out.append("[*] ? (").append(translatePredicate(innerFilter)).append(")");
+    String filter = "[*] ? (" + translatePredicate(innerFilter) + ")";
+    if (out.inPath() && standsAsPredicate(input, filterEnd + 1)) {
+      out.closePathInExists(filter);
+    } else {
+      out.appendToPath(filter);
+    }
     return filterEnd + 1 - i;
+  }
+
+  /**
+   * Whether what follows a {@code [?(...)]} ends the predicate it belongs to: the end of the
+   * input, a {@code )}, {@code &&} or {@code ||}. Anything else (an accessor, a comparison)
+   * makes the filtered path an operand.
+   */
+  private static boolean standsAsPredicate(String s, int from) {
+    int i = skipSpaces(s, from);
+    return i >= s.length() || s.charAt(i) == ')' || s.startsWith("&&", i) || s.startsWith("||", i);
   }
 
   private static boolean looksLikeFilterOpen(String s, int i) {
@@ -383,6 +411,61 @@ public class JsonbJsonPathTranslator {
       i++;
     }
     throw new TmfFilteringException("Unterminated array-match filter starting at index " + start);
+  }
+
+  /**
+   * The translated text of one predicate, and where the path being written started: the index
+   * of its {@code @} or {@code $}, or -1 when no path is being written.
+   */
+  private static final class PredicateText {
+
+    private final StringBuilder text;
+    private int pathStart = -1;
+
+    PredicateText(int capacity) {
+      this.text = new StringBuilder(capacity);
+    }
+
+    StringBuilder text() {
+      return text;
+    }
+
+    void append(char c) {
+      if (c == '@' || c == '$') {
+        pathStart = text.length();
+      } else if (!isPathChar(c)) {
+        pathStart = -1;
+      }
+      text.append(c);
+    }
+
+    void endPath() {
+      pathStart = -1;
+    }
+
+    boolean inPath() {
+      return pathStart >= 0;
+    }
+
+    /** Appends a filter the path continues after, as in {@code @.a[*] ? (...).b}. */
+    void appendToPath(String filter) {
+      text.append(filter);
+    }
+
+    /** Ends the path with {@code filter} and wraps the whole path in {@code exists(...)}. */
+    void closePathInExists(String filter) {
+      text.insert(pathStart, "exists(").append(filter).append(')');
+      pathStart = -1;
+    }
+
+    @Override
+    public String toString() {
+      return text.toString();
+    }
+
+    private static boolean isPathChar(char c) {
+      return isFieldChar(c) || c == '[' || c == ']' || c == '*';
+    }
   }
 
   private static int findStringEnd(String s, int quotePos) {

@@ -66,10 +66,12 @@ class Tmf630JsonbIndexPlanIT {
   private static final String TABLE = JsonbIndexedRow.TABLE;
   private static final String GIN_INDEX = TABLE + "_payload_gin";
   private static final String CITY = "@.receiver.postalAddress.city";
+  private static final String K3_V10 = "@.characteristic[?(@.name == 'k3' && @.value == 'v10')]";
 
   /**
    * Row {@code g} (1..ROWS) has id {@code r<g>}, city {@code City<g % 500>}, priority {@code g %
-   * 300} and two characteristics: {@code {k<g % 7>, v<g % 1000>}} and {@code {z, w<g % 3>}}.
+   * 300}, two characteristics: {@code {k<g % 7>, v<g % 1000>}} and {@code {z, w<g % 3>}}, and two
+   * items whose tag arrays hold {@code t<g % 50>} and {@code u<g % 5>}.
    */
   private static final String SEED_SQL =
       """
@@ -82,7 +84,12 @@ class Tmf630JsonbIndexPlanIT {
               jsonb_build_object('city', 'City' || (g % 500), 'houseNumber', g % 1000)),
           'characteristic', jsonb_build_array(
               jsonb_build_object('name', 'k' || (g % 7), 'value', 'v' || (g % 1000)),
-              jsonb_build_object('name', 'z', 'value', 'w' || (g % 3))))
+              jsonb_build_object('name', 'z', 'value', 'w' || (g % 3))),
+          'item', jsonb_build_array(
+              jsonb_build_object('state', 'OPEN', 'tag', jsonb_build_array(
+                  jsonb_build_object('code', 't' || (g % 50)))),
+              jsonb_build_object('state', 'DONE', 'tag', jsonb_build_array(
+                  jsonb_build_object('code', 'u' || (g % 5))))))
       FROM generate_series(1, ?) AS g
       """;
 
@@ -126,7 +133,27 @@ class Tmf630JsonbIndexPlanIT {
         Arguments.of(
             "&& of an equality and a range",
             "$[?(" + CITY + " == 'City42' && @.priority > 250)]",
-            (IntPredicate) g -> g % 500 == 42 && g % 300 > 250));
+            (IntPredicate) g -> g % 500 == 42 && g % 300 > 250),
+        Arguments.of(
+            "array correlation on one element",
+            "$[?(" + K3_V10 + ")]",
+            (IntPredicate) g -> g % 7 == 3 && g % 1000 == 10),
+        Arguments.of(
+            "array correlation does not pair values of different elements",
+            "$[?(@.characteristic[?(@.name == 'z' && @.value == 'v10')])]",
+            (IntPredicate) g -> false),
+        Arguments.of(
+            "nested array correlation",
+            "$[?(@.item[?(@.state == 'OPEN' && @.tag[?(@.code == 't7')])])]",
+            (IntPredicate) g -> g % 50 == 7),
+        Arguments.of(
+            "nested array correlation does not cross items",
+            "$[?(@.item[?(@.state == 'DONE' && @.tag[?(@.code == 't7')])])]",
+            (IntPredicate) g -> false),
+        Arguments.of(
+            "array correlation || an equality",
+            "$[?(" + K3_V10 + " || " + CITY + " == 'City42')]",
+            (IntPredicate) g -> (g % 7 == 3 && g % 1000 == 10) || g % 500 == 42));
   }
 
   @ParameterizedTest(name = "{0}")
