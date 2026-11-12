@@ -90,9 +90,7 @@ public class JsonbSortBuilder {
     Class<?> fieldType = fieldTypeResolver.apply(term.expression());
     JsonbCast cast = JsonbCast.forJavaType(fieldType);
     String extraction = extractor.extractAsText(term.expression());
-    String casted =
-        cast == JsonbCast.TEXT ? extraction : "(" + extraction + ")" + cast.suffix();
-    return casted + " " + directionKeyword(term) + nullsTail();
+    return cast.read(extraction) + " " + directionKeyword(term) + nullsTail();
   }
 
   private String correlatedTermFragment(
@@ -101,6 +99,10 @@ public class JsonbSortBuilder {
     JsonbCast cast = resolveCast(expr, term, fieldTypeResolver);
     params.add(expr.jsonPath());
     Optional<JsonbSortExpression.Aggregator> aggregator = expr.aggregator();
+    if (aggregator.isEmpty() && cast.readRepeatsText()) {
+      // the first-match extraction carries the jsonpath parameter and the read repeats it
+      params.add(expr.jsonPath());
+    }
     String fragment =
         aggregator.isPresent()
             ? aggregateSubqueryFragment(aggregator.get(), cast)
@@ -137,7 +139,7 @@ public class JsonbSortBuilder {
   private String firstMatchFragment(JsonbCast cast) {
     String extraction =
         "((jsonb_path_query_first(" + payloadColumn + ", ?::jsonpath)) #>> '{}')";
-    return cast == JsonbCast.TEXT ? extraction : extraction + cast.suffix();
+    return cast.readParenthesized(extraction);
   }
 
   /**
@@ -147,7 +149,7 @@ public class JsonbSortBuilder {
    */
   private String aggregateSubqueryFragment(
       JsonbSortExpression.Aggregator aggregator, JsonbCast cast) {
-    String inner = "(v #>> '{}')" + (cast == JsonbCast.TEXT ? "" : cast.suffix());
+    String inner = cast.readParenthesized("(v #>> '{}')");
     return "(SELECT "
         + aggregator.sqlName()
         + "("

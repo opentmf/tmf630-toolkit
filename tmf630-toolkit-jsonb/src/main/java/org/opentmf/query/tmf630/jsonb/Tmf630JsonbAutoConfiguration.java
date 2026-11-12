@@ -153,6 +153,24 @@ public class Tmf630JsonbAutoConfiguration {
     return JdbcClient.create(dataSource);
   }
 
+  /**
+   * Refuses to start on a PostgreSQL older than 16, which the date and time filters and sorts need
+   * ({@code pg_input_is_valid}). The check is replaceable, the requirement is not: an application
+   * that replaces this bean and runs below 16 starts, and then every filter and sort on a date or
+   * time field fails with "function pg_input_is_valid does not exist".
+   */
+  @Bean
+  @ConditionalOnMissingBean
+  @ConditionalOnBean(DataSource.class)
+  public Tmf630JsonbPostgresVersionCheck tmf630JsonbPostgresVersionCheck(DataSource dataSource) {
+    JdbcClient jdbc = JdbcClient.create(dataSource);
+    return new Tmf630JsonbPostgresVersionCheck(
+        () ->
+            jdbc.sql("SELECT current_setting('server_version_num')::int")
+                .query(Integer.class)
+                .single());
+  }
+
   @Bean
   @ConditionalOnMissingBean
   public Tmf630JsonbFilterExecutor tmf630JsonbFilterExecutor(

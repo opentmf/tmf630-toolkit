@@ -161,6 +161,35 @@ All notable changes to `tmf630-toolkit` are documented in this file.
   none. `jackson-databind` is an optional dependency of `tmf630-toolkit-attribute-filtering-core`
   and `-autoconfigure`; without Jackson on the classpath, the reader is simply absent.
 
+### Changed (JSONB needs PostgreSQL 16)
+
+- **The JSONB module now needs PostgreSQL 16 or later, and refuses to start below it.** The
+  design document said 15+.
+  - The reason: date and time values are now read with `pg_input_is_valid` (PostgreSQL 16); see
+    the next entry.
+  - Below 16 the application does not start. The `Tmf630JsonbPostgresVersionCheck` bean fails it
+    with: `tmf630-toolkit-jsonb needs PostgreSQL 16 or later: … this server reports
+    server_version_num <n>.` There is no silent fallback to a plain cast.
+  - The check is replaceable, the requirement is not. An application that replaces the bean and
+    runs below 16 starts, and then every filter and sort on a date or time field fails with
+    "function pg_input_is_valid does not exist".
+
+### Fixed (JSONB date and time values no cast reads)
+
+- **On JSONB, a stored date or date-time that no cast can read no longer turns a filter or a
+  sort on that field into a 500.** One row holding `"someday"`, or a number out of range, in a
+  `LocalDate` / `LocalTime` / `LocalDateTime` / `OffsetDateTime` / `ZonedDateTime` / `Instant`
+  field made every range, `ne`, `in`, `nin` and equality filter and every sort on the field
+  fail: `invalid input syntax for type date`, or `date/time field value out of range`.
+- **Now such a value is read only where PostgreSQL's input function accepts it.** It is then no
+  match in a filter, and sorts as a null. The emitted form is
+  `CASE WHEN pg_input_is_valid(payload->>'createdOn', 'timestamptz') THEN
+  (payload->>'createdOn')::timestamptz END`, the same in filters, plain sorts and correlated
+  sorts.
+- **No index is affected.** PostgreSQL never allowed an expression index on a text-to-date or
+  text-to-timestamptz cast, because those casts are not IMMUTABLE. Number and boolean casts are
+  unchanged here.
+
 ### Fixed (JSONB `filter=` null tests, `in` and `nin`)
 
 - **`filter=$[?(!@.field)]` now answers on JSONB.** It reached PostgreSQL as a jsonpath syntax

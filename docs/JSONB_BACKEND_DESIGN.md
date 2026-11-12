@@ -1127,7 +1127,9 @@ For a service currently on JPA-relational migrating to JSONB:
 
 ## 10. Testing strategy
 
-- **Testcontainers Postgres 15+**. Postgres 15 is required for full JSONB path
+- **Testcontainers Postgres 16+** (corrected 2026-11-12, 3.6.0: the module reads date and time
+  values with `pg_input_is_valid`, PostgreSQL 16, and refuses to start below it). Postgres 15 was
+  the floor for full JSONB path
   expression support (`?` predicate operator, `jsonb_path_query_first`, etc.).
 - **Parity IT** — `Tmf630PredicateJsonbIT`, mirroring the existing
   `Tmf630PredicateMongoIT` and `Tmf630PredicateJpaParityIT`. Same URL fixtures,
