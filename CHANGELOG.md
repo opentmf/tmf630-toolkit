@@ -28,8 +28,19 @@ All notable changes to `tmf630-toolkit` are documented in this file.
   Both forms still raise an error for a date-time comparison that needs a time zone, for an
   undefined `$variable`, and for a jsonpath syntax error. The only difference is a body that
   closes the wrapper and goes on outside the filter, such as `$[?(@.a == 1) + (1)]` or
-  `$[?(@.a == 1).double()]`. The function raised an error (HTTP 500); the operator matches no
-  row.
+  `$[?(@.a == 1).double()]`. The function raised an error (HTTP 500). Such a body is now
+  refused before any SQL runs (next entry), so no request gets the operator's silent empty
+  page instead.
+- **On JSONB, a `filter=` body that leaves its `$[?(...)]` wrapper is now a 400 (was a 500).**
+  Outside string and regex literals, the body's parentheses must never close the wrapper early,
+  and all of them must be closed at its end.
+  - `$[?(@.status == 'NEW') || (@.status == 'DONE')]` balances by count, but its body closes
+    the wrapper after the first comparison. On JSONB it was a jsonpath syntax error (500);
+    the QueryDSL terminal already refused it with a 400.
+  - `$[?(@.a == 1) + (1)]` and `$[?((@.a == 1)]` are refused the same way.
+  - Parentheses inside string literals (`'a) || (b'`) and regex literals (`/^a\)/`) do not
+    count.
+  - Write a disjunction inside one wrapper: `$[?(@.status == 'NEW' || @.status == 'DONE')]`.
 - **`filter=` array correlation now works on a JSONB-backed entity without split collections.**
   `$[?(@.characteristic[?(@.name == 'k3' && @.value == 'v10')])]` was translated to
   `$ ? (@.characteristic[*] ? (...))`. That is not a predicate in SQL/JSON path, so PostgreSQL

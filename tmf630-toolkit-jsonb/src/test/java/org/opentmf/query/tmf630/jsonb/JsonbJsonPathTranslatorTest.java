@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import java.time.Duration;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.opentmf.query.tmf630.filtering.TmfFilteringException;
 
 class JsonbJsonPathTranslatorTest {
@@ -209,6 +211,38 @@ class JsonbJsonPathTranslatorTest {
         () ->
             assertThatThrownBy(() -> translator.translate(pathological))
                 .isInstanceOf(TmfFilteringException.class));
+  }
+
+  @ParameterizedTest(name = "{0}")
+  @ValueSource(
+      strings = {
+        "$[?(@.a == 1) || (@.b == 2)]",
+        "$[?(@.a == 1) + (1)]",
+        "$[?(@.a == 1).double()]",
+        "$[?(@.a == 1))]",
+        "$[?((@.a == 1)]",
+        "$[?(@.items[?(@.s == 'x'))])]"
+      })
+  @DisplayName("a body that leaves the $[?(...)] wrapper, or leaves a parenthesis open, is refused")
+  void bodyLeavingTheWrapperIsRefused(String filter) {
+    JsonbJsonPathTranslator regex = new JsonbJsonPathTranslator(extractor, "payload", true);
+    assertThatThrownBy(() -> regex.translate(filter))
+        .isInstanceOf(TmfFilteringException.class)
+        .hasMessageContaining("parentheses");
+  }
+
+  @Test
+  @DisplayName("parentheses inside string and regex literals do not count toward the wrapper")
+  void parenthesesInsideLiteralsStayAccepted() {
+    JsonbJsonPathTranslator regex = new JsonbJsonPathTranslator(extractor, "payload", true);
+    assertThat(regex.translate("$[?(@.name == 'a) || (b')]").params())
+        .containsExactly("$ ? (@.name == \"a) || (b\")");
+    assertThat(regex.translate("$[?(@.name == \"x(\")]").params())
+        .containsExactly("$ ? (@.name == \"x(\")");
+    assertThat(regex.translate("$[?(@.name =~ /^a\\)/)]").params())
+        .containsExactly("$ ? (@.name like_regex \"^a\\\\)\")");
+    assertThat(regex.translate("$[?(@.name =~ /^(a|b)$/i || (@.n == 1))]").params())
+        .containsExactly("$ ? (@.name like_regex \"^(a|b)$\" flag \"i\" || (@.n == 1))");
   }
 
   @Test

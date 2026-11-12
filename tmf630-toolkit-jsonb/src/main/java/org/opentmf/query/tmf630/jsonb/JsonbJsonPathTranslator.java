@@ -15,8 +15,8 @@ import org.opentmf.query.tmf630.filtering.TmfFilteringException;
  * The JDBC text carries the operator as {@code @??}: the PostgreSQL driver turns {@code ??} into
  * a literal {@code ?}, so the server receives {@code payload @? $1::jsonpath} (the same escape
  * {@link JsonbPathExtractor#hasTopLevelKey} uses). The operator suppresses the errors the
- * function raises; for the lax {@code $ ? (...)} path this class emits, that differs only when a
- * wrapper body continues outside the filter.
+ * function raises; for the lax {@code $ ? (...)} path this class emits, that differs only for a
+ * body that continues outside the filter, which is refused (see {@link #translate}).
  *
  * <p>Translation rules:
  *
@@ -95,6 +95,12 @@ public class JsonbJsonPathTranslator {
    *   <li>Everything else — translated to Postgres SQL/JSON path and tested with
    *       {@code payload @? ?::jsonpath}.
    * </ol>
+   *
+   * <p>A body that would close the {@code $ ? (...)} wrapper early, or leave a parenthesis open,
+   * is refused: outside string and regex literals, its parenthesis depth must never fall below
+   * zero and must end at zero. {@code $[?(@.a == 1) || (@.b == 2)]} balances by count and is
+   * still refused, because its body closes the wrapper after {@code @.a == 1}. The QueryDSL
+   * terminal refuses the same bodies.
    */
   public JsonbClause translate(String filterExpression) {
     if (filterExpression == null || filterExpression.isBlank()) {
@@ -106,6 +112,7 @@ public class JsonbJsonPathTranslator {
                 () ->
                     new TmfFilteringException(
                         "filter= expression must be wrapped in $[?(...)]: " + filterExpression));
+    requireBodyInsideWrapper(body);
     Optional<LengthEquality> lengthEquality = lengthEquality(body);
     if (lengthEquality.isPresent()) {
       return translateLengthEquality(
@@ -119,6 +126,63 @@ public class JsonbJsonPathTranslator {
     // JDBC parameter for the jsonpath text — Postgres will cast the text to jsonpath. "@??" is
     // the driver's escape for the "@?" operator, so the index can serve the test.
     return JsonbClause.of(payloadColumn + " @?? ?::jsonpath", jsonPath);
+  }
+
+  /**
+   * Refuses a wrapper body whose parentheses, outside string and regex literals, close the
+   * wrapper early (the depth falls below zero) or leave a parenthesis open (it ends above zero).
+   */
+  private static void requireBodyInsideWrapper(String body) {
+    int depth = 0;
+    int i = 0;
+    while (i < body.length()) {
+      char c = body.charAt(i);
+      if (c == '\'' || c == '"') {
+        i = findStringEnd(body, i) + 1;
+      } else if (c == '=' && i + 1 < body.length() && body.charAt(i + 1) == '~') {
+        i = endOfRegexOperand(body, i + 2);
+      } else {
+        depth += parenthesisDelta(c);
+        if (depth < 0) {
+          throw unbalancedBody("closes the $[?(...)] wrapper early");
+        }
+        i++;
+      }
+    }
+    if (depth != 0) {
+      throw unbalancedBody("leaves a parenthesis open");
+    }
+  }
+
+  private static int parenthesisDelta(char c) {
+    if (c == '(') {
+      return 1;
+    }
+    return c == ')' ? -1 : 0;
+  }
+
+  /**
+   * Index just past the {@code /pattern/} literal that follows {@code =~} at {@code from}; when
+   * there is no complete literal, {@code from} itself, so the translation reports it.
+   */
+  private static int endOfRegexOperand(String s, int from) {
+    int open = skipSpaces(s, from);
+    if (open >= s.length() || s.charAt(open) != '/') {
+      return from;
+    }
+    int i = open + 1;
+    while (i < s.length() && s.charAt(i) != '/') {
+      i += s.charAt(i) == '\\' ? 2 : 1;
+    }
+    return i < s.length() ? i + 1 : from;
+  }
+
+  private static TmfFilteringException unbalancedBody(String what) {
+    return new TmfFilteringException(
+        "filter= expression "
+            + what
+            + ": outside string and regex literals, the parentheses of $[?(...)] must close"
+            + " exactly at its end.");
   }
 
   private JsonbClause translateLengthEquality(String dottedField, int expectedLength) {
