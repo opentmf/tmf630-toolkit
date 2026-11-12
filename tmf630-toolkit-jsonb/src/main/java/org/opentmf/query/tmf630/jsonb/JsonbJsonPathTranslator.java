@@ -2,6 +2,7 @@ package org.opentmf.query.tmf630.jsonb;
 
 import java.util.Optional;
 import org.opentmf.query.tmf630.filtering.TmfFilteringException;
+import org.opentmf.query.tmf630.filtering.config.IsnullSemantics;
 
 /**
  * Phase (b.3) — translates the toolkit's Jayway-flavour JsonPath {@code filter=}
@@ -40,7 +41,14 @@ import org.opentmf.query.tmf630.filtering.TmfFilteringException;
  *   <li>Comparison operators {@code ==}, {@code !=}, {@code >}, {@code >=},
  *       {@code <}, {@code <=} pass through unchanged.
  *   <li>Numeric and boolean literals pass through unchanged.
- *   <li>{@code null} → {@code null} (SQL/JSON path {@code null}, all lowercase).
+ *   <li>Null tests follow the configured {@code isnull-semantics}, as the core reads them
+ *       ({@code IS_NULL} / {@code IS_NOT_NULL}): {@code !@.field} and {@code @.field == null} →
+ *       {@code !(exists(@.field))}, {@code @.field != null} → {@code exists(@.field)}; under
+ *       NULLISH a JSON null counts as no value too ({@code exists(@.field ? (@ != null))}).
+ *       Before 3.6.0 {@code !@.field} was a jsonpath syntax error and {@code == null} matched only
+ *       a stored JSON null. A negated array match ({@code !@.arr[?(…)]}) is the core's 400.
+ *   <li>{@code in} / {@code nin} are the core's 400 ("Unsupported token in jsonPath filter
+ *       near: …"): they are not part of the toolkit's {@code filter=} grammar.
  *   <li>{@code =~ /pattern/} and {@code =~ /pattern/i} (TMF-630 Part 6 regex) →
  *       {@code like_regex "pattern"} / {@code like_regex "pattern" flag "i"}. Postgres
  *       evaluates {@code like_regex} with the same POSIX engine as the {@code ~} operator the
@@ -67,14 +75,28 @@ public class JsonbJsonPathTranslator {
   private final JsonbPathExtractor extractor;
   private final String payloadColumn;
   private final boolean regexEnabled;
+  private final IsnullSemantics isnullSemantics;
 
   /** Regex-disabled translator: {@code =~} is rejected, matching the attribute side's default. */
   public JsonbJsonPathTranslator(JsonbPathExtractor extractor, String payloadColumn) {
     this(extractor, payloadColumn, false);
   }
 
+  /** A translator under the default isnull meaning, {@link IsnullSemantics#MISSING_ONLY}. */
   public JsonbJsonPathTranslator(
       JsonbPathExtractor extractor, String payloadColumn, boolean regexEnabled) {
+    this(extractor, payloadColumn, regexEnabled, IsnullSemantics.MISSING_ONLY);
+  }
+
+  /**
+   * A translator whose null tests ({@code !@.field}, {@code == null}, {@code != null}) follow
+   * {@code isnullSemantics}, as the attribute {@code isnull} does.
+   */
+  public JsonbJsonPathTranslator(
+      JsonbPathExtractor extractor,
+      String payloadColumn,
+      boolean regexEnabled,
+      IsnullSemantics isnullSemantics) {
     if (extractor == null) {
       throw new IllegalArgumentException("extractor must not be null");
     }
@@ -84,6 +106,8 @@ public class JsonbJsonPathTranslator {
     this.extractor = extractor;
     this.payloadColumn = payloadColumn;
     this.regexEnabled = regexEnabled;
+    this.isnullSemantics =
+        isnullSemantics == null ? IsnullSemantics.MISSING_ONLY : isnullSemantics;
   }
 
   /**
@@ -345,6 +369,19 @@ public class JsonbJsonPathTranslator {
   /** Translates the token starting at {@code i} and returns how many characters it consumed. */
   private int translateAt(String input, int i, PredicateText out) {
     char c = input.charAt(i);
+    if (c == '!' && !input.startsWith("!=", i)) {
+      int negated = translateNegation(input, i, out);
+      if (negated > 0) {
+        return negated;
+      }
+    }
+    if (c == '@' || c == '$') {
+      int nullTest = translateNullComparison(input, i, out);
+      if (nullTest > 0) {
+        return nullTest;
+      }
+    }
+    refuseInOperator(input, i);
     if (c == '\'' || c == '"') {
       out.endPath();
       return translateQuotedLiteral(input, i, out.text());
@@ -358,6 +395,100 @@ public class JsonbJsonPathTranslator {
     }
     out.append(c);
     return 1;
+  }
+
+  /**
+   * {@code !@.field}: the field has no value, by the configured isnull meaning (as the core,
+   * which reads it as {@code @.field == null}). Returns the characters consumed, or 0 when the
+   * {@code !} does not negate a path (a negated group {@code !(…)} passes through).
+   */
+  private int translateNegation(String input, int i, PredicateText out) {
+    int path = skipSpaces(input, i + 1);
+    if (path >= input.length() || (input.charAt(path) != '@' && input.charAt(path) != '$')) {
+      return 0;
+    }
+    int end = pathEnd(input, path);
+    if (looksLikeFilterOpen(input, end)) {
+      throw new TmfFilteringException(
+          "Negation of array-match expressions is not supported in jsonPath filter.");
+    }
+    out.endPath();
+    out.text().append(noValue(input.substring(path, end)));
+    return end - i;
+  }
+
+  /**
+   * {@code <path> == null} / {@code <path> != null}: the field has no value / a value, by the
+   * configured isnull meaning, as the core's {@code IS_NULL} / {@code IS_NOT_NULL}. Returns the
+   * characters consumed, or 0 when no such comparison starts at {@code i}.
+   */
+  private int translateNullComparison(String input, int i, PredicateText out) {
+    int end = pathEnd(input, i);
+    if (looksLikeFilterOpen(input, end)) {
+      return 0;
+    }
+    int operator = skipSpaces(input, end);
+    boolean equal = input.startsWith("==", operator);
+    if (!equal && !input.startsWith("!=", operator)) {
+      return 0;
+    }
+    int literal = skipSpaces(input, operator + 2);
+    if (!startsWithWord(input, literal, "null")) {
+      return 0;
+    }
+    String path = input.substring(i, end);
+    out.endPath();
+    out.text().append(equal ? noValue(path) : someValue(path));
+    return literal + "null".length() - i;
+  }
+
+  /** {@code in} / {@code nin} are not part of the toolkit's filter= grammar: the core's 400. */
+  private static void refuseInOperator(String input, int i) {
+    boolean wordStart = i == 0 || isSpace(input.charAt(i - 1));
+    if (wordStart && (startsWithWord(input, i, "in") || startsWithWord(input, i, "nin"))) {
+      throw new TmfFilteringException(
+          "Unsupported token in jsonPath filter near: " + input.substring(i));
+    }
+  }
+
+  private String noValue(String path) {
+    return "!(" + someValue(path) + ")";
+  }
+
+  private String someValue(String path) {
+    return isnullSemantics == IsnullSemantics.NULLISH
+        ? "exists(" + path + " ? (@ != null))"
+        : "exists(" + path + ")";
+  }
+
+  /** End of the path starting at {@code i}: field characters and positional {@code [N]} / {@code [*]}. */
+  private static int pathEnd(String s, int i) {
+    int j = i + 1;
+    while (j < s.length()) {
+      char c = s.charAt(j);
+      if (isFieldChar(c)) {
+        j++;
+      } else if (c == '[' && positionalEnd(s, j) > 0) {
+        j = positionalEnd(s, j);
+      } else {
+        break;
+      }
+    }
+    return j;
+  }
+
+  /** Index past {@code [digits]} or {@code [*]} at {@code open}, or -1. */
+  private static int positionalEnd(String s, int open) {
+    int j = open + 1;
+    while (j < s.length() && (Character.isDigit(s.charAt(j)) || s.charAt(j) == '*')) {
+      j++;
+    }
+    return j > open + 1 && j < s.length() && s.charAt(j) == ']' ? j + 1 : -1;
+  }
+
+  private static boolean startsWithWord(String s, int i, String word) {
+    int end = i + word.length();
+    return s.startsWith(word, i) && (end == s.length() || !isFieldChar(s.charAt(end)));
   }
 
   private int translateQuotedLiteral(String input, int i, StringBuilder out) {

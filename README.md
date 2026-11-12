@@ -3314,9 +3314,13 @@ $[?(@.price <= 100)]
 $[?(!@.optionalField)]
 ```
 
-Matches rows where the named field is missing or `null`. Translates to `IS_NULL`.
-Negation of array-match subforms — e.g. `!@.externalReference[?(...)]` — is not
-supported.
+Matches rows where the named field has no value, by `isnull-semantics`. Translates to
+`IS_NULL`, the same as `@.field == null`; `@.field != null` is `IS_NOT_NULL`. Under the default
+`MISSING_ONLY` that means the field is absent (a stored JSON `null` is a value); under `NULLISH`
+a JSON `null` counts as no value too. See
+[null-check widening](#null-check-widening-missing_only-vs-nullish). The same holds on all three
+backends. Negation of array-match subforms, such as `!@.externalReference[?(...)]`, is refused
+with a 400.
 
 #### Logical AND / OR
 

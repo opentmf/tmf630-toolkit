@@ -126,7 +126,8 @@ public class Tmf630JsonbAutoConfiguration {
       JsonbPathExtractor extractor, ObjectProvider<Tmf630FilterSettings> filterSettings) {
     Tmf630FilterSettings settings = filterSettings.getIfAvailable();
     boolean regexEnabled = settings != null && settings.regexEnabled();
-    return new JsonbJsonPathTranslator(extractor, "payload", regexEnabled);
+    return new JsonbJsonPathTranslator(
+        extractor, "payload", regexEnabled, settings != null ? settings.isnullSemantics() : null);
   }
 
   @Bean

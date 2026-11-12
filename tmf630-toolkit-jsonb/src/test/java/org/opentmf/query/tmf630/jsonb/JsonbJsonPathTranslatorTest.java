@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.opentmf.query.tmf630.filtering.TmfFilteringException;
+import org.opentmf.query.tmf630.filtering.config.IsnullSemantics;
 
 class JsonbJsonPathTranslatorTest {
 
@@ -119,10 +120,11 @@ class JsonbJsonPathTranslatorTest {
   }
 
   @Test
-  @DisplayName("null literal in comparison passes through")
+  @DisplayName("== null is the configured isnull test, not a comparison with a stored null")
   void nullLiteral() {
+    // == null is the isnull test (MISSING_ONLY: the key absent), as on the other backends
     JsonbClause c = translator.translate("$[?(@.optional == null)]");
-    assertThat(c.params()).containsExactly("$ ? (@.optional == null)");
+    assertThat(c.params()).containsExactly("$ ? (!(exists(@.optional)))");
   }
 
   @Test
@@ -243,6 +245,59 @@ class JsonbJsonPathTranslatorTest {
         .containsExactly("$ ? (@.name like_regex \"^a\\\\)\")");
     assertThat(regex.translate("$[?(@.name =~ /^(a|b)$/i || (@.n == 1))]").params())
         .containsExactly("$ ? (@.name like_regex \"^(a|b)$\" flag \"i\" || (@.n == 1))");
+  }
+
+  @Test
+  @DisplayName("filter= in / nin are refused with the core's 400, as on JPA and Mongo")
+  void inAndNinAreRefusedAsOnTheOtherBackends() {
+    assertThatThrownBy(() -> translator.translate("$[?(@.s in ['a', 'b'])]"))
+        .isInstanceOf(TmfFilteringException.class)
+        .hasMessage("Unsupported token in jsonPath filter near: in ['a', 'b']");
+    assertThatThrownBy(() -> translator.translate("$[?(@.s == 'x' && @.t nin ['a'])]"))
+        .isInstanceOf(TmfFilteringException.class)
+        .hasMessage("Unsupported token in jsonPath filter near: nin ['a']");
+    // " in " inside a string literal is a value, not the operator
+    assertThat(translator.translate("$[?(@.s == 'x in [y]')]").params())
+        .containsExactly("$ ? (@.s == \"x in [y]\")");
+  }
+
+  @Test
+  @DisplayName("!@.field, == null and != null follow isnull MISSING_ONLY: the key absent / present")
+  void nullTestsUnderMissingOnly() {
+    assertThat(translator.translate("$[?(!@.s)]").params())
+        .containsExactly("$ ? (!(exists(@.s)))");
+    assertThat(translator.translate("$[?(@.s == null)]").params())
+        .containsExactly("$ ? (!(exists(@.s)))");
+    assertThat(translator.translate("$[?(@.s != null)]").params())
+        .containsExactly("$ ? (exists(@.s))");
+    assertThat(translator.translate("$[?(@.a.b == null && ! @.c)]").params())
+        .containsExactly("$ ? (!(exists(@.a.b)) && !(exists(@.c)))");
+    assertThat(translator.translate("$[?(@.items[?(!@.b)])]").params())
+        .containsExactly("$ ? (exists(@.items[*] ? (!(exists(@.b)))))");
+    // != stays a comparison when its right side is not the null literal
+    assertThat(translator.translate("$[?(@.s != 'x')]").params())
+        .containsExactly("$ ? (@.s != \"x\")");
+  }
+
+  @Test
+  @DisplayName("under isnull NULLISH a JSON null is no value too")
+  void nullTestsUnderNullish() {
+    JsonbJsonPathTranslator nullish =
+        new JsonbJsonPathTranslator(extractor, "payload", false, IsnullSemantics.NULLISH);
+    assertThat(nullish.translate("$[?(!@.s)]").params())
+        .containsExactly("$ ? (!(exists(@.s ? (@ != null))))");
+    assertThat(nullish.translate("$[?(@.s == null)]").params())
+        .containsExactly("$ ? (!(exists(@.s ? (@ != null))))");
+    assertThat(nullish.translate("$[?(@.s != null)]").params())
+        .containsExactly("$ ? (exists(@.s ? (@ != null)))");
+  }
+
+  @Test
+  @DisplayName("negating an array match is refused with the core's 400")
+  void negatedArrayMatchIsRefused() {
+    assertThatThrownBy(() -> translator.translate("$[?(!@.items[?(@.b == 'x')])]"))
+        .isInstanceOf(TmfFilteringException.class)
+        .hasMessage("Negation of array-match expressions is not supported in jsonPath filter.");
   }
 
   @Test
