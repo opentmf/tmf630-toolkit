@@ -170,8 +170,9 @@ All notable changes to `tmf630-toolkit` are documented in this file.
   - Below 16 the application does not start. The `Tmf630JsonbPostgresVersionCheck` bean fails it
     with: `tmf630-toolkit-jsonb needs PostgreSQL 16 or later: … this server reports
     server_version_num <n>.` There is no silent fallback to a plain cast.
-  - Replacing the bean opts out, at your own risk: date filters and sorts then fail on that
-    server with "function pg_input_is_valid does not exist".
+  - The check is replaceable, the requirement is not. An application that replaces the bean and
+    runs below 16 starts, and then every filter and sort on a date or time field fails with
+    "function pg_input_is_valid does not exist".
 
 ### Fixed (JSONB date and time values no cast reads)
 

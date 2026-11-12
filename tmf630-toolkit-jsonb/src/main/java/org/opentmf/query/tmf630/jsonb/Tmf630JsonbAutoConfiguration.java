@@ -155,7 +155,9 @@ public class Tmf630JsonbAutoConfiguration {
 
   /**
    * Refuses to start on a PostgreSQL older than 16, which the date and time filters and sorts need
-   * ({@code pg_input_is_valid}). Replace the bean to opt out at your own risk.
+   * ({@code pg_input_is_valid}). The check is replaceable, the requirement is not: an application
+   * that replaces this bean and runs below 16 starts, and then every filter and sort on a date or
+   * time field fails with "function pg_input_is_valid does not exist".
    */
   @Bean
   @ConditionalOnMissingBean

@@ -9,6 +9,10 @@ import org.springframework.beans.factory.InitializingBean;
  * cast reads is no match instead of an error that fails the whole query. Below 16 that function
  * does not exist; rather than fall back silently to a plain cast, the application does not start,
  * and says why.
+ *
+ * <p>The check is replaceable (it is an ordinary bean), the requirement is not: an application that
+ * replaces it and runs below 16 starts, and then every filter and sort on a date or time field
+ * fails with "function pg_input_is_valid does not exist".
  */
 public class Tmf630JsonbPostgresVersionCheck implements InitializingBean {
 
