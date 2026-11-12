@@ -233,6 +233,35 @@ class Tmf630JsonbCombinationIT {
       urlCell(split, position, kind, operator);
       filterCell(split, position, kind, operator);
     }
+    for (String[] word : JAYWAY_OPERATORS_NOT_IN_THE_GRAMMAR) {
+      jaywayWordCell(split, position, kind, word[0], word[1]);
+    }
+  }
+
+  /**
+   * Jayway's filter operators the toolkit's {@code filter=} grammar does not have (README: "What
+   * filter= does NOT support (rejected with 400)"), each with a value of its kind. Both the
+   * QueryDSL terminal and JSONB must answer the toolkit's 400.
+   */
+  private static final String[][] JAYWAY_OPERATORS_NOT_IN_THE_GRAMMAR = {
+    {"in", "['x', 'y']"}, {"nin", "['x']"}, {"size", "2"}, {"empty", "true"},
+    {"contains", "'x'"}, {"anyof", "['x']"}, {"noneof", "['x']"}, {"subsetof", "['x']"},
+    {"all", "['x']"}, {"exists", "true"}, {"type", "'string'"}, {"matches", "'x'"},
+    {"IN", "['x']"}, {"===", "'x'"}, {"!==", "'x'"}
+  };
+
+  private void jaywayWordCell(
+      boolean split, ComboPosition position, ComboKind kind, String word, String value) {
+    List<Step> steps = new ArrayList<>(position.steps());
+    String leafKey = kind.key();
+    if (kind == ComboKind.OBJECT_LIST) {
+      steps.add(new Step("lo", true));
+      leafKey = "code";
+    }
+    String expression =
+        "$[?(" + nest(steps, 0, "@.", leafKey, "%s " + word + " " + value) + ")]";
+    evaluate(split, position, kind, "FILTER", "JAYWAY_" + word, Map.of("filter",
+        new String[] {expression}), Optional.empty());
   }
 
   // ---- URL attribute operators ------------------------------------------------------------
