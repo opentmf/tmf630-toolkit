@@ -5,19 +5,34 @@ import org.opentmf.query.tmf630.filtering.TmfFilteringException;
 
 /**
  * Phase (b.3) — translates the toolkit's Jayway-flavour JsonPath {@code filter=}
- * expression into a Postgres SQL/JSON path expression, wrapped in a
- * {@code jsonb_path_exists(payload, ...)} call. Emits a {@link JsonbClause} the b.5
- * executor can compose into a full WHERE clause.
+ * expression into a Postgres SQL/JSON path expression, tested with the {@code @?} operator:
+ * {@code payload @? ?::jsonpath}. Emits a {@link JsonbClause} the b.5 executor can compose into
+ * a full WHERE clause.
+ *
+ * <p>The operator, not the equivalent {@code jsonb_path_exists(payload, ...)} function, because
+ * PostgreSQL serves a GIN index ({@code jsonb_path_ops} or {@code jsonb_ops}) only through the
+ * operators {@code @>}, {@code @?} and {@code @@}, never through a function call.
+ * The JDBC text carries the operator as {@code @??}: the PostgreSQL driver turns {@code ??} into
+ * a literal {@code ?}, so the server receives {@code payload @? $1::jsonpath} (the same escape
+ * {@link JsonbPathExtractor#hasTopLevelKey} uses). The operator suppresses the errors the
+ * function raises; for the lax {@code $ ? (...)} path this class emits, that differs only for a
+ * body that continues outside the filter, which is refused (see {@link #translate}).
  *
  * <p>Translation rules:
  *
  * <ul>
  *   <li>Wrapper: {@code $[?(<pred>)]} / {@code [?(<pred>)]} / {@code $.[?(<pred>)]}
  *       → {@code $ ? (<pred>)}
- *   <li>Array match nested inside a predicate: {@code @.arr[?(<inner>)]} →
- *       {@code @.arr[*] ? (<inner>)}. Postgres SQL/JSON path natively supports
- *       nested filters this way, so multi-level array correlation composes
- *       recursively.
+ *   <li>Array match standing as a predicate: {@code @.arr[?(<inner>)]} →
+ *       {@code exists(@.arr[*] ? (<inner>))}. A path with a filter is not a predicate in
+ *       SQL/JSON path, so {@code exists(...)} turns it into one (before 3.5.3 the bare form was
+ *       emitted and PostgreSQL rejected it as a jsonpath syntax error). "Standing as a
+ *       predicate" means it is followed by the end of its predicate, a {@code )}, {@code &&} or
+ *       {@code ||}. Multi-level correlation composes recursively, each level in its own
+ *       {@code exists(...)}.
+ *   <li>Array match used as an operand: {@code @.arr[?(<inner>)].field == 'X'} →
+ *       {@code @.arr[*] ? (<inner>).field == "X"}, the filter followed by an accessor and a
+ *       comparison, which is already a predicate.
  *   <li>Quote conversion: single-quoted string literals → double-quoted (Postgres
  *       requires double quotes for path-language string literals). Escapes preserved.
  *   <li>Logical operators {@code &&} / {@code ||} / unary {@code !} pass through
@@ -77,9 +92,15 @@ public class JsonbJsonPathTranslator {
    *
    * <ol>
    *   <li>{@code length()} equality — special-cased to {@code jsonb_array_length}.
-   *   <li>Everything else — translated to Postgres SQL/JSON path and wrapped in
-   *       {@code jsonb_path_exists}.
+   *   <li>Everything else — translated to Postgres SQL/JSON path and tested with
+   *       {@code payload @? ?::jsonpath}.
    * </ol>
+   *
+   * <p>A body that would close the {@code $ ? (...)} wrapper early, or leave a parenthesis open,
+   * is refused: outside string and regex literals, its parenthesis depth must never fall below
+   * zero and must end at zero. {@code $[?(@.a == 1) || (@.b == 2)]} balances by count and is
+   * still refused, because its body closes the wrapper after {@code @.a == 1}. The QueryDSL
+   * terminal refuses the same bodies.
    */
   public JsonbClause translate(String filterExpression) {
     if (filterExpression == null || filterExpression.isBlank()) {
@@ -91,19 +112,77 @@ public class JsonbJsonPathTranslator {
                 () ->
                     new TmfFilteringException(
                         "filter= expression must be wrapped in $[?(...)]: " + filterExpression));
+    requireBodyInsideWrapper(body);
     Optional<LengthEquality> lengthEquality = lengthEquality(body);
     if (lengthEquality.isPresent()) {
       return translateLengthEquality(
           lengthEquality.get().field(), Integer.parseInt(lengthEquality.get().literal()));
     }
-    return translateAsJsonbPathExists(body);
+    return translateAsPathMatch(body);
   }
 
-  private JsonbClause translateAsJsonbPathExists(String body) {
+  private JsonbClause translateAsPathMatch(String body) {
     String jsonPath = "$ ? (" + translatePredicate(body) + ")";
-    // JDBC parameter for the jsonpath text — Postgres will cast the text to jsonpath.
-    return JsonbClause.of(
-        "jsonb_path_exists(" + payloadColumn + ", ?::jsonpath)", jsonPath);
+    // JDBC parameter for the jsonpath text — Postgres will cast the text to jsonpath. "@??" is
+    // the driver's escape for the "@?" operator, so the index can serve the test.
+    return JsonbClause.of(payloadColumn + " @?? ?::jsonpath", jsonPath);
+  }
+
+  /**
+   * Refuses a wrapper body whose parentheses, outside string and regex literals, close the
+   * wrapper early (the depth falls below zero) or leave a parenthesis open (it ends above zero).
+   */
+  private static void requireBodyInsideWrapper(String body) {
+    int depth = 0;
+    int i = 0;
+    while (i < body.length()) {
+      char c = body.charAt(i);
+      if (c == '\'' || c == '"') {
+        i = findStringEnd(body, i) + 1;
+      } else if (c == '=' && i + 1 < body.length() && body.charAt(i + 1) == '~') {
+        i = endOfRegexOperand(body, i + 2);
+      } else {
+        depth += parenthesisDelta(c);
+        if (depth < 0) {
+          throw unbalancedBody("closes the $[?(...)] wrapper early");
+        }
+        i++;
+      }
+    }
+    if (depth != 0) {
+      throw unbalancedBody("leaves a parenthesis open");
+    }
+  }
+
+  private static int parenthesisDelta(char c) {
+    if (c == '(') {
+      return 1;
+    }
+    return c == ')' ? -1 : 0;
+  }
+
+  /**
+   * Index just past the {@code /pattern/} literal that follows {@code =~} at {@code from}; when
+   * there is no complete literal, {@code from} itself, so the translation reports it.
+   */
+  private static int endOfRegexOperand(String s, int from) {
+    int open = skipSpaces(s, from);
+    if (open >= s.length() || s.charAt(open) != '/') {
+      return from;
+    }
+    int i = open + 1;
+    while (i < s.length() && s.charAt(i) != '/') {
+      i += s.charAt(i) == '\\' ? 2 : 1;
+    }
+    return i < s.length() ? i + 1 : from;
+  }
+
+  private static TmfFilteringException unbalancedBody(String what) {
+    return new TmfFilteringException(
+        "filter= expression "
+            + what
+            + ": outside string and regex literals, the parentheses of $[?(...)] must close"
+            + " exactly at its end.");
   }
 
   private JsonbClause translateLengthEquality(String dottedField, int expectedLength) {
@@ -255,24 +334,30 @@ public class JsonbJsonPathTranslator {
    * </ul>
    */
   private String translatePredicate(String input) {
-    StringBuilder out = new StringBuilder(input.length() + 16);
+    PredicateText out = new PredicateText(input.length() + 16);
     int i = 0;
     while (i < input.length()) {
-      char c = input.charAt(i);
-      int consumed;
-      if (c == '\'' || c == '"') {
-        consumed = translateQuotedLiteral(input, i, out);
-      } else if (c == '=' && i + 1 < input.length() && input.charAt(i + 1) == '~') {
-        consumed = translateRegexOperator(input, i, out);
-      } else if (c == '[' && looksLikeFilterOpen(input, i)) {
-        consumed = translateFilterExpression(input, i, out);
-      } else {
-        out.append(c);
-        consumed = 1;
-      }
-      i += consumed;
+      i += translateAt(input, i, out);
     }
     return out.toString();
+  }
+
+  /** Translates the token starting at {@code i} and returns how many characters it consumed. */
+  private int translateAt(String input, int i, PredicateText out) {
+    char c = input.charAt(i);
+    if (c == '\'' || c == '"') {
+      out.endPath();
+      return translateQuotedLiteral(input, i, out.text());
+    }
+    if (c == '=' && i + 1 < input.length() && input.charAt(i + 1) == '~') {
+      out.endPath();
+      return translateRegexOperator(input, i, out.text());
+    }
+    if (c == '[' && looksLikeFilterOpen(input, i)) {
+      return translateFilterExpression(input, i, out);
+    }
+    out.append(c);
+    return 1;
   }
 
   private int translateQuotedLiteral(String input, int i, StringBuilder out) {
@@ -335,13 +420,29 @@ public class JsonbJsonPathTranslator {
    * Consumes {@code [?(...)]} at position {@code i} and appends its SQL/JSON form. The
    * inner-filter body is at {@code [i+3, filterEnd-1)} — from just past {@code [?(} up
    * to but not including the closing {@code )}; {@code filterEnd} points at the closing
-   * {@code ]}, so the {@code )} sits one character before it.
+   * {@code ]}, so the {@code )} sits one character before it. When the filtered path stands as a
+   * predicate, the path and its filter are wrapped in {@code exists(...)}.
    */
-  private int translateFilterExpression(String input, int i, StringBuilder out) {
+  private int translateFilterExpression(String input, int i, PredicateText out) {
     int filterEnd = findMatchingFilterClose(input, i);
     String innerFilter = input.substring(i + 3, filterEnd - 1);
-    out.append("[*] ? (").append(translatePredicate(innerFilter)).append(")");
+    String filter = "[*] ? (" + translatePredicate(innerFilter) + ")";
+    if (out.inPath() && standsAsPredicate(input, filterEnd + 1)) {
+      out.closePathInExists(filter);
+    } else {
+      out.appendToPath(filter);
+    }
     return filterEnd + 1 - i;
+  }
+
+  /**
+   * Whether what follows a {@code [?(...)]} ends the predicate it belongs to: the end of the
+   * input, a {@code )}, {@code &&} or {@code ||}. Anything else (an accessor, a comparison)
+   * makes the filtered path an operand.
+   */
+  private static boolean standsAsPredicate(String s, int from) {
+    int i = skipSpaces(s, from);
+    return i >= s.length() || s.charAt(i) == ')' || s.startsWith("&&", i) || s.startsWith("||", i);
   }
 
   private static boolean looksLikeFilterOpen(String s, int i) {
@@ -374,6 +475,61 @@ public class JsonbJsonPathTranslator {
       i++;
     }
     throw new TmfFilteringException("Unterminated array-match filter starting at index " + start);
+  }
+
+  /**
+   * The translated text of one predicate, and where the path being written started: the index
+   * of its {@code @} or {@code $}, or -1 when no path is being written.
+   */
+  private static final class PredicateText {
+
+    private final StringBuilder text;
+    private int pathStart = -1;
+
+    PredicateText(int capacity) {
+      this.text = new StringBuilder(capacity);
+    }
+
+    StringBuilder text() {
+      return text;
+    }
+
+    void append(char c) {
+      if (c == '@' || c == '$') {
+        pathStart = text.length();
+      } else if (!isPathChar(c)) {
+        pathStart = -1;
+      }
+      text.append(c);
+    }
+
+    void endPath() {
+      pathStart = -1;
+    }
+
+    boolean inPath() {
+      return pathStart >= 0;
+    }
+
+    /** Appends a filter the path continues after, as in {@code @.a[*] ? (...).b}. */
+    void appendToPath(String filter) {
+      text.append(filter);
+    }
+
+    /** Ends the path with {@code filter} and wraps the whole path in {@code exists(...)}. */
+    void closePathInExists(String filter) {
+      text.insert(pathStart, "exists(").append(filter).append(')');
+      pathStart = -1;
+    }
+
+    @Override
+    public String toString() {
+      return text.toString();
+    }
+
+    private static boolean isPathChar(char c) {
+      return isFieldChar(c) || c == '[' || c == ']' || c == '*';
+    }
   }
 
   private static int findStringEnd(String s, int quotePos) {

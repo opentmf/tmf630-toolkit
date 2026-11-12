@@ -22,11 +22,11 @@ import org.opentmf.query.tmf630.filtering.TmfSplitFilterDecomposer.SplitClauseRe
  *
  * <ul>
  *   <li><b>Parent-only</b>, e.g. {@code $[?(@.status == 'X')]} — delegates to base
- *       translator, emits {@code jsonb_path_exists(payload, ?)} on the parent payload.
+ *       translator, emits {@code payload @? ?::jsonpath} on the parent payload.
  *   <li><b>Top-level array correlation into any split field</b>, e.g.
  *       {@code $[?(@.items[?(@.state == 'X')])]} — rewrites to
  *       {@code EXISTS (SELECT 1 FROM <childTable> WHERE parent_id = <parentTable>.id AND
- *       jsonb_path_exists(payload, ?))}.
+ *       payload @? ?::jsonpath)}.
  *   <li><b>Top-level {@code &&} conjunction mixing parent-only clauses and split
  *       correlations</b>, e.g. {@code $[?(@.status == 'X' && @.items[?(@.state == 'Y')])]}
  *       — each half is translated in isolation and AND'd via {@link JsonbClause#and}.
@@ -46,7 +46,7 @@ import org.opentmf.query.tmf630.filtering.TmfSplitFilterDecomposer.SplitClauseRe
  *
  * <ul>
  *   <li>Non-default child payload column names — the delegate emits
- *       {@code jsonb_path_exists(payload, ...)} against a column literally named
+ *       {@code payload @? ...} against a column literally named
  *       {@code payload}.
  * </ul>
  *

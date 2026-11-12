@@ -186,7 +186,17 @@ class Tmf630JsonbUrlBindingParityIT {
             Map.of(
                 "status", List.of("NEW"),
                 "filter", List.of("$[?(@.priority > 2)]"),
-                "filter.combineWithAttributes", List.of("BOGUS"))));
+                "filter.combineWithAttributes", List.of("BOGUS"))),
+        // a filter= body that closes its $[?(...)] wrapper early (3.5.3: JSONB answered 500)
+        Arguments.of(
+            "filter= body balanced by count but closing the wrapper",
+            Map.of("filter", List.of("$[?(@.status == 'NEW') || (@.status == 'DONE')]"))),
+        Arguments.of(
+            "filter= body going on outside the filter",
+            Map.of("filter", List.of("$[?(@.priority == 1) + (1)]"))),
+        Arguments.of(
+            "filter= body with an unclosed parenthesis",
+            Map.of("filter", List.of("$[?((@.priority == 1)]"))));
   }
 
   @ParameterizedTest(name = "{0}")

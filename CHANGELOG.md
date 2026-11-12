@@ -2,6 +2,70 @@
 
 All notable changes to `tmf630-toolkit` are documented in this file.
 
+## [3.5.3] - 2026-11-12
+
+### Fixed (JSONB `filter=` and the GIN index)
+
+- **On a JSONB-backed entity, a GIN index on the payload can now serve `filter=`.** The
+  translator emitted the function `jsonb_path_exists(payload, ?::jsonpath)`. PostgreSQL serves
+  a `GIN (payload jsonb_path_ops)` (or `jsonb_ops`) index only through the operators `@>`, `@?`
+  and `@@`, never through a function call. So every `filter=` query read the whole table,
+  including on services that had created the index the design document recommends. The
+  translator now emits the operator `payload @? ?::jsonpath`. The JDBC text reads
+  `payload @?? ?::jsonpath`; the driver turns `??` into `?`. The same form now covers the root
+  filter, `&&` and `||`, the split-collection `EXISTS` subquery and the `COUNT` query.
+  - The index serves a filter when every `||` branch carries an equality; inside `&&`, one
+    equality is enough. That covers `@.a == 'x'`, `@.a == 'x' || @.a == 'y'`,
+    `@.a == 'x' && @.n > 5`, and an array correlation on an equality. The plan shows a Bitmap
+    Index Scan.
+  - The index has no key for a filter with no equality (ranges only, `=~`, `!(...)`), nor for
+    one where a `||` branch has none (`@.a == 'x' || @.n > 5`). With a plan made for the
+    actual path, PostgreSQL scans the table, as before.
+  - With a generic plan, PostgreSQL cannot see the path, so it always picks the index. It
+    switches a server-prepared statement to a generic plan after its first five executions,
+    and every `filter=`-only query on a table shares one SQL text. Such a filter then reads the
+    whole index and rechecks every row. Measured on 20,000 rows: 903 buffers, against 690 for
+    the scan.
+  - Both forms return the same rows. No adopter action is needed: an existing GIN index starts
+    being used, and nothing else changes.
+- **What the operator answers differently.** The operator suppresses errors that the function
+  raises. The path the toolkit emits is always the lax `$ ? (<filter>)`, and inside that filter
+  both forms already treat an error as no match. Measured, with the same answer in both forms:
+  - a missing key, a value of another type, arithmetic on text, division by zero;
+  - an unparseable date-time, `.double()` on text, an out-of-range subscript.
+
+  Both forms still raise an error for a date-time comparison that needs a time zone, for an
+  undefined `$variable`, and for a jsonpath syntax error. The only difference is a body that
+  closes the wrapper and goes on outside the filter, such as `$[?(@.a == 1) + (1)]` or
+  `$[?(@.a == 1).double()]`. The function raised an error (HTTP 500). Such a body is now
+  refused before any SQL runs (next entry), so no request gets the operator's silent empty
+  page instead.
+- **On JSONB, a `filter=` body that leaves its `$[?(...)]` wrapper is now a 400 (was a 500).**
+  Outside string and regex literals, the body's parentheses must never close the wrapper early,
+  and all of them must be closed at its end.
+  - `$[?(@.status == 'NEW') || (@.status == 'DONE')]` balances by count, but its body closes
+    the wrapper after the first comparison. On JSONB it was a jsonpath syntax error (500);
+    the QueryDSL terminal already refused it with a 400.
+  - `$[?(@.a == 1) + (1)]` and `$[?((@.a == 1)]` are refused the same way.
+  - Parentheses inside string literals (`'a) || (b'`) and regex literals (`/^a\)/`) do not
+    count.
+  - Write a disjunction inside one wrapper: `$[?(@.status == 'NEW' || @.status == 'DONE')]`.
+- **`filter=` array correlation now works on a JSONB-backed entity without split collections.**
+  `$[?(@.characteristic[?(@.name == 'k3' && @.value == 'v10')])]` was translated to
+  `$ ? (@.characteristic[*] ? (...))`. That is not a predicate in SQL/JSON path, so PostgreSQL
+  rejected it with `syntax error at or near ")" of jsonpath input`. The request failed with an
+  unhandled `BadSqlGrammarException` (HTTP 500, unless the service maps that exception). The
+  defect has been there since 3.0.0. It affected every place an array filter stands as a
+  predicate: alone, next to `&&` / `||` / `!`, and nested
+  (`$[?(@.item[?(@.tag[?(@.code == 't7')])])]`).
+  - Such a filter is now emitted as `exists(@.characteristic[*] ? (...))`, one `exists` per
+    level. It matches within one array element, as on the other backends, and a GIN index on
+    the payload serves it.
+  - An array filter used as an operand, such as `@.items[?(@.state == 'Y')].id == 'i1'`, already
+    worked and keeps its form.
+  - Split collections were never affected: their decomposer strips the wrapper before
+    translation.
+
 ## [3.5.2] - 2026-11-04
 
 ### Fixed

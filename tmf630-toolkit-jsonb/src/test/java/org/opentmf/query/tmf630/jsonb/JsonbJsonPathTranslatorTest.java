@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import java.time.Duration;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.opentmf.query.tmf630.filtering.TmfFilteringException;
 
 class JsonbJsonPathTranslatorTest {
@@ -16,10 +18,10 @@ class JsonbJsonPathTranslatorTest {
       new JsonbJsonPathTranslator(extractor, "payload");
 
   @Test
-  @DisplayName("simple equality filter wraps in jsonb_path_exists with converted quotes")
+  @DisplayName("simple equality filter is tested with the @? operator, quotes converted")
   void simpleEquality() {
     JsonbClause c = translator.translate("$[?(@.status == 'Pending')]");
-    assertThat(c.sql()).isEqualTo("jsonb_path_exists(payload, ?::jsonpath)");
+    assertThat(c.sql()).isEqualTo("payload @?? ?::jsonpath");
     assertThat(c.params()).containsExactly("$ ? (@.status == \"Pending\")");
   }
 
@@ -55,14 +57,40 @@ class JsonbJsonPathTranslatorTest {
   }
 
   @Test
-  @DisplayName("array correlation @.arr[?(...)] rewrites to @.arr[*] ? (...)")
+  @DisplayName("array correlation @.arr[?(...)] as a predicate rewrites to exists(@.arr[*] ? (...))")
   void arrayCorrelation() {
     JsonbClause c =
         translator.translate(
             "$[?(@.externalReference[?(@.name == 'REF' && @.id == 'X')])]");
     assertThat(c.params())
         .containsExactly(
-            "$ ? (@.externalReference[*] ? (@.name == \"REF\" && @.id == \"X\"))");
+            "$ ? (exists(@.externalReference[*] ? (@.name == \"REF\" && @.id == \"X\")))");
+  }
+
+  @Test
+  @DisplayName("array correlation next to &&, || and ! is wrapped in exists(...) at each place")
+  void arrayCorrelationInsideBooleanOperators() {
+    assertThat(
+            translator
+                .translate("$[?(@.status == 'X' || @.items[?(@.state == 'Y')] && @.p > 1)]")
+                .params())
+        .containsExactly(
+            "$ ? (@.status == \"X\" || exists(@.items[*] ? (@.state == \"Y\")) && @.p > 1)");
+    assertThat(translator.translate("$[?(!(@.items[?(@.state == 'Y')]))]").params())
+        .containsExactly("$ ? (!(exists(@.items[*] ? (@.state == \"Y\"))))");
+    assertThat(translator.translate("$[?(@.items[?(@.state == 'Y')] )]").params())
+        .containsExactly("$ ? (exists(@.items[*] ? (@.state == \"Y\")) )");
+  }
+
+  @Test
+  @DisplayName("array filter used as an operand (accessor + comparison after it) stays unwrapped")
+  void arrayFilterAsOperandIsNotWrapped() {
+    assertThat(translator.translate("$[?(@.items[?(@.state == 'Y')].id == 'i1')]").params())
+        .containsExactly("$ ? (@.items[*] ? (@.state == \"Y\").id == \"i1\")");
+    // a filter after the operand's accessor makes the whole chain a predicate again
+    assertThat(
+            translator.translate("$[?(@.items[?(@.state == 'Y')].tags[?(@ == 't')])]").params())
+        .containsExactly("$ ? (exists(@.items[*] ? (@.state == \"Y\").tags[*] ? (@ == \"t\")))");
   }
 
   @Test
@@ -142,13 +170,13 @@ class JsonbJsonPathTranslatorTest {
   }
 
   @Test
-  @DisplayName("nested array-match inside array-match composes recursively")
+  @DisplayName("nested array-match inside array-match composes recursively, one exists per level")
   void nestedArrayCorrelation() {
     JsonbClause c =
         translator.translate(
             "$[?(@.a[?(@.b[?(@.c == 'X')])])]");
     assertThat(c.params())
-        .containsExactly("$ ? (@.a[*] ? (@.b[*] ? (@.c == \"X\")))");
+        .containsExactly("$ ? (exists(@.a[*] ? (exists(@.b[*] ? (@.c == \"X\")))))");
   }
 
   @Test
@@ -185,6 +213,38 @@ class JsonbJsonPathTranslatorTest {
                 .isInstanceOf(TmfFilteringException.class));
   }
 
+  @ParameterizedTest(name = "{0}")
+  @ValueSource(
+      strings = {
+        "$[?(@.a == 1) || (@.b == 2)]",
+        "$[?(@.a == 1) + (1)]",
+        "$[?(@.a == 1).double()]",
+        "$[?(@.a == 1))]",
+        "$[?((@.a == 1)]",
+        "$[?(@.items[?(@.s == 'x'))])]"
+      })
+  @DisplayName("a body that leaves the $[?(...)] wrapper, or leaves a parenthesis open, is refused")
+  void bodyLeavingTheWrapperIsRefused(String filter) {
+    JsonbJsonPathTranslator regex = new JsonbJsonPathTranslator(extractor, "payload", true);
+    assertThatThrownBy(() -> regex.translate(filter))
+        .isInstanceOf(TmfFilteringException.class)
+        .hasMessageContaining("parentheses");
+  }
+
+  @Test
+  @DisplayName("parentheses inside string and regex literals do not count toward the wrapper")
+  void parenthesesInsideLiteralsStayAccepted() {
+    JsonbJsonPathTranslator regex = new JsonbJsonPathTranslator(extractor, "payload", true);
+    assertThat(regex.translate("$[?(@.name == 'a) || (b')]").params())
+        .containsExactly("$ ? (@.name == \"a) || (b\")");
+    assertThat(regex.translate("$[?(@.name == \"x(\")]").params())
+        .containsExactly("$ ? (@.name == \"x(\")");
+    assertThat(regex.translate("$[?(@.name =~ /^a\\)/)]").params())
+        .containsExactly("$ ? (@.name like_regex \"^a\\\\)\")");
+    assertThat(regex.translate("$[?(@.name =~ /^(a|b)$/i || (@.n == 1))]").params())
+        .containsExactly("$ ? (@.name like_regex \"^(a|b)$\" flag \"i\" || (@.n == 1))");
+  }
+
   @Test
   @DisplayName("=~ /pattern/ lowers to like_regex with the pattern as a double-quoted literal")
   void regexOperator() {
@@ -201,7 +261,7 @@ class JsonbJsonPathTranslatorTest {
             regex.translate("$[?(@.href =~ /\\/v4\\// || @.items[?(@.id =~ /^X/i)])]").params())
         .containsExactly(
             "$ ? (@.href like_regex \"\\\\/v4\\\\/\""
-                + " || @.items[*] ? (@.id like_regex \"^X\" flag \"i\"))");
+                + " || exists(@.items[*] ? (@.id like_regex \"^X\" flag \"i\")))");
   }
 
   @Test

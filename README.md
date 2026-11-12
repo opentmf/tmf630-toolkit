@@ -47,7 +47,7 @@ they would against a non-split backend.
    [handbook section 14](#14-master-detail-split--mongo).
 4. **PostgreSQL with JSONB columns as a document DB** — Postgres tables where a
    `payload jsonb` column holds the full domain. Same TMF-630 query contract via native
-   Postgres SQL/JSON path (`jsonb_path_exists`, `jsonb_path_query`) — no ORM object
+   Postgres SQL/JSON path (`payload @? jsonpath`, `jsonb_path_query`) — no ORM object
    graph, no lazy-load surface. See [handbook section 13](#13-postgresql-with-jsonb-as-a-document-db).
 5. **PostgreSQL with JSONB columns as a document DB and master-detail split**
    *(toolkit extension)* — as (4), but the child collection lives in a companion table
@@ -2361,9 +2361,10 @@ API.
 The JSONB backend supports the full JsonPath grammar for `filter=` and `sort=` — array
 correlation (`@.characteristic[?(@.name == 'price')]`), positional index (`@.items[3].state`),
 `length()`, regex (`=~ /pattern/i` when `regex.enabled=true`), and correlated sort
-(`sort=$.characteristic[?(@.name == 'price')].value`) — all lowered to native
-`jsonb_path_exists` / `jsonb_path_query` calls. No aggregation stage, no cross-table
-joins.
+(`sort=$.characteristic[?(@.name == 'price')].value`) — all lowered to native SQL/JSON path:
+`filter=` as the `payload @? ?::jsonpath` operator, which a GIN index on the payload can serve
+(an array correlation as `exists(@.characteristic[*] ? (...))`), and sorts as
+`jsonb_path_query` calls. No aggregation stage, no cross-table joins.
 
 For SQL fragments the toolkit doesn't cover (custom scoring, materialised-view lookups),
 compose your own `JsonbClause` and AND / OR it with the translator's output:
@@ -2607,8 +2608,8 @@ class ProductOrderController {
 
 Identical shape to §13. The difference is invisible at the call site — the translator
 handles both parent-only and split-touching filters uniformly. On the wire it emits
-`jsonb_path_exists(payload, ?)` for parent-only clauses, `EXISTS(SELECT 1 FROM
-product_order_item WHERE parent_id = product_order_row.id AND jsonb_path_exists(payload, ?))`
+`payload @? ?::jsonpath` for parent-only clauses, `EXISTS(SELECT 1 FROM
+product_order_item WHERE parent_id = product_order_row.id AND payload @? ?::jsonpath)`
 for split correlations, and composes them with SQL `AND`/`OR` when the filter mixes both.
 
 #### Level 2 — sub-endpoint controller
