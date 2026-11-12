@@ -66,6 +66,29 @@ All notable changes to `tmf630-toolkit` are documented in this file.
   - Split collections were never affected: their decomposer strips the wrapper before
     translation.
 
+### Fixed (JSONB filters on an enum field)
+
+- **On JSONB, a filter on a field declared as an enum no longer fails.** The defect has been
+  there since 3.0.0. `EQ`, `NE`, `IN`, `NIN`, the ranges and the `LIKE` family all bound the enum
+  constant itself. The PostgreSQL driver refuses that ("Can't infer the SQL type to use for an
+  instance of …"), so the request failed with an unhandled `BadSqlGrammarException` (HTTP 500).
+  `.eqi` and `.nei` ran, but they bound `toString()`, and against an enum stored by a wire
+  value they found nothing.
+- **The value is now bound as the payload holds it:** the text that the service's
+  `ObjectMapper` writes for that constant.
+  - A `@JsonValue` or `@JsonProperty` wire value applies. A generated TMF enum with constant
+    `IN_PROGRESS` and stored value `"inProgress"` is bound as `"inProgress"`.
+  - Jackson 3 writes an enum with `toString()` by default (`EnumFeature.WRITE_ENUMS_USING_TO_STRING`),
+    so an overridden `toString()` applies too.
+  - The auto-configuration passes the context's mapper through the new constructor
+    `JsonbPredicateFactory(extractor, isnullSemantics, regexEnabled, ObjectMapper)`. With the
+    old constructor, or without a mapper bean, a default `JsonMapper` decides: it honours the
+    annotations, not the service's own configuration.
+- **What a URL can name.** A URL still names an enum by its constant (`?state=IN_PROGRESS`).
+  It can use the wire value (`?state=inProgress`) only when the enum has a public static
+  `String` factory, such as the `fromValue` that OpenAPI generators emit. Without one, the wire
+  value is a 400. This release does not change that.
+
 ## [3.5.2] - 2026-11-04
 
 ### Fixed

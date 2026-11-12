@@ -3,13 +3,19 @@ package org.opentmf.query.tmf630.jsonb;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonValue;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Locale;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.opentmf.query.tmf630.filtering.TmfFilteringException;
 import org.opentmf.query.tmf630.filtering.TmfOperator;
 import org.opentmf.query.tmf630.filtering.config.IsnullSemantics;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.EnumFeature;
+import tools.jackson.databind.json.JsonMapper;
 
 class JsonbPredicateFactoryTest {
 
@@ -26,6 +32,89 @@ class JsonbPredicateFactoryTest {
 
     JsonbClause ne = factory.build(TmfOperator.NE, "status", String.class, "Cancelled");
     assertThat(ne.sql()).isEqualTo("payload->>'status' <> ?");
+  }
+
+  private enum Color {
+    RED,
+    GREEN
+  }
+
+  private enum Labelled {
+    ONE;
+
+    @Override
+    public String toString() {
+      return "label " + name().toLowerCase(Locale.ROOT);
+    }
+  }
+
+  private enum Status {
+    IN_PROGRESS("inProgress"),
+    DONE("done");
+
+    private final String wire;
+
+    Status(String wire) {
+      this.wire = wire;
+    }
+
+    @JsonValue
+    public String wire() {
+      return wire;
+    }
+  }
+
+  private enum Phase {
+    @JsonProperty("phase-one")
+    ONE
+  }
+
+  @Test
+  @DisplayName("a plain Enum value is bound by the name the mapper writes for it")
+  void plainEnumIsBoundByName() {
+    assertThat(factory.build(TmfOperator.EQ, "c", Color.class, Color.RED).params())
+        .containsExactly("RED");
+    assertThat(factory.build(TmfOperator.NE, "c", Color.class, Color.RED).params())
+        .containsExactly("RED");
+    assertThat(factory.build(TmfOperator.EQI, "c", Color.class, Color.RED).params())
+        .containsExactly("RED");
+    assertThat(
+            factory
+                .buildMulti(TmfOperator.IN, "c", Color.class, List.of(Color.RED, Color.GREEN))
+                .params())
+        .containsExactly("RED", "GREEN");
+    assertThat(
+            factory.buildMulti(TmfOperator.NIN, "c", Color.class, List.of(Color.GREEN)).params())
+        .containsExactly("GREEN");
+  }
+
+  @Test
+  @DisplayName("an Enum with @JsonValue or @JsonProperty is bound by its wire value, not its name")
+  void annotatedEnumIsBoundByWireValue() {
+    assertThat(factory.build(TmfOperator.EQ, "w", Status.class, Status.IN_PROGRESS).params())
+        .containsExactly("inProgress");
+    assertThat(
+            factory
+                .buildMulti(TmfOperator.NIN, "w", Status.class, List.of(Status.DONE))
+                .params())
+        .containsExactly("done");
+    assertThat(factory.build(TmfOperator.NE, "p", Phase.class, Phase.ONE).params())
+        .containsExactly("phase-one");
+  }
+
+  @Test
+  @DisplayName("the mapper decides: Jackson 3 writes toString(), a mapper without that writes name()")
+  void configuredMapperDecidesTheBoundText() {
+    // Jackson 3 enables WRITE_ENUMS_USING_TO_STRING by default, so that is what payloads hold
+    assertThat(factory.build(TmfOperator.EQ, "l", Labelled.class, Labelled.ONE).params())
+        .containsExactly("label one");
+
+    ObjectMapper byName =
+        JsonMapper.builder().disable(EnumFeature.WRITE_ENUMS_USING_TO_STRING).build();
+    JsonbPredicateFactory withMapper =
+        new JsonbPredicateFactory(extractor, IsnullSemantics.MISSING_ONLY, true, byName);
+    assertThat(withMapper.build(TmfOperator.EQ, "l", Labelled.class, Labelled.ONE).params())
+        .containsExactly("ONE");
   }
 
   @Test
