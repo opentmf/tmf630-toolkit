@@ -24,6 +24,8 @@ import tools.jackson.databind.JsonNode;
  *   <li><b>NE, NEI, NIN</b> match a present, non-null value that is not equal (so a value stored in
  *       another JSON type counts as not equal); JSON null and an absent key match neither them nor
  *       the positive operators (SQL three-valued logic, as JPA).
+ *   <li><b>A value no cast reads</b> (a date string that is no date) matches NO operator, the
+ *       negative ones included (the unreadable-value row's ruling (a), 2026-11-12).
  *   <li><b>IS_NULL / IS_NOT_NULL</b> under {@code MISSING_ONLY}: the key absent at the path, or
  *       present (a JSON null is present).
  *   <li><b>LIKE</b> is SQL LIKE ({@code %} any run, {@code _} one character, whole value);
@@ -81,11 +83,18 @@ final class ComboOracle {
     return switch (operator) {
       case IS_NULL -> !found.present();
       case IS_NOT_NULL -> found.present();
-      case NE -> anyValue(found, v -> !positive(TmfOperator.EQ, kind, v, query));
-      case NEI -> anyValue(found, v -> !positive(TmfOperator.EQI, kind, v, query));
-      case NIN -> anyValue(found, v -> !positive(TmfOperator.IN, kind, v, query));
+      case NE -> anyValue(found, v -> readable(kind, v) && !positive(TmfOperator.EQ, kind, v, query));
+      case NEI ->
+          anyValue(found, v -> readable(kind, v) && !positive(TmfOperator.EQI, kind, v, query));
+      case NIN -> anyValue(found, v -> readable(kind, v) && !positive(TmfOperator.IN, kind, v, query));
       default -> anyValue(found, v -> positive(operator, kind, v, query));
     };
+  }
+
+  /** False for a value of the declared JSON type that no cast reads: a date string no date parser reads. */
+  private static boolean readable(ComboKind kind, JsonNode value) {
+    boolean dated = kind.shape() == ComboKind.Shape.DATE || kind.shape() == ComboKind.Shape.INSTANT;
+    return !(dated && value.isString() && typed(kind, value).isEmpty());
   }
 
   private static boolean anyValue(Found found, Predicate<JsonNode> test) {
