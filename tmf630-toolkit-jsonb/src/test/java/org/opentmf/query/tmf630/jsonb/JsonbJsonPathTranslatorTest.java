@@ -262,6 +262,24 @@ class JsonbJsonPathTranslatorTest {
   }
 
   @Test
+  @DisplayName("the in / nin refusal does not fire inside a literal or on a field named like them")
+  void inRefusalSparesLiteralsAndFieldNames() {
+    assertThat(translator.translate("$[?(@.s == 'made in germany')]").params())
+        .containsExactly("$ ? (@.s == \"made in germany\")");
+    assertThat(translator.translate("$[?(@.s == \"nin ['a']\")]").params())
+        .containsExactly("$ ? (@.s == \"nin ['a']\")");
+    JsonbJsonPathTranslator regex = new JsonbJsonPathTranslator(extractor, "payload", true);
+    assertThat(regex.translate("$[?(@.s =~ / in /)]").params())
+        .containsExactly("$ ? (@.s like_regex \" in \")");
+    assertThat(translator.translate("$[?(@.info == 'x')]").params())
+        .containsExactly("$ ? (@.info == \"x\")");
+    assertThat(translator.translate("$[?(@.ninja == 'x')]").params())
+        .containsExactly("$ ? (@.ninja == \"x\")");
+    assertThat(translator.translate("$[?(@.in == 'x' && @.nin == 'y')]").params())
+        .containsExactly("$ ? (@.in == \"x\" && @.nin == \"y\")");
+  }
+
+  @Test
   @DisplayName("!@.field, == null and != null follow isnull MISSING_ONLY: the key absent / present")
   void nullTestsUnderMissingOnly() {
     assertThat(translator.translate("$[?(!@.s)]").params())
