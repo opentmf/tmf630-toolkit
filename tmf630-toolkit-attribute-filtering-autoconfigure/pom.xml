@@ -17,6 +17,13 @@
       <groupId>org.opentmf.query</groupId>
       <artifactId>tmf630-toolkit-attribute-filtering-core</artifactId>
     </dependency>
+    <!-- Optional: the EnumTextReader bean reads enum filter values with the service's mapper
+         when Jackson is on the classpath (@ConditionalOnClass). -->
+    <dependency>
+      <groupId>tools.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+      <optional>true</optional>
+    </dependency>
     <dependency>
       <groupId>org.opentmf.query</groupId>
       <artifactId>tmf630-toolkit-paging-sorting-autoconfigure</artifactId>

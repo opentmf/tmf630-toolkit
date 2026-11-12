@@ -18,6 +18,9 @@ public class ParityDomain {
   private Integer priority;
   private String modifiedBy;
   private String createdOn;
+  private ParityStage stage;
+  private ParityPhase phase;
+  private ParityClash clash;
 
   public String getId() {
     return id;
@@ -57,5 +60,29 @@ public class ParityDomain {
 
   public void setCreatedOn(String createdOn) {
     this.createdOn = createdOn;
+  }
+
+  public ParityStage getStage() {
+    return stage;
+  }
+
+  public void setStage(ParityStage stage) {
+    this.stage = stage;
+  }
+
+  public ParityPhase getPhase() {
+    return phase;
+  }
+
+  public void setPhase(ParityPhase phase) {
+    this.phase = phase;
+  }
+
+  public ParityClash getClash() {
+    return clash;
+  }
+
+  public void setClash(ParityClash clash) {
+    this.clash = clash;
   }
 }

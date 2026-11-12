@@ -34,6 +34,14 @@
       <groupId>com.jayway.jsonpath</groupId>
       <artifactId>json-path</artifactId>
     </dependency>
+    <!-- Optional: only JacksonEnumTextReader uses it, to read an enum filter value the way the
+         service's mapper reads it. The auto-configurations create that reader only when Jackson
+         is on the classpath; ValueConverter itself never touches Jackson. -->
+    <dependency>
+      <groupId>tools.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+      <optional>true</optional>
+    </dependency>
     <dependency>
       <groupId>jakarta.servlet</groupId>
       <artifactId>jakarta.servlet-api</artifactId>

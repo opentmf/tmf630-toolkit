@@ -51,10 +51,22 @@ public class ValueConverter {
   record FormatHint(String format, String example) {}
 
   private final ConversionService conversionService;
+  private final EnumTextReader enumTextReader;
   private final Map<Class<?>, List<Method>> enumFactoryCache = new ConcurrentHashMap<>();
 
+  /** A converter that accepts an enum value by a String factory method or the constant name. */
   public ValueConverter(ConversionService conversionService) {
+    this(conversionService, EnumTextReader.NONE);
+  }
+
+  /**
+   * A converter that, for an enum, also accepts what {@code enumTextReader} reads (the service's
+   * wire value, see {@link JacksonEnumTextReader}) when the factory methods and the constant name
+   * both fail.
+   */
+  public ValueConverter(ConversionService conversionService, EnumTextReader enumTextReader) {
     this.conversionService = conversionService;
+    this.enumTextReader = enumTextReader == null ? EnumTextReader.NONE : enumTextReader;
   }
 
   public Object convert(String rawValue, Class<?> targetType) {
@@ -118,11 +130,26 @@ public class ValueConverter {
     try {
       return Enum.valueOf((Class<Enum>) enumType, rawValue);
     } catch (IllegalArgumentException ex) {
-      String msg = fieldName != null
-          ? FIELD_PREFIX + fieldName + "\" (" + enumType.getSimpleName() + ") could not be parsed from value \"" + rawValue + "\"."
-          : "Failed to convert value '" + rawValue + "' to " + enumType.getSimpleName() + ".";
-      throw new TmfFilteringException(msg, ex);
+      // Neither a factory nor the constant name: the service's wire value, else a 400.
+      return enumTextReader
+          .read(enumType, rawValue)
+          .orElseThrow(() -> unparsableEnum(rawValue, enumType, fieldName, ex));
     }
+  }
+
+  private static TmfFilteringException unparsableEnum(
+      String rawValue, Class<?> enumType, String fieldName, IllegalArgumentException cause) {
+    String msg =
+        fieldName != null
+            ? FIELD_PREFIX
+                + fieldName
+                + "\" ("
+                + enumType.getSimpleName()
+                + ") could not be parsed from value \""
+                + rawValue
+                + "\"."
+            : "Failed to convert value '" + rawValue + "' to " + enumType.getSimpleName() + ".";
+    return new TmfFilteringException(msg, cause);
   }
 
   private List<Method> discoverFactoryMethods(Class<?> enumType) {

@@ -5,7 +5,9 @@ import java.util.ArrayList;
 import java.util.List;
 import org.opentmf.query.tmf630.filtering.advice.Tmf630FilteringExceptionHandler;
 import org.opentmf.query.tmf630.filtering.config.Tmf630FilterSettings;
+import org.opentmf.query.tmf630.filtering.predicate.EnumTextReader;
 import org.opentmf.query.tmf630.filtering.predicate.FieldPathResolver;
+import org.opentmf.query.tmf630.filtering.predicate.JacksonEnumTextReader;
 import org.opentmf.query.tmf630.filtering.predicate.PredicateFactory;
 import org.opentmf.query.tmf630.filtering.predicate.ValueConverter;
 import org.opentmf.query.tmf630.paging.TmfSortKeyValidator;
@@ -17,9 +19,11 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
 import org.springframework.format.support.DefaultFormattingConversionService;
 import org.springframework.web.method.support.HandlerMethodArgumentResolver;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerAdapter;
+import tools.jackson.databind.ObjectMapper;
 
 @AutoConfiguration
 @ConditionalOnClass({Predicate.class, HandlerMethodArgumentResolver.class})
@@ -68,10 +72,32 @@ public class Tmf630AttributeFilteringAutoConfiguration {
     return new FieldPathResolver();
   }
 
+  /**
+   * The converter of URL text into typed filter values. For an enum it also reads the service's
+   * wire value ({@code inProgress} for {@code IN_PROGRESS}) through the {@link EnumTextReader}
+   * bean, which {@link JacksonEnumTextReaderConfiguration} provides when Jackson is present.
+   */
   @Bean
   @ConditionalOnMissingBean
-  public ValueConverter tmf630ValueConverter() {
-    return new ValueConverter(new DefaultFormattingConversionService());
+  public ValueConverter tmf630ValueConverter(ObjectProvider<EnumTextReader> enumTextReader) {
+    return new ValueConverter(
+        new DefaultFormattingConversionService(),
+        enumTextReader.getIfAvailable(() -> EnumTextReader.NONE));
+  }
+
+  /**
+   * Reads enum filter values with the context's {@link ObjectMapper} (the one the service writes
+   * its payloads with); without one, a default {@code JsonMapper}.
+   */
+  @Configuration(proxyBeanMethods = false)
+  @ConditionalOnClass(name = "tools.jackson.databind.ObjectMapper")
+  static class JacksonEnumTextReaderConfiguration {
+
+    @Bean
+    @ConditionalOnMissingBean
+    EnumTextReader tmf630EnumTextReader(ObjectProvider<ObjectMapper> objectMapper) {
+      return new JacksonEnumTextReader(objectMapper.getIfAvailable());
+    }
   }
 
   @Bean
