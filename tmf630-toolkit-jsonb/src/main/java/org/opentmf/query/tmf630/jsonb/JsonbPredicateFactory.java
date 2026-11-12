@@ -15,6 +15,11 @@ import tools.jackson.databind.json.JsonMapper;
  * payload column. Ships all 24 {@code TmfOperator} values per the mapping table in
  * {@code docs/JSONB_BACKEND_DESIGN.md} §5.
  *
+ * <p>{@code contains}, {@code startswith}, {@code endswith} and their case-insensitive forms
+ * match their value literally: {@code %}, {@code _} and {@code !} in it are escaped under
+ * {@code ESCAPE '!'}, as on the QueryDSL terminal (since 3.6.0; before, they were wildcards and a
+ * backslash was PostgreSQL's implicit escape). {@code like} / {@code likei} take a pattern.
+ *
  * <p>Regex uses Postgres native operators ({@code ~} / {@code ~*}), closing the JPA
  * gap #11 (see {@code docs/JPA_BACKEND_GAP_ANALYSIS.md} §3.6). Type coercion via
  * {@link JsonbCast} — the caller passes the domain-model Java type of the field;
@@ -166,12 +171,12 @@ public class JsonbPredicateFactory {
       case LTE -> JsonbClause.of(castedLhs + " <= ?" + cast.suffix(), value);
       case LIKE -> JsonbClause.of(text + " LIKE ?", value);
       case LIKEI -> JsonbClause.of(text + " ILIKE ?", value);
-      case CONTAINS -> JsonbClause.of(text + " LIKE '%' || ? || '%'", value);
-      case CONTAINSI -> JsonbClause.of(text + " ILIKE '%' || ? || '%'", value);
-      case STARTS_WITH -> JsonbClause.of(text + " LIKE ? || '%'", value);
-      case STARTS_WITHI -> JsonbClause.of(text + " ILIKE ? || '%'", value);
-      case ENDS_WITH -> JsonbClause.of(text + " LIKE '%' || ?", value);
-      case ENDS_WITHI -> JsonbClause.of(text + " ILIKE '%' || ?", value);
+      case CONTAINS -> literalLike(text, " LIKE '%' || ? || '%'", value);
+      case CONTAINSI -> literalLike(text, " ILIKE '%' || ? || '%'", value);
+      case STARTS_WITH -> literalLike(text, " LIKE ? || '%'", value);
+      case STARTS_WITHI -> literalLike(text, " ILIKE ? || '%'", value);
+      case ENDS_WITH -> literalLike(text, " LIKE '%' || ?", value);
+      case ENDS_WITHI -> literalLike(text, " ILIKE '%' || ?", value);
       case REGEX -> {
         requireRegexEnabled();
         yield JsonbClause.of(text + " ~ ?", String.valueOf(value));
@@ -221,6 +226,18 @@ public class JsonbPredicateFactory {
   }
 
   // --- helpers ---
+
+  /**
+   * A substring operator ({@code contains}, {@code startswith}, {@code endswith} and the
+   * case-insensitive forms): {@code value} is matched literally, its {@code %}, {@code _} and
+   * {@code !} escaped under an explicit {@code ESCAPE '!'}, and only the operator's own
+   * {@code '%'} is a wildcard. {@code like} / {@code likei} bind their value as the pattern.
+   */
+  private static JsonbClause literalLike(String text, String operatorAndPattern, Object value) {
+    return JsonbClause.of(
+        text + operatorAndPattern + " ESCAPE '" + JsonbStringEscape.LIKE_ESCAPE + "'",
+        JsonbStringEscape.escapeLikeValue(String.valueOf(value)));
+  }
 
   /**
    * The value as the JDBC driver can bind it and as the payload holds it: an {@link Enum} by the

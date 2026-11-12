@@ -478,6 +478,10 @@ explicit operator) to transmit a literal semicolon.
 **26 operators total**, when the case-insensitive variants and multi-value operators are
 counted separately.
 
+`contains`, `startswith`, `endswith` and their `i` forms match their value literally on every
+backend: `surname.contains=50%` finds "50% off", not "500 off", and a `_` or a backslash in the
+value is a plain character. `like` and `likei` take a pattern, in which `%` and `_` are wildcards.
+
 #### URL-encoded operator literal forms (TMF-630 Part 1 §4.4)
 
 Per TMF-630 Part 1 §4.4, the operator can also be embedded in the parameter *name*
