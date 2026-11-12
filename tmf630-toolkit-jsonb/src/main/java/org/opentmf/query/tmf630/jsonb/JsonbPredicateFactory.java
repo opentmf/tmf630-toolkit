@@ -202,10 +202,10 @@ public class JsonbPredicateFactory {
   }
 
   private Optional<JsonbClause> containment(String fieldPath, Class<?> targetType, Object value) {
-    String payloadColumn = extractor.payloadColumn();
+    String test = extractor.containsJsonb();
     return containment
         .fragment(extractor.segments(fieldPath), targetType, value)
-        .map(fragment -> JsonbClause.of(payloadColumn + " @> ?::jsonb", fragment));
+        .map(fragment -> JsonbClause.of(test, fragment));
   }
 
   private Optional<JsonbClause> containmentAnyOf(

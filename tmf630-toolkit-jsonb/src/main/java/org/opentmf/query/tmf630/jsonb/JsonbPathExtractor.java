@@ -75,9 +75,12 @@ public final class JsonbPathExtractor {
     return payloadColumn + " ?? '" + segments[0] + "'";
   }
 
-  /** The payload column the fragments read. */
-  public String payloadColumn() {
-    return payloadColumn;
+  /**
+   * The containment test of the payload against a JSON fragment bound as the one parameter:
+   * {@code payload @> ?::jsonb}.
+   */
+  String containsJsonb() {
+    return payloadColumn + " @> ?::jsonb";
   }
 
   /** The validated segments of {@code dottedPath}, as the extraction fragments use them. */
