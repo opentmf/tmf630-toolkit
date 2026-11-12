@@ -71,6 +71,7 @@ import org.opentmf.query.tmf630.filtering.config.IsnullSemantics;
 public class JsonbJsonPathTranslator {
 
   private static final String LENGTH_SUFFIX = ".length";
+  private static final String EXISTS = "exists(";
 
   private final JsonbPathExtractor extractor;
   private final String payloadColumn;
@@ -457,8 +458,8 @@ public class JsonbJsonPathTranslator {
 
   private String someValue(String path) {
     return isnullSemantics == IsnullSemantics.NULLISH
-        ? "exists(" + path + " ? (@ != null))"
-        : "exists(" + path + ")";
+        ? EXISTS + path + " ? (@ != null))"
+        : EXISTS + path + ")";
   }
 
   /** End of the path starting at {@code i}: field characters and positional {@code [N]} / {@code [*]}. */
@@ -649,7 +650,7 @@ public class JsonbJsonPathTranslator {
 
     /** Ends the path with {@code filter} and wraps the whole path in {@code exists(...)}. */
     void closePathInExists(String filter) {
-      text.insert(pathStart, "exists(").append(filter).append(')');
+      text.insert(pathStart, EXISTS).append(filter).append(')');
       pathStart = -1;
     }
 
