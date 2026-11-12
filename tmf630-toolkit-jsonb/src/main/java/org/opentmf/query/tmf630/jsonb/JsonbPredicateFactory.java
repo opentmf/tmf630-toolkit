@@ -1,9 +1,13 @@
 package org.opentmf.query.tmf630.jsonb;
 
 import java.util.List;
+import java.util.Optional;
 import org.opentmf.query.tmf630.filtering.TmfFilteringException;
 import org.opentmf.query.tmf630.filtering.TmfOperator;
 import org.opentmf.query.tmf630.filtering.config.IsnullSemantics;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Translates a {@link TmfOperator} + field-path + typed value(s) into a
@@ -16,6 +20,20 @@ import org.opentmf.query.tmf630.filtering.config.IsnullSemantics;
  * {@link JsonbCast} — the caller passes the domain-model Java type of the field;
  * numeric / date comparisons cast the extracted text before the comparator.
  *
+ * <p>An {@link Enum} value is bound by what the payload holds for that constant: the value the
+ * service's {@link ObjectMapper} writes for it, so {@code @JsonValue}, {@code @JsonProperty} on the
+ * constants and the mapper's enum features all apply (constant {@code IN_PROGRESS} with wire value
+ * {@code "inProgress"} is bound as {@code "inProgress"}). The JDBC driver cannot send an enum
+ * constant itself. Without the service's mapper, a default {@link JsonMapper} decides: it honours
+ * the annotations, not the service's own configuration. Note that Jackson 3 writes an enum by its
+ * {@code toString()} by default ({@code EnumFeature.WRITE_ENUMS_USING_TO_STRING}), which equals
+ * {@link Enum#name()} unless the enum overrides it.
+ *
+ * <p>{@link #buildOnObjectPath} / {@link #buildMultiOnObjectPath} emit {@code EQ} / {@code IN} on
+ * an object path as containment, {@code payload @> ?::jsonb}, which a GIN index on the payload
+ * serves (since 3.6.0; the URL grammar uses them). {@link #build} / {@link #buildMulti} keep the
+ * extraction for every operator.
+ *
  * <p>{@link IsnullSemantics#NULLISH} widens {@code IS_NULL}/{@code IS_NOT_NULL} to
  * include explicit JSON {@code null} values in addition to missing-key checks — per
  * §5.1 of the design doc, using an AND-of-complements form on the {@code IS_NOT_NULL}
@@ -24,22 +42,81 @@ import org.opentmf.query.tmf630.filtering.config.IsnullSemantics;
  */
 public class JsonbPredicateFactory {
 
+  private static final ObjectMapper DEFAULT_MAPPER = JsonMapper.builder().build();
+
   private final JsonbPathExtractor extractor;
   private final IsnullSemantics isnullSemantics;
   private final boolean regexEnabled;
+  private final JsonbContainment containment;
 
+  /** A factory that writes enum values with a default {@link JsonMapper}. */
   public JsonbPredicateFactory(
       JsonbPathExtractor extractor,
       IsnullSemantics isnullSemantics,
       boolean regexEnabled) {
+    this(extractor, isnullSemantics, regexEnabled, null);
+  }
+
+  /**
+   * A factory that writes enum values with {@code mapper}, the mapper the service stores its
+   * payloads with; {@code null} means a default {@link JsonMapper}.
+   */
+  public JsonbPredicateFactory(
+      JsonbPathExtractor extractor,
+      IsnullSemantics isnullSemantics,
+      boolean regexEnabled,
+      ObjectMapper mapper) {
     this.extractor = extractor;
     this.isnullSemantics = isnullSemantics == null ? IsnullSemantics.MISSING_ONLY : isnullSemantics;
     this.regexEnabled = regexEnabled;
+    this.containment = new JsonbContainment(mapper == null ? DEFAULT_MAPPER : mapper);
+  }
+
+  /**
+   * {@link #build} for a field whose every path step is an object field: no array on the way and
+   * no positional index. {@code EQ} on a String, CharSequence, Enum, integer, decimal or Boolean
+   * field is emitted as containment, {@code payload @> ?::jsonb}, with the value nested under the
+   * path in the JSON type the field declares; a GIN index on the payload serves it.
+   *
+   * <p>Containment is type-exact, as on the Mongo backend: it finds the value stored in the JSON
+   * type the field declares, not one stored in another (a String field holding the number
+   * {@code 42} is not found by {@code "42"}; an Integer field holding the string {@code "42"} is not
+   * found by {@code 42}), and a value no cast can read no longer fails the query. Every other
+   * operator, the date-time types, any other type and a {@code null} value are exactly
+   * {@link #build}.
+   */
+  public JsonbClause buildOnObjectPath(
+      TmfOperator operator, String fieldPath, Class<?> targetType, Object value) {
+    if (operator == TmfOperator.EQ) {
+      Optional<JsonbClause> contained = containment(fieldPath, targetType, value);
+      if (contained.isPresent()) {
+        return contained.get();
+      }
+    }
+    return build(operator, fieldPath, targetType, value);
+  }
+
+  /**
+   * {@link #buildMulti} for a field whose every path step is an object field: {@code IN} is an
+   * {@code OR} of containment fragments, one per value, when every value has one (see
+   * {@link #buildOnObjectPath}); otherwise, and for every other operator, exactly
+   * {@link #buildMulti}.
+   */
+  public JsonbClause buildMultiOnObjectPath(
+      TmfOperator operator, String fieldPath, Class<?> targetType, List<Object> values) {
+    if (operator == TmfOperator.IN && values != null && !values.isEmpty()) {
+      Optional<JsonbClause> anyOf = containmentAnyOf(fieldPath, targetType, values);
+      if (anyOf.isPresent()) {
+        return anyOf.get();
+      }
+    }
+    return buildMulti(operator, fieldPath, targetType, values);
   }
 
   /** Single-value operator (EQ/NE/EQI/NEI/GT/GTE/LT/LTE/LIKE/LIKEI/CONTAINS/CONTAINSI/ */
   public JsonbClause build(
-      TmfOperator operator, String fieldPath, Class<?> targetType, Object value) {
+      TmfOperator operator, String fieldPath, Class<?> targetType, Object rawValue) {
+    Object value = bindable(rawValue);
     String text = extractor.extractAsText(fieldPath);
     JsonbCast cast = JsonbCast.forJavaType(targetType);
     // Parenthesise the extraction before applying the cast — Postgres's :: binds
@@ -82,11 +159,12 @@ public class JsonbPredicateFactory {
 
   /** Multi-value operator: IN, NIN, BETWEEN. */
   public JsonbClause buildMulti(
-      TmfOperator operator, String fieldPath, Class<?> targetType, List<Object> values) {
-    if (values == null || values.isEmpty()) {
+      TmfOperator operator, String fieldPath, Class<?> targetType, List<Object> rawValues) {
+    if (rawValues == null || rawValues.isEmpty()) {
       throw new TmfFilteringException(
           "Multi-value operator '" + operator.suffix() + "' requires at least one value.");
     }
+    List<Object> values = rawValues.stream().map(this::bindable).toList();
     String text = extractor.extractAsText(fieldPath);
     JsonbCast cast = JsonbCast.forJavaType(targetType);
     return switch (operator) {
@@ -111,6 +189,37 @@ public class JsonbPredicateFactory {
   }
 
   // --- helpers ---
+
+  /**
+   * The value as the JDBC driver can bind it and as the payload holds it: an {@link Enum} by the
+   * text the mapper writes for it ({@link Enum#name()} when the mapper writes no scalar).
+   */
+  private Object bindable(Object value) {
+    if (!(value instanceof Enum<?> constant)) {
+      return value;
+    }
+    return containment.writtenEnum(constant).map(JsonNode::asString).orElse(constant.name());
+  }
+
+  private Optional<JsonbClause> containment(String fieldPath, Class<?> targetType, Object value) {
+    String test = extractor.containsJsonb();
+    return containment
+        .fragment(extractor.segments(fieldPath), targetType, value)
+        .map(fragment -> JsonbClause.of(test, fragment));
+  }
+
+  private Optional<JsonbClause> containmentAnyOf(
+      String fieldPath, Class<?> targetType, List<Object> values) {
+    JsonbClause anyOf = JsonbClause.alwaysFalse();
+    for (Object value : values) {
+      Optional<JsonbClause> one = containment(fieldPath, targetType, value);
+      if (one.isEmpty()) {
+        return Optional.empty();
+      }
+      anyOf = anyOf.or(one.get());
+    }
+    return Optional.of(anyOf);
+  }
 
   private JsonbClause inClause(String text, JsonbCast cast, List<Object> values, boolean negate) {
     String lhs = cast == JsonbCast.TEXT ? text : "(" + text + ")" + cast.suffix();

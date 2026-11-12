@@ -105,13 +105,18 @@ public class Tmf630JsonbAutoConfiguration {
   @Bean
   @ConditionalOnMissingBean
   public JsonbPredicateFactory tmf630JsonbPredicateFactory(
-      JsonbPathExtractor extractor, ObjectProvider<Tmf630FilterSettings> filterSettings) {
+      JsonbPathExtractor extractor,
+      ObjectProvider<Tmf630FilterSettings> filterSettings,
+      ObjectProvider<ObjectMapper> objectMapper) {
     Tmf630FilterSettings settings = filterSettings.getIfAvailable();
     boolean regexEnabled = settings != null && settings.regexEnabled();
+    // The service's mapper writes the payloads, so it decides an enum's stored form; without
+    // one the factory falls back to a default mapper.
     return new JsonbPredicateFactory(
         extractor,
         settings != null ? settings.isnullSemantics() : null,
-        regexEnabled);
+        regexEnabled,
+        objectMapper.getIfAvailable());
   }
 
   @Bean

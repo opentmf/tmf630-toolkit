@@ -3,13 +3,23 @@ package org.opentmf.query.tmf630.jsonb;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonValue;
+import java.math.BigDecimal;
+import java.math.BigInteger;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Locale;
+import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.opentmf.query.tmf630.filtering.TmfFilteringException;
 import org.opentmf.query.tmf630.filtering.TmfOperator;
 import org.opentmf.query.tmf630.filtering.config.IsnullSemantics;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.EnumFeature;
+import tools.jackson.databind.json.JsonMapper;
 
 class JsonbPredicateFactoryTest {
 
@@ -26,6 +36,176 @@ class JsonbPredicateFactoryTest {
 
     JsonbClause ne = factory.build(TmfOperator.NE, "status", String.class, "Cancelled");
     assertThat(ne.sql()).isEqualTo("payload->>'status' <> ?");
+  }
+
+  private enum Color {
+    RED,
+    GREEN
+  }
+
+  private enum Labelled {
+    ONE;
+
+    @Override
+    public String toString() {
+      return "label " + name().toLowerCase(Locale.ROOT);
+    }
+  }
+
+  private enum Status {
+    IN_PROGRESS("inProgress"),
+    DONE("done");
+
+    private final String wire;
+
+    Status(String wire) {
+      this.wire = wire;
+    }
+
+    @JsonValue
+    public String wire() {
+      return wire;
+    }
+  }
+
+  private enum Phase {
+    @JsonProperty("phase-one")
+    ONE
+  }
+
+  @Test
+  @DisplayName("a plain Enum value is bound by the name the mapper writes for it")
+  void plainEnumIsBoundByName() {
+    assertThat(factory.build(TmfOperator.EQ, "c", Color.class, Color.RED).params())
+        .containsExactly("RED");
+    assertThat(factory.build(TmfOperator.NE, "c", Color.class, Color.RED).params())
+        .containsExactly("RED");
+    assertThat(factory.build(TmfOperator.EQI, "c", Color.class, Color.RED).params())
+        .containsExactly("RED");
+    assertThat(
+            factory
+                .buildMulti(TmfOperator.IN, "c", Color.class, List.of(Color.RED, Color.GREEN))
+                .params())
+        .containsExactly("RED", "GREEN");
+    assertThat(
+            factory.buildMulti(TmfOperator.NIN, "c", Color.class, List.of(Color.GREEN)).params())
+        .containsExactly("GREEN");
+  }
+
+  @Test
+  @DisplayName("an Enum with @JsonValue or @JsonProperty is bound by its wire value, not its name")
+  void annotatedEnumIsBoundByWireValue() {
+    assertThat(factory.build(TmfOperator.EQ, "w", Status.class, Status.IN_PROGRESS).params())
+        .containsExactly("inProgress");
+    assertThat(
+            factory
+                .buildMulti(TmfOperator.NIN, "w", Status.class, List.of(Status.DONE))
+                .params())
+        .containsExactly("done");
+    assertThat(factory.build(TmfOperator.NE, "p", Phase.class, Phase.ONE).params())
+        .containsExactly("phase-one");
+  }
+
+  @Test
+  @DisplayName("the mapper decides: Jackson 3 writes toString(), a mapper without that writes name()")
+  void configuredMapperDecidesTheBoundText() {
+    // Jackson 3 enables WRITE_ENUMS_USING_TO_STRING by default, so that is what payloads hold
+    assertThat(factory.build(TmfOperator.EQ, "l", Labelled.class, Labelled.ONE).params())
+        .containsExactly("label one");
+
+    ObjectMapper byName =
+        JsonMapper.builder().disable(EnumFeature.WRITE_ENUMS_USING_TO_STRING).build();
+    JsonbPredicateFactory withMapper =
+        new JsonbPredicateFactory(extractor, IsnullSemantics.MISSING_ONLY, true, byName);
+    assertThat(withMapper.build(TmfOperator.EQ, "l", Labelled.class, Labelled.ONE).params())
+        .containsExactly("ONE");
+  }
+
+  private static final String CONTAINS = "payload @> ?::jsonb";
+
+  @Test
+  @DisplayName("EQ on an object path is containment, the value in the field's own JSON type")
+  void equalityOnAnObjectPathIsContainment() {
+    assertContainment(factory.buildOnObjectPath(TmfOperator.EQ, "a.b", String.class, "x"),
+        "{\"a\":{\"b\":\"x\"}}");
+    assertContainment(factory.buildOnObjectPath(TmfOperator.EQ, "n", Integer.class, 42),
+        "{\"n\":42}");
+    assertContainment(factory.buildOnObjectPath(TmfOperator.EQ, "n", short.class, (short) 7),
+        "{\"n\":7}");
+    assertContainment(factory.buildOnObjectPath(TmfOperator.EQ, "n", Byte.class, (byte) 1),
+        "{\"n\":1}");
+    assertContainment(
+        factory.buildOnObjectPath(
+            TmfOperator.EQ, "n", BigInteger.class, new BigInteger("9007199254740993")),
+        "{\"n\":9007199254740993}");
+    assertContainment(
+        factory.buildOnObjectPath(TmfOperator.EQ, "d", BigDecimal.class, new BigDecimal("1.50")),
+        "{\"d\":1.50}");
+    assertContainment(factory.buildOnObjectPath(TmfOperator.EQ, "d", Double.class, 0.1),
+        "{\"d\":0.1}");
+    assertContainment(factory.buildOnObjectPath(TmfOperator.EQ, "d", float.class, 0.1f),
+        "{\"d\":0.1}");
+    assertContainment(factory.buildOnObjectPath(TmfOperator.EQ, "b", Boolean.class, true),
+        "{\"b\":true}");
+    assertContainment(
+        factory.buildOnObjectPath(TmfOperator.EQ, "w", Status.class, Status.IN_PROGRESS),
+        "{\"w\":\"inProgress\"}");
+    assertContainment(
+        factory.buildOnObjectPath(TmfOperator.EQ, "q", String.class, "a\"b"),
+        "{\"q\":\"a\\\"b\"}");
+  }
+
+  @Test
+  @DisplayName("EQ keeps the extraction for date-times, other types, NaN, [N] and other operators")
+  void equalityKeepsTheExtractionWhereContainmentWouldDiffer() {
+    assertThat(
+            factory
+                .buildOnObjectPath(TmfOperator.EQ, "ld", LocalDate.class, LocalDate.of(2025, 1, 1))
+                .sql())
+        .isEqualTo("(payload->>'ld')::date = ?::date");
+    assertThat(
+            factory
+                .buildOnObjectPath(TmfOperator.EQ, "u", UUID.class, UUID.randomUUID())
+                .sql())
+        .isEqualTo("payload->>'u' = ?");
+    assertThat(factory.buildOnObjectPath(TmfOperator.EQ, "d", Double.class, Double.NaN).sql())
+        .isEqualTo("(payload->>'d')::numeric = ?::numeric");
+    assertThat(factory.buildOnObjectPath(TmfOperator.EQ, "items.0.b", String.class, "x").sql())
+        .isEqualTo("payload#>>'{items,0,b}' = ?");
+    assertThat(factory.buildOnObjectPath(TmfOperator.NE, "s", String.class, "x").sql())
+        .isEqualTo("payload->>'s' <> ?");
+    assertThat(factory.buildOnObjectPath(TmfOperator.EQ, "n", Integer.class, "42").sql())
+        .as("a value not of the declared type keeps the extraction")
+        .isEqualTo("(payload->>'n')::bigint = ?::bigint");
+  }
+
+  @Test
+  @DisplayName("IN on an object path is an OR of fragments; NIN and an ineligible value keep IN")
+  void inOnAnObjectPathIsAnOrOfFragments() {
+    JsonbClause two =
+        factory.buildMultiOnObjectPath(TmfOperator.IN, "s", String.class, List.of("x", "y"));
+    assertThat(two.sql()).isEqualTo("(" + CONTAINS + " OR " + CONTAINS + ")");
+    assertThat(two.params()).containsExactly("{\"s\":\"x\"}", "{\"s\":\"y\"}");
+
+    assertContainment(
+        factory.buildMultiOnObjectPath(TmfOperator.IN, "s", String.class, List.of("x")),
+        "{\"s\":\"x\"}");
+    assertThat(
+            factory
+                .buildMultiOnObjectPath(
+                    TmfOperator.IN, "d", Double.class, List.of(0.1, Double.NaN))
+                .sql())
+        .isEqualTo("(payload->>'d')::numeric IN (?::numeric, ?::numeric)");
+    assertThat(
+            factory
+                .buildMultiOnObjectPath(TmfOperator.NIN, "s", String.class, List.of("x"))
+                .sql())
+        .isEqualTo("payload->>'s' NOT IN (?)");
+  }
+
+  private static void assertContainment(JsonbClause clause, String fragment) {
+    assertThat(clause.sql()).isEqualTo(CONTAINS);
+    assertThat(clause.params()).containsExactly(fragment);
   }
 
   @Test

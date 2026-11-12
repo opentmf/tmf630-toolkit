@@ -2,7 +2,52 @@
 
 All notable changes to `tmf630-toolkit` are documented in this file.
 
-## [3.5.3] - 2026-11-12
+## [3.6.0] - 2026-11-12
+
+### Changed (JSONB equality is served by the GIN index)
+
+- **On JSONB, `EQ` and `IN` on an object path are now a containment test, which a GIN index
+  on the payload serves.**
+  - Before: a URL equality such as `?receiver.postalAddress.city=Berlin` or `?status.in=A,B` was
+    emitted as an extraction, `payload#>>'{receiver,postalAddress,city}' = ?`, cast by the
+    field's type. No GIN index serves that, so every equality filter read the whole table
+    unless the field had its own expression index.
+  - Now, when every step of the path is an object field (no collection on the way, no
+    positional `[N]`) and the field is a String or CharSequence, an enum, an integer or decimal
+    type, or a Boolean:
+    - `EQ` is `payload @> ?::jsonb`, with the value nested under the path:
+      `{"receiver":{"postalAddress":{"city":"Berlin"}}}`;
+    - `IN` is an `OR` of such fragments.
+- **Containment is type-exact, as on the Mongo backend.** A row whose stored JSON type differs
+  from the field's declared type is no longer found. `Tmf630JsonbEqualityParityIT` pins each
+  case with both row sets:
+  - a String field holding the number `42`, the boolean `true` or the number `42.0`:
+    `?s=42`, `?s=true` and `?s=42.0` found it, and no longer do;
+  - an Integer field holding the string `"42"` or `" 42"`: no longer found by `?n=42`;
+  - a BigDecimal field holding the string `"1.5"`: no longer found by `?d=1.5`;
+  - a Boolean field holding `"true"`, `"yes"` or `1`: no longer found by `?b=true`.
+- **Unchanged:**
+  - a value stored in the declared type is found as before; a decimal compares by value, so
+    `1.5` finds `1.50`;
+  - a JSON `null`, or an array where the path expects an object, was found neither before nor
+    now.
+- **The 500 goes away.** If any row of an Integer field held a value the `bigint` cast cannot
+  read (`"abc"`, or `42.0`), every equality on that field failed with HTTP 500. Containment
+  reads no row's text, so `?n=42` now finds the rows holding `42` and `42.0`, and passes over
+  `"abc"`.
+- **These keep the extraction, unchanged:**
+  - the date-time types: they are strings in the payload, so containment would compare text
+    and miss `…+02:00` or `.000Z` forms of the same instant; they still match by instant;
+  - every other type (`UUID`, `Object`, `Map`, …);
+  - a path through a collection or with `[N]`;
+  - `NE`, `NIN`, the ranges, the case-insensitive and the pattern operators;
+  - the factory's own `build` and `buildMulti`. The new methods are `buildOnObjectPath` and
+    `buildMultiOnObjectPath`, and the URL grammar uses them.
+- **An expression index created for an equality no longer serves it.** Take
+  `((payload->>'status'))`: it still serves the forms that extract (ranges, `NE`,
+  case-insensitive), but not `?status=X`, which now needs the GIN index on the payload. A
+  service that indexed equality fields only with expression indexes will scan for those
+  filters after this change. Create `GIN (payload jsonb_path_ops)`.
 
 ### Fixed (JSONB `filter=` and the GIN index)
 
@@ -65,6 +110,29 @@ All notable changes to `tmf630-toolkit` are documented in this file.
     worked and keeps its form.
   - Split collections were never affected: their decomposer strips the wrapper before
     translation.
+
+### Fixed (JSONB filters on an enum field)
+
+- **On JSONB, a filter on a field declared as an enum no longer fails.** The defect has been
+  there since 3.0.0. `EQ`, `NE`, `IN`, `NIN`, the ranges and the `LIKE` family all bound the enum
+  constant itself. The PostgreSQL driver refuses that ("Can't infer the SQL type to use for an
+  instance of …"), so the request failed with an unhandled `BadSqlGrammarException` (HTTP 500).
+  `.eqi` and `.nei` ran, but they bound `toString()`, and against an enum stored by a wire
+  value they found nothing.
+- **The value is now bound as the payload holds it:** the text that the service's
+  `ObjectMapper` writes for that constant.
+  - A `@JsonValue` or `@JsonProperty` wire value applies. A generated TMF enum with constant
+    `IN_PROGRESS` and stored value `"inProgress"` is bound as `"inProgress"`.
+  - Jackson 3 writes an enum with `toString()` by default (`EnumFeature.WRITE_ENUMS_USING_TO_STRING`),
+    so an overridden `toString()` applies too.
+  - The auto-configuration passes the context's mapper through the new constructor
+    `JsonbPredicateFactory(extractor, isnullSemantics, regexEnabled, ObjectMapper)`. With the
+    old constructor, or without a mapper bean, a default `JsonMapper` decides: it honours the
+    annotations, not the service's own configuration.
+- **What a URL can name.** A URL still names an enum by its constant (`?state=IN_PROGRESS`).
+  It can use the wire value (`?state=inProgress`) only when the enum has a public static
+  `String` factory, such as the `fromValue` that OpenAPI generators emit. Without one, the wire
+  value is a 400. This release does not change that.
 
 ## [3.5.2] - 2026-11-04
 

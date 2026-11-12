@@ -75,6 +75,19 @@ public final class JsonbPathExtractor {
     return payloadColumn + " ?? '" + segments[0] + "'";
   }
 
+  /**
+   * The containment test of the payload against a JSON fragment bound as the one parameter:
+   * {@code payload @> ?::jsonb}.
+   */
+  String containsJsonb() {
+    return payloadColumn + " @> ?::jsonb";
+  }
+
+  /** The validated segments of {@code dottedPath}, as the extraction fragments use them. */
+  String[] segments(String dottedPath) {
+    return validateAndSplit(dottedPath);
+  }
+
   private static String[] validateAndSplit(String dottedPath) {
     if (dottedPath == null || dottedPath.isBlank()) {
       throw new IllegalArgumentException("dottedPath must not be blank");
