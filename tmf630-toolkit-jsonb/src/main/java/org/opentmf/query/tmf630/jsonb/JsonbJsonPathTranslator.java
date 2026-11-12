@@ -1,6 +1,12 @@
 package org.opentmf.query.tmf630.jsonb;
 
+import com.jayway.jsonpath.internal.filter.RelationalOperator;
+import java.util.Arrays;
+import java.util.EnumSet;
+import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
 import org.opentmf.query.tmf630.filtering.TmfFilteringException;
 import org.opentmf.query.tmf630.filtering.config.IsnullSemantics;
 
@@ -47,8 +53,10 @@ import org.opentmf.query.tmf630.filtering.config.IsnullSemantics;
  *       NULLISH a JSON null counts as no value too ({@code exists(@.field ? (@ != null))}).
  *       Before 3.6.0 {@code !@.field} was a jsonpath syntax error and {@code == null} matched only
  *       a stored JSON null. A negated array match ({@code !@.arr[?(…)]}) is the core's 400.
- *   <li>{@code in} / {@code nin} are the core's 400 ("Unsupported token in jsonPath filter
- *       near: …"): they are not part of the toolkit's {@code filter=} grammar.
+ *   <li>The JsonPath library's operators the toolkit's {@code filter=} grammar does not have
+ *       ({@code in}, {@code nin}, {@code size}, {@code empty}, {@code contains}, …, {@code ===})
+ *       are the core's 400 ("Unsupported token in jsonPath filter near: …"), read from Jayway's
+ *       operator enum so the two cannot drift.
  *   <li>{@code =~ /pattern/} and {@code =~ /pattern/i} (TMF-630 Part 6 regex) →
  *       {@code like_regex "pattern"} / {@code like_regex "pattern" flag "i"}. Postgres
  *       evaluates {@code like_regex} with the same POSIX engine as the {@code ~} operator the
@@ -72,6 +80,37 @@ public class JsonbJsonPathTranslator {
 
   private static final String LENGTH_SUFFIX = ".length";
   private static final String EXISTS = "exists(";
+
+  // RelationalOperator lives in Jayway's `internal` package: it is the one place the library
+  // lists its filter operators, so the refusal below follows the library the core validates
+  // with. A Jayway upgrade that moves it fails this module's compile, deliberately.
+  /** The comparison operators of the toolkit's {@code filter=} grammar. */
+  private static final Set<RelationalOperator> SUPPORTED =
+      EnumSet.of(
+          RelationalOperator.EQ,
+          RelationalOperator.NE,
+          RelationalOperator.GT,
+          RelationalOperator.GTE,
+          RelationalOperator.LT,
+          RelationalOperator.LTE,
+          RelationalOperator.REGEX);
+
+  /** Jayway's word operators the grammar does not have, lower-cased. */
+  private static final List<String> UNSUPPORTED_WORDS =
+      Arrays.stream(RelationalOperator.values())
+          .filter(op -> !SUPPORTED.contains(op))
+          .map(RelationalOperator::toString)
+          .filter(text -> text.chars().allMatch(Character::isLetter))
+          .map(text -> text.toLowerCase(Locale.ROOT))
+          .toList();
+
+  /** Jayway's symbol operators the grammar does not have ({@code ===}, {@code !==}). */
+  private static final List<String> UNSUPPORTED_SYMBOLS =
+      Arrays.stream(RelationalOperator.values())
+          .filter(op -> !SUPPORTED.contains(op))
+          .map(RelationalOperator::toString)
+          .filter(text -> text.chars().noneMatch(Character::isLetter))
+          .toList();
 
   private final JsonbPathExtractor extractor;
   private final String payloadColumn;
@@ -382,7 +421,7 @@ public class JsonbJsonPathTranslator {
         return nullTest;
       }
     }
-    refuseInOperator(input, i);
+    refuseUnsupportedOperator(input, i);
     if (c == '\'' || c == '"') {
       out.endPath();
       return translateQuotedLiteral(input, i, out.text());
@@ -443,13 +482,47 @@ public class JsonbJsonPathTranslator {
     return literal + "null".length() - i;
   }
 
-  /** {@code in} / {@code nin} are not part of the toolkit's filter= grammar: the core's 400. */
-  private static void refuseInOperator(String input, int i) {
-    boolean wordStart = i == 0 || isSpace(input.charAt(i - 1));
-    if (wordStart && (startsWithWord(input, i, "in") || startsWithWord(input, i, "nin"))) {
-      throw new TmfFilteringException(
-          "Unsupported token in jsonPath filter near: " + input.substring(i));
+  /**
+   * The JsonPath library's operators that are not part of the toolkit's {@code filter=} grammar
+   * ({@code in}, {@code nin}, {@code size}, {@code empty}, {@code contains}, {@code anyof},
+   * {@code noneof}, {@code subsetof}, {@code all}, {@code exists}, {@code type}, {@code matches},
+   * {@code ===}, {@code !==}) are the core's 400, with its message. The list is read from Jayway's
+   * operator enum, the library the core validates {@code filter=} with, so the two cannot drift.
+   * A word counts as an operator at a word start, as a whole word, case-insensitively, and not
+   * followed by {@code (}: PostgreSQL's own {@code exists(…)} is a function, not Jayway's operator.
+   */
+  private static void refuseUnsupportedOperator(String input, int i) {
+    for (String symbol : UNSUPPORTED_SYMBOLS) {
+      if (input.startsWith(symbol, i)) {
+        // the core's tokenizer reads "==" and stops at the third character
+        throw unsupportedToken(input, i + 2);
+      }
     }
+    boolean wordStart = i == 0 || isSpace(input.charAt(i - 1));
+    if (!wordStart || !isFieldStart(input.charAt(i))) {
+      return;
+    }
+    for (String word : UNSUPPORTED_WORDS) {
+      if (input.regionMatches(true, i, word, 0, word.length())
+          && wordEnds(input, i + word.length())
+          && !opensCall(input, i + word.length())) {
+        throw unsupportedToken(input, i);
+      }
+    }
+  }
+
+  private static TmfFilteringException unsupportedToken(String input, int at) {
+    return new TmfFilteringException(
+        "Unsupported token in jsonPath filter near: " + input.substring(at));
+  }
+
+  private static boolean wordEnds(String s, int end) {
+    return end == s.length() || !isFieldChar(s.charAt(end));
+  }
+
+  private static boolean opensCall(String s, int end) {
+    int next = skipSpaces(s, end);
+    return next < s.length() && s.charAt(next) == '(';
   }
 
   private String noValue(String path) {

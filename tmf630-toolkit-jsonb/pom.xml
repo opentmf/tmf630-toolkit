@@ -53,6 +53,12 @@
       <groupId>tools.jackson.core</groupId>
       <artifactId>jackson-databind</artifactId>
     </dependency>
+    <!-- The filter= translator refuses the operators of the JsonPath library the core validates
+         with (Jayway) that the toolkit does not support, read from its operator enum. -->
+    <dependency>
+      <groupId>com.jayway.jsonpath</groupId>
+      <artifactId>json-path</artifactId>
+    </dependency>
     <!-- spring-web is needed by Tmf630JsonbSubResourceController (@GetMapping,
          @PathVariable, ResponseEntity). Marked optional so downstream services that
          use the JSONB backend headlessly (no HTTP layer) don't pull it in

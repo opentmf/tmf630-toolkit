@@ -261,6 +261,59 @@ class JsonbJsonPathTranslatorTest {
         .containsExactly("$ ? (@.s == \"x in [y]\")");
   }
 
+  @ParameterizedTest(name = "{0}")
+  @ValueSource(
+      strings = {
+        "in ['a']", "nin ['a']", "size 2", "empty true", "contains 'a'", "anyof ['a']",
+        "noneof ['a']", "subsetof ['a']", "all ['a']", "exists true", "type 'string'",
+        "matches 'x'", "IN ['a']", "Size 2"
+      })
+  @DisplayName("every Jayway operator word the toolkit does not support is the core's 400")
+  void jaywayOperatorWordsAreTheCores400(String operatorAndValue) {
+    assertThatThrownBy(() -> translator.translate("$[?(@.tags " + operatorAndValue + ")]"))
+        .isInstanceOf(TmfFilteringException.class)
+        .hasMessage("Unsupported token in jsonPath filter near: " + operatorAndValue);
+  }
+
+  @ParameterizedTest(name = "{0}")
+  @ValueSource(strings = {"===", "!=="})
+  @DisplayName("Jayway's type-safe equality operators are the core's 400")
+  void jaywayTypeSafeEqualityIsTheCores400(String operator) {
+    assertThatThrownBy(() -> translator.translate("$[?(@.s " + operator + " 'a')]"))
+        .isInstanceOf(TmfFilteringException.class)
+        .hasMessage("Unsupported token in jsonPath filter near: = 'a'");
+  }
+
+  @Test
+  @DisplayName("an operator word inside a literal, as a field name, or as a jsonpath function is no operator")
+  void operatorWordsSpareLiteralsFieldNamesAndFunctions() {
+    assertThat(translator.translate("$[?(@.s == 'size matters' && @.type == 'x')]").params())
+        .containsExactly("$ ? (@.s == \"size matters\" && @.type == \"x\")");
+    assertThat(translator.translate("$[?(@.contains == 'empty' || @.all.size == 1)]").params())
+        .containsExactly("$ ? (@.contains == \"empty\" || @.all.size == 1)");
+    // PostgreSQL's own exists(...) is a function here, not Jayway's exists operator (row 4 rules on it)
+    assertThat(translator.translate("$[?(exists(@.s))]").params())
+        .containsExactly("$ ? (exists(@.s))");
+  }
+
+  @Test
+  @DisplayName("the in / nin refusal does not fire inside a literal or on a field named like them")
+  void inRefusalSparesLiteralsAndFieldNames() {
+    assertThat(translator.translate("$[?(@.s == 'made in germany')]").params())
+        .containsExactly("$ ? (@.s == \"made in germany\")");
+    assertThat(translator.translate("$[?(@.s == \"nin ['a']\")]").params())
+        .containsExactly("$ ? (@.s == \"nin ['a']\")");
+    JsonbJsonPathTranslator regex = new JsonbJsonPathTranslator(extractor, "payload", true);
+    assertThat(regex.translate("$[?(@.s =~ / in /)]").params())
+        .containsExactly("$ ? (@.s like_regex \" in \")");
+    assertThat(translator.translate("$[?(@.info == 'x')]").params())
+        .containsExactly("$ ? (@.info == \"x\")");
+    assertThat(translator.translate("$[?(@.ninja == 'x')]").params())
+        .containsExactly("$ ? (@.ninja == \"x\")");
+    assertThat(translator.translate("$[?(@.in == 'x' && @.nin == 'y')]").params())
+        .containsExactly("$ ? (@.in == \"x\" && @.nin == \"y\")");
+  }
+
   @Test
   @DisplayName("!@.field, == null and != null follow isnull MISSING_ONLY: the key absent / present")
   void nullTestsUnderMissingOnly() {
