@@ -45,6 +45,7 @@ import tools.jackson.databind.ObjectMapper;
 class Tmf630JsonbSplitCollectionIT {
 
   @Autowired private Tmf630JsonbFilterExecutor executor;
+  @Autowired private Tmf630JsonbClauseBuilder clauseBuilder;
   @Autowired private Tmf630JsonbWriteExecutor writeExecutor;
   @Autowired private JsonbSplitAwareFilterTranslator splitAwareTranslator;
   @Autowired private Tmf630JsonbSplitChildCounter childCounter;
@@ -370,6 +371,45 @@ class Tmf630JsonbSplitCollectionIT {
             SplitOrderDomain.class, where, TmfSort.empty(), Pageable.unpaged(),
             field -> String.class);
     assertThat(page.getContent()).extracting(SplitOrderDomain::getId).containsExactly("F1");
+  }
+
+  @Test
+  @DisplayName(
+      "URL attribute operator on a split item field: the child EXISTS, any item (3.6.0)")
+  void urlOperatorOnSplitItemsUsesTheChildExists() throws Exception {
+    SplitOrderDomain o1 = new SplitOrderDomain();
+    o1.setId("U1");
+    o1.setStatus("OPEN");
+    o1.setItems(List.of(item("i1", "SHIPPED"), item("i2", "PENDING")));
+    writeExecutor.saveWithSplits(o1);
+    SplitOrderDomain o2 = new SplitOrderDomain();
+    o2.setId("U2");
+    o2.setStatus("OPEN");
+    o2.setItems(List.of(item("i1", "SHIPPED")));
+    writeExecutor.saveWithSplits(o2);
+    SplitOrderDomain o3 = new SplitOrderDomain();
+    o3.setId("U3");
+    o3.setStatus("OPEN");
+    o3.setItems(List.of());
+    writeExecutor.saveWithSplits(o3);
+
+    assertThat(urlIds("items.state", "PENDING")).containsExactly("U1");
+    assertThat(urlIds("items.state.ne", "PENDING")).containsExactly("U1", "U2");
+    assertThat(urlIds("items.state.in", "PENDING,DELIVERED")).containsExactly("U1");
+    assertThat(urlIds("items.state.isnull", "true")).containsExactly("U3");
+    assertThat(urlIds("items.state.isnotnull", "true")).containsExactly("U1", "U2");
+  }
+
+  private List<String> urlIds(String param, String value) {
+    JsonbClause where =
+        clauseBuilder.build(SplitOrderDomain.class, Map.of(param, new String[] {value}));
+    return executor
+        .findAll(SplitOrderDomain.class, where, TmfSort.empty(), Pageable.unpaged(), f -> String.class)
+        .getContent()
+        .stream()
+        .map(SplitOrderDomain::getId)
+        .sorted()
+        .toList();
   }
 
   @Test

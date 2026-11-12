@@ -184,7 +184,22 @@ class Tmf630JsonbIndexPlanIT {
             "IN on a three-level path",
             "receiver.postalAddress.city.in",
             "City42,City43",
-            (IntPredicate) g -> g % 500 == 42 || g % 500 == 43));
+            (IntPredicate) g -> g % 500 == 42 || g % 500 == 43),
+        Arguments.of(
+            "EQ through an array, any element",
+            "characteristic.name",
+            "k3",
+            (IntPredicate) g -> g % 7 == 3),
+        Arguments.of(
+            "EQ through an array inside an array",
+            "item.tag.code",
+            "t7",
+            (IntPredicate) g -> g % 50 == 7),
+        Arguments.of(
+            "IN through an array",
+            "characteristic.value.in",
+            "v10,v11",
+            (IntPredicate) g -> g % 1000 == 10 || g % 1000 == 11));
   }
 
   @ParameterizedTest(name = "{0}")

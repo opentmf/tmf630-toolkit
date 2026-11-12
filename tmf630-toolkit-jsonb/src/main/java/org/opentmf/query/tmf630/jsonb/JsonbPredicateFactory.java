@@ -54,7 +54,7 @@ public class JsonbPredicateFactory {
       JsonbPathExtractor extractor,
       IsnullSemantics isnullSemantics,
       boolean regexEnabled) {
-    this(extractor, isnullSemantics, regexEnabled, null);
+    this(extractor, isnullSemantics, regexEnabled, (ObjectMapper) null);
   }
 
   /**
@@ -70,6 +70,38 @@ public class JsonbPredicateFactory {
     this.isnullSemantics = isnullSemantics == null ? IsnullSemantics.MISSING_ONLY : isnullSemantics;
     this.regexEnabled = regexEnabled;
     this.containment = new JsonbContainment(mapper == null ? DEFAULT_MAPPER : mapper);
+  }
+
+  private JsonbPredicateFactory(
+      JsonbPathExtractor extractor,
+      IsnullSemantics isnullSemantics,
+      boolean regexEnabled,
+      JsonbContainment containment) {
+    this.extractor = extractor;
+    this.isnullSemantics = isnullSemantics;
+    this.regexEnabled = regexEnabled;
+    this.containment = containment;
+  }
+
+  /** The same factory over another JSONB column (an array element, a split child's payload). */
+  JsonbPredicateFactory forColumn(String column) {
+    return new JsonbPredicateFactory(
+        new JsonbPathExtractor(column), isnullSemantics, regexEnabled, containment);
+  }
+
+  JsonbPathExtractor extractor() {
+    return extractor;
+  }
+
+  /**
+   * Containment for {@code path = value} through the array steps of {@code path}, or empty when
+   * the value's type has no fragment.
+   */
+  Optional<JsonbClause> containmentThrough(JsonbFieldPath path, Class<?> targetType, Object value) {
+    String test = extractor.containsJsonb();
+    return containment
+        .fragment(path.segmentArray(), path.arrayFlags(), targetType, value)
+        .map(fragment -> JsonbClause.of(test, fragment));
   }
 
   /**
