@@ -184,7 +184,9 @@ All notable changes to `tmf630-toolkit` are documented in this file.
   - As the README states, they are not part of the `filter=` grammar on any backend; for a set
     of values use the attribute operators `.in` / `.nin`.
   - JSONB passed them to PostgreSQL, which answered with a jsonpath syntax error. The list is read
-    from Jayway's operator enum, the library the core validates `filter=` with.
+    from Jayway's operator enum (`com.jayway.jsonpath.internal.filter.RelationalOperator`), the
+    library the core validates `filter=` with. It lives in Jayway's `internal` package: a Jayway
+    upgrade that moves it fails the build on purpose, so the list can never silently drift.
   - A word inside a literal, as a field name (`@.size`), or followed by `(` (PostgreSQL's own
     `exists(…)`) is no operator and stays as it was.
 - **A negated array match, `!@.arr[?(…)]`, is now a 400 on JSONB (was a 500)**, with the core's

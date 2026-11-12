@@ -81,6 +81,9 @@ public class JsonbJsonPathTranslator {
   private static final String LENGTH_SUFFIX = ".length";
   private static final String EXISTS = "exists(";
 
+  // RelationalOperator lives in Jayway's `internal` package: it is the one place the library
+  // lists its filter operators, so the refusal below follows the library the core validates
+  // with. A Jayway upgrade that moves it fails this module's compile, deliberately.
   /** The comparison operators of the toolkit's {@code filter=} grammar. */
   private static final Set<RelationalOperator> SUPPORTED =
       EnumSet.of(
