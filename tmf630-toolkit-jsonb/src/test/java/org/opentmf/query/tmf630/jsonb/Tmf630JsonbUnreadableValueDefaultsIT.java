@@ -71,14 +71,13 @@ class Tmf630JsonbUnreadableValueDefaultsIT {
   void aTypedFilterWithAnUnreadableRowFails(String param, String value) {
     JsonbClause where =
         clauseBuilder.build(JsonbTypedDomain.class, Map.of(param, new String[] {value}));
+    // only running the query may throw
+    JdbcClient.MappedQuerySpec<String> query =
+        jdbc.sql("SELECT id FROM " + TABLE + " WHERE " + where.sql())
+            .params(where.params())
+            .query(String.class);
 
-    assertThatThrownBy(
-            () -> jdbc.sql("SELECT id FROM " + TABLE + " WHERE " + where.sql())
-                .params(where.params())
-                .query(String.class)
-                .list())
-        .as(where.sql())
-        .isInstanceOf(DataAccessException.class);
+    assertThatThrownBy(query::list).as(where.sql()).isInstanceOf(DataAccessException.class);
   }
 
   @Test
@@ -88,9 +87,11 @@ class Tmf630JsonbUnreadableValueDefaultsIT {
     JsonbClause order = sortBuilder.buildOrderByClause(sort, f -> LocalDate.class);
     String sql = "SELECT id FROM " + TABLE + " WHERE id LIKE 'LD%' ORDER BY " + order.sql();
 
+    JdbcClient.MappedQuerySpec<String> query =
+        jdbc.sql(sql).params(order.params()).query(String.class);
+
     assertThat(order.sql()).isEqualTo("(payload->>'ld')::date ASC");
-    assertThatThrownBy(() -> jdbc.sql(sql).params(order.params()).query(String.class).list())
-        .isInstanceOf(DataAccessException.class);
+    assertThatThrownBy(query::list).isInstanceOf(DataAccessException.class);
   }
 
   @Test
