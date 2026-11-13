@@ -129,7 +129,9 @@ public class Tmf630JsonbAutoConfiguration {
   @Bean
   @ConditionalOnMissingBean
   public JsonbJsonPathTranslator tmf630JsonbJsonPathTranslator(
-      JsonbPathExtractor extractor, ObjectProvider<Tmf630FilterSettings> filterSettings) {
+      JsonbPathExtractor extractor,
+      ObjectProvider<Tmf630FilterSettings> filterSettings,
+      Tmf630JsonbProperties properties) {
     Tmf630FilterSettings settings = filterSettings.getIfAvailable();
     boolean regexEnabled = settings != null && settings.regexEnabled();
     return new JsonbJsonPathTranslator(
@@ -137,9 +139,18 @@ public class Tmf630JsonbAutoConfiguration {
         "payload",
         regexEnabled,
         settings != null ? settings.isnullSemantics() : null,
-        settings != null
-            ? settings.limits().maxRegexLength()
-            : JsonbJsonPathTranslator.DEFAULT_MAX_REGEX_LENGTH);
+        maxRegexLength(settings, properties));
+  }
+
+  /** The {@code =~} cap: none by default; the core's {@code regex.max-length} when opted in. */
+  private static int maxRegexLength(
+      Tmf630FilterSettings settings, Tmf630JsonbProperties properties) {
+    if (!properties.isApplyRegexMaxLength()) {
+      return JsonbJsonPathTranslator.NO_REGEX_LENGTH_CAP;
+    }
+    return settings != null
+        ? settings.limits().maxRegexLength()
+        : JsonbJsonPathTranslator.DEFAULT_MAX_REGEX_LENGTH;
   }
 
   @Bean
@@ -249,7 +260,8 @@ public class Tmf630JsonbAutoConfiguration {
         ObjectProvider<ValueConverter> valueConverter,
         ObjectProvider<ObjectMapper> objectMapper,
         JsonbPredicateFactory predicateFactory,
-        JsonbSplitAwareFilterTranslator filterTranslator) {
+        JsonbSplitAwareFilterTranslator filterTranslator,
+        Tmf630JsonbProperties properties) {
       Tmf630FilterParser parser =
           new Tmf630FilterParser(
               keyParser.getIfAvailable(
@@ -266,7 +278,8 @@ public class Tmf630JsonbAutoConfiguration {
                       new DefaultFormattingConversionService(),
                       new JacksonEnumTextReader(objectMapper.getIfAvailable()))),
           predicateFactory,
-          filterTranslator);
+          filterTranslator,
+          properties.isApplyRegexMaxLength());
     }
 
     @Bean
