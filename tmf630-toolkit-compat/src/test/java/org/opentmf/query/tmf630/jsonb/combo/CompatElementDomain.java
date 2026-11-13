@@ -26,7 +26,7 @@ public record CompatElementDomain(String id, List<Leaf> items, List<Outer> outer
       Boolean b,
       LocalDate ld,
       OffsetDateTime t,
-      LocalTime lt,
+      LocalTime tm,
       LocalDateTime ldt) {}
 
   /** An element of the outer array: an array of leaves. */

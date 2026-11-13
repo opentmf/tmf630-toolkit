@@ -226,18 +226,127 @@ class CompatComparatorTest {
       String reason = knownReason(fields(key));
       sameButWrong
           .computeIfAbsent(reason == null ? "" : reason, r -> new ArrayList<>())
-          .add(oneLine(key) + " :: both [" + clip(to.answer()) + "] :: oracle [" + clip(oracle)
-              + "]");
+          .add(oneLine(key) + " :: rows that differ: " + differingRows(fields(key), to, oracle)
+              + " :: both [" + clip(to.answer()) + "] :: oracle [" + clip(oracle) + "]");
     }
 
-    /** A documented reason the backend answers otherwise than the oracle, or null. */
+    /**
+     * Which of the seeded rows the two answers disagree on, by what the row holds at the asked
+     * position: the declared type, another JSON type, an unreadable value, JSON null, or nothing
+     * (the field absent there).
+     */
+    private static String differingRows(String[] f, CompatAnswer to, String oracle) {
+      Set<String> answer = Set.of(to.answer().split(","));
+      Set<String> expected = Set.of(oracle.split(","));
+      Set<String> labels = new TreeSet<>();
+      String key = kindKey(f[3]);
+      for (String id : union(asMap(answer), asMap(expected))) {
+        if (id.isEmpty() || answer.contains(id) == expected.contains(id)) {
+          continue;
+        }
+        labels.add(rowLabel(id, f[2].toLowerCase(), key));
+      }
+      return String.join("+", labels);
+    }
+
+    private static String rowLabel(String id, String position, String key) {
+      String[] parts = id.split("\\.");
+      if (parts.length < 3 || !parts[0].equals(position) || !parts[1].equals(key)) {
+        return "absent";
+      }
+      if ("nul".equals(parts[2])) {
+        return "null";
+      }
+      return switch (parts[2].charAt(0)) {
+        case 'o' -> "other-type";
+        case 'x' -> "unreadable";
+        default -> "declared";
+      };
+    }
+
+    private static Map<String, Boolean> asMap(Set<String> ids) {
+      Map<String, Boolean> map = new TreeMap<>();
+      ids.forEach(id -> map.put(id, true));
+      return map;
+    }
+
+    private static String kindKey(String kind) {
+      for (ComboKind k : ComboKind.values()) {
+        if (k.name().equals(kind)) {
+          return k.key();
+        }
+      }
+      return kind;
+    }
+
+    /**
+     * A documented reason the backend answers otherwise than the oracle, or a known limit of the
+     * oracle itself (each class checked on one example), or null.
+     */
     private String knownReason(String[] f) {
+      String oracleLimit = oracleLimit(f);
+      if (oracleLimit != null) {
+        return oracleLimit;
+      }
       if ("MONGO".equals(f[0])) {
         return mongoReason(f);
       }
       if ("JSONB".equals(f[0])) {
         String pin = pins.get(String.join("\t", f[1], f[2], f[3], f[4], f[5], f[6]));
-        return pin == null ? null : "pinned in the suite: " + pin;
+        return pin != null ? "pinned in the suite: " + pin : jsonbReason(f);
+      }
+      return null;
+    }
+
+    private static final Set<String> TEXT_OPERATORS =
+        Set.of(
+            "CONTAINS", "CONTAINSI", "STARTS_WITH", "STARTS_WITHI", "ENDS_WITH", "ENDS_WITHI",
+            "LIKE", "LIKEI", "REGEX", "REGEXI", "EQI", "NEI");
+    private static final Set<String> NOT_TEXT =
+        Set.of("INTEGER", "LONG", "DECIMAL", "DOUBLE", "BOOLEAN", "DATE", "DATE_TIME");
+    private static final Set<String> ORDERINGS = Set.of("GT", "GTE", "LT", "LTE", "BETWEEN");
+
+    /** Where the oracle's own Jayway leaf of a filter= cell is not the documented meaning. */
+    private static String oracleLimit(String[] f) {
+      if (!"FILTER".equals(f[4])) {
+        return null;
+      }
+      if ("BOOLEAN".equals(f[3]) && ORDERINGS.contains(f[5])) {
+        return "oracle limit: its Jayway leaf does not order booleans; the backends order"
+            + " false < true";
+      }
+      if ("STRING_LIST".equals(f[3])) {
+        return "oracle limit: its Jayway leaf compares a list as a whole; the backends match a"
+            + " list leaf by element (jsonpath lax mode, Mongo arrays)";
+      }
+      if (Set.of("INTEGER", "DECIMAL").contains(f[3]) && "EQ".equals(f[5])
+          && !"JSONB".equals(f[0])) {
+        return "oracle limit: its Jayway leaf finds a stored \"5\" for == 5; the backends are"
+            + " type-exact there (the suite pins the same meaning on JSONB)";
+      }
+      if ("JPA".equals(f[0]) && "NE".equals(f[5])) {
+        return "JPA: filter= != does not match a missing or null value (README, \"What ne, nin"
+            + " and != mean on each backend\")";
+      }
+      if ("JPA".equals(f[0]) && "DATE_TIME".equals(f[3])) {
+        return "oracle limit: its Jayway leaf compares date-times as text; JPA compares instants"
+            + " (2025-01-01T10:00:00+02:00 equals 2025-01-01T08:00:00Z)";
+      }
+      return null;
+    }
+
+    /** JSONB's documented reads by the stored text (README, section 13, Level 1). */
+    private static String jsonbReason(String[] f) {
+      if (NOT_TEXT.contains(f[3]) && TEXT_OPERATORS.contains(f[5])) {
+        return "JSONB: a string operator on a non-string field answers by the stored text"
+            + " (README, section 13: where JSONB answers differently)";
+      }
+      if ("OBJECT".equals(f[3])) {
+        return "JSONB: an Object field compares by the stored text (README, section 13)";
+      }
+      if (Set.of("EQ", "IN").contains(f[5])) {
+        return "JSONB: equality=extraction (the default) finds a value stored in another JSON type"
+            + " through its text or cast (README, behaviour switches)";
       }
       return null;
     }
@@ -251,6 +360,10 @@ class CompatComparatorTest {
       }
       if (Set.of("NE", "NEI", "NIN").contains(f[5])) {
         return "Mongo: ne / nin / != (README, \"What ne, nin and != mean on each backend\")";
+      }
+      if (Set.of("STRING_LIST", "OBJECT_LIST").contains(f[3])) {
+        return "Mongo: a scalar or object stored where a list is declared matches as one element"
+            + " (Mongo's query semantics; the twin holds the suite's JSON as written)";
       }
       return null;
     }
