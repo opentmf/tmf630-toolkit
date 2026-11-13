@@ -14,7 +14,9 @@ import java.util.regex.Pattern;
  * ({@code 500>400}: a 500 that now answers 400; {@code 200>200}: the same status, other rows) and
  * the evidence its candidate rows must carry: {@code -} none, {@code name-twin} the release's rows
  * for the same request with each wire value written as its constant's name ({@link CompatNames}),
- * {@code oracle} the oracle's rows. A difference between the release and the candidate passes the
+ * {@code candidate-twin} the candidate's own rows for that by-name request (where the release
+ * answered an error for both spellings), {@code oracle} the oracle's rows. A difference between
+ * the release and the candidate passes the
  * gate only when one rule matches it and its evidence holds; a rule no request matches fails the
  * gate too, and so does a rule with a transition from a 2xx to a 4xx or a 5xx.
  */
@@ -36,6 +38,9 @@ record CompatRule(
 
   /** The release's rows for the request by the constant's name. */
   static final String NAME_TWIN = "name-twin";
+
+  /** The candidate's rows for the request by the constant's name. */
+  static final String CANDIDATE_TWIN = "candidate-twin";
 
   /** The oracle's rows. */
   static final String ORACLE = "oracle";

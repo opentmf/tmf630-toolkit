@@ -496,6 +496,30 @@ return"; SQL (JPA, and the JSONB URL operators) as "a value is present and diffe
 | `items.b.ne=x`, through an array | no element's `b` equals `x` (also an empty array, and a row without the array) | not supported: Hibernate refuses a URL path through a `@OneToMany` (HTTP 500); use `filter=` | some element's `b` is a value other than `x` |
 | `filter=$[?(@.items[?(@.b != 'x')])]` | some element whose `b` is not `x`, missing or null | some element whose `b` is a value other than `x` | some element whose `b` is not `x`, or is a JSON null |
 
+A scalar or an object stored where a `List` field is declared: on Mongo it matches as one element
+(`?tags=alpha` finds a stored `"alpha"` as well as `["alpha","bravo"]`), as Mongo's query language
+does; on JSONB it holds no element and matches nothing; a JPA collection cannot hold it. Measured by
+the compatibility report (Mongo 8.0.5, PostgreSQL 18.1). Mongo answered the same in 3.5.2; JSONB
+then compared the field's text, so it found the scalar and missed the list (fixed in 3.6.0).
+
+#### What an ordering operator means on an enum field
+
+`gt`, `gte`, `lt`, `lte` and `between` on an enum field compare the **stored value as text**,
+never the declaration order of the constants. The URL value is read as the constant first (by its
+name or, since 3.6.0, by its wire value), then written as that backend stores it. Measured by the
+compatibility report, with `enum Color { RED, GREEN }` and
+`enum Stage { IN_PROGRESS("inProgress"), DONE("done") }` (`@JsonValue` on the wire value):
+
+| Backend | What is compared | `?color.gt=GREEN` | `?stage.gt=done` (or `=DONE`) |
+| --- | --- | --- | --- |
+| JSONB | the payload's text (the name of a plain enum, the wire value of a `@JsonValue` one) with the constant's stored text, in the database's collation | finds `RED` | finds `"inProgress"`; `?stage.lt=done` finds a stored `"IN_PROGRESS"` and a number `7`, by their text, in the report database's order |
+| Mongo | the stored string with the constant's **name**, which Spring Data writes for an enum, in binary order | finds `RED` | compares with `"DONE"`: finds `"IN_PROGRESS"` (and any stored `"inProgress"` or `"done"`) |
+| JPA, `@Enumerated(EnumType.STRING)` | the column's name, in the database's collation | finds `RED` | finds `IN_PROGRESS` |
+| JPA, `@Enumerated(EnumType.ORDINAL)` (JPA's default) | the column holds the ordinal | not covered by the report | not covered by the report |
+
+So an ordering on an enum whose names and wire values sort differently answers differently per
+backend: compare by an explicit field, or avoid ordering an enum, where the order matters.
+
 #### URL-encoded operator literal forms (TMF-630 Part 1 §4.4)
 
 Per TMF-630 Part 1 §4.4, the operator can also be embedded in the parameter *name*

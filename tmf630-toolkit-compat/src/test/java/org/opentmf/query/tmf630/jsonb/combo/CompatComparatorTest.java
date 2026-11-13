@@ -171,6 +171,7 @@ class CompatComparatorTest {
       String backend = fields(key)[0];
       return switch (rule.evidence()) {
         case CompatRule.NAME_TWIN -> twinProblem(key, to);
+        case CompatRule.CANDIDATE_TWIN -> candidateTwinProblem(key, to);
         case CompatRule.ORACLE -> oracleProblem(key, to);
         default ->
             "MONGO".equals(backend) || "JPA".equals(backend)
@@ -192,6 +193,20 @@ class CompatComparatorTest {
           : "3.5.2 answers it by the constant's name with other rows: " + show(twin);
     }
 
+    /** The candidate answers the wire value and the constant's name with the same rows. */
+    private String candidateTwinProblem(String key, CompatAnswer to) {
+      CompatAnswer twin = candidate.answers().get(twinKey(key));
+      if (twinKey(key).equals(key) || twin == null) {
+        return "no request by the constant's name was asked";
+      }
+      if (twin.status() != 200) {
+        return "the candidate answers it by the constant's name with " + show(twin);
+      }
+      return twin.answer().equals(to.answer())
+          ? null
+          : "the candidate answers it by the constant's name with other rows: " + show(twin);
+    }
+
     private String oracleProblem(String key, CompatAnswer to) {
       String oracle = oracleOf(key);
       if ("-".equals(oracle)) {
@@ -203,6 +218,9 @@ class CompatComparatorTest {
     private String evidenceNote(CompatRule rule, String key) {
       return switch (rule.evidence()) {
         case CompatRule.NAME_TWIN -> " :: R0 by name " + show(release.answers().get(twinKey(key)));
+        case CompatRule.CANDIDATE_TWIN ->
+            " :: R0 by name " + show(release.answers().get(twinKey(key))) + " :: R1 by name "
+                + show(candidate.answers().get(twinKey(key)));
         case CompatRule.ORACLE -> " :: oracle [" + clip(oracleOf(key)) + "]";
         default -> "";
       };

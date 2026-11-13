@@ -5,13 +5,14 @@
 # and so does any transition from a 2xx to a 4xx or a 5xx (a request that answered must keep answering).
 # Columns: id, CHANGELOG entry, backend, shape, position, kind, entry, operator, request, transitions
 # (FROM>TO statuses; 200>200 = other rows), evidence (- none; name-twin: 3.5.2's rows for the request with
-# each wire value written as its constant's name; oracle: the oracle's rows).
+# each wire value written as its constant's name; candidate-twin: the candidate's own rows for that request,
+# where 3.5.2 answered an error for both spellings; oracle: the oracle's rows).
 FIX-FILTER-ARRAY-PREDICATE	Fixed (JSONB `filter=` and the GIN index)	JSONB	not split	ARRAY|ARRAY_IN_ARRAY	.*	FILTER	.*	.*	500>200,500>400	-
 FIX-FILTER-ARRAY-PREDICATE-LIST	Fixed (JSONB `filter=` and the GIN index)	JSONB	not split|split	TOP|NESTED|SPLIT	OBJECT_LIST	FILTER	.*	.*	500>200	-
 FIX-WRAPPER	Fixed (JSONB `filter=` and the GIN index)	JSONB	sample	-	-	SAMPLE	WRAPPER_CLOSED	.*	500>400	-
 FIX-ENUM-BINDING	Fixed (JSONB filters on an enum field)	JSONB	.*	.*	PLAIN_ENUM|WIRE_ENUM	URL	.*	.*	500>200,500>400,200>200	-
 FIX-WIRE-ENUM-JSONB	Fixed (an enum filter value by its wire value, on every backend)	JSONB	.*	.*	WIRE_ENUM	URL	EQ|NE|IN|NIN	.*	400>200	oracle
-FIX-WIRE-ENUM-JSONB-ORDER	Fixed (an enum filter value by its wire value, on every backend)	JSONB	.*	.*	WIRE_ENUM	URL	GT|GTE|LT|LTE|BETWEEN	.*	400>200	name-twin
+FIX-WIRE-ENUM-JSONB-ORDER	Fixed (an enum filter value by its wire value, on every backend)	JSONB	.*	.*	WIRE_ENUM	URL	GT|GTE|LT|LTE|BETWEEN	.*	400>200	candidate-twin
 FIX-WIRE-ENUM	Fixed (an enum filter value by its wire value, on every backend)	MONGO|JPA	.*	.*	WIRE_ENUM	URL|FILTER	EQ|NE|IN|NIN	.*	400>200	name-twin
 FIX-WIRE-ENUM-ORDER	Fixed (an enum filter value by its wire value, on every backend)	MONGO|JPA	.*	.*	WIRE_ENUM	URL|FILTER	GT|GTE|LT|LTE|BETWEEN	.*	400>200	name-twin
 FIX-WIRE-ENUM-LEDGER	Fixed (an enum filter value by its wire value, on every backend)	MONGO|JPA	ledger	-	-	URL	state	state=inProgress	400>200	name-twin
