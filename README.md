@@ -3813,6 +3813,27 @@ making them resolvable from downstream projects on the same machine. `verify` ru
 tests and integration tests but stops before installation, so a downstream project
 building against the current `-SNAPSHOT` would not find the artifacts.
 
+### Compatibility report against the released version
+
+Backward compatibility is proven, not argued. `tmf630-toolkit-compat` (a test-only module, built
+only under the `compat` profile, never deployed) asks the released version and the working tree
+every request of the JSONB combination suite, the suite's cells on a Mongo twin, the typeable
+cells on a JPA twin and the samples of the 3.6.0 compatibility ledger. It records each answer
+(status and rows) and compares them:
+
+```bash
+JAVA_HOME=/usr/lib64/openjdk-17 tmf630-toolkit-compat/run.sh   # COMPAT_RELEASE=3.5.2 by default
+```
+
+Run R0 is the release and R1 the candidate under its defaults; R2 to R4 turn the JSONB opt-ins
+on. The gate compares R0 with R1. A request that answered 200 must answer the same rows, and one
+that answered a 4xx or a 5xx the same status. Every difference must be a fix named in
+`tmf630-toolkit-compat/src/test/resources/compat/named-differences.tsv`, and a named fix that no
+request exercises fails too.
+
+`target/compat/report.md` starts with what the report does not cover, then lists every verdict
+and what each switch changes. Each run starts PostgreSQL and Mongo containers.
+
 ### Local Sonar analysis (opt-in)
 
 An opt-in `sonar` Maven profile runs the SonarScanner against a locally-running

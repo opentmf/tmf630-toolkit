@@ -80,6 +80,7 @@
     <maven.javadoc.plugin.version>3.12.0</maven.javadoc.plugin.version>
     <maven.gpg.plugin.version>3.2.8</maven.gpg.plugin.version>
     <maven.release.plugin.version>3.3.1</maven.release.plugin.version>
+    <build-helper.plugin.version>3.8.0</build-helper.plugin.version>
     <central.publishing.maven.plugin.version>0.12.0</central.publishing.maven.plugin.version>
     <sonar.maven.plugin.version>5.8.0.7211</sonar.maven.plugin.version>
     <failsafe.includes.pattern>**/*IT.java</failsafe.includes.pattern>
@@ -186,6 +187,11 @@
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-release-plugin</artifactId>
           <version>${maven.release.plugin.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.codehaus.mojo</groupId>
+          <artifactId>build-helper-maven-plugin</artifactId>
+          <version>${build-helper.plugin.version}</version>
         </plugin>
       </plugins>
     </pluginManagement>
@@ -327,6 +333,17 @@
   </build>
 
   <profiles>
+    <!--
+      The compatibility report (TOOLKIT-COMPATIBILITY-REPORT-AGAINST-RELEASE-1): a test-only module
+      that answers the combination suite's requests against the released version and the candidate.
+      Never part of the default build, never deployed; driven by tmf630-toolkit-compat/run.sh.
+    -->
+    <profile>
+      <id>compat</id>
+      <modules>
+        <module>tmf630-toolkit-compat</module>
+      </modules>
+    </profile>
     <profile>
       <id>it-postgresql</id>
       <properties>

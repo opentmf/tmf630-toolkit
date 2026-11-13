@@ -1,0 +1,19 @@
+# The NAMED FIXES of 3.6.0 against the release: each line a reviewed pattern (regular expressions over the
+# request key, each matching the whole field) and the answer transitions it covers. A difference between the
+# release (R0) and the candidate under its defaults (R1) passes only when a rule names it; a rule that names
+# no request fails the gate too. Columns: id, CHANGELOG entry, backend, shape, position, kind, entry, operator,
+# request, transitions (FROM>TO statuses; 200>200 = other rows).
+FIX-FILTER-ARRAY-PREDICATE	Fixed (JSONB `filter=` and the GIN index)	JSONB	not split	ARRAY|ARRAY_IN_ARRAY	.*	FILTER	.*	.*	500>200,500>400
+FIX-WRAPPER	Fixed (JSONB `filter=` and the GIN index)	JSONB	sample	-	-	SAMPLE	WRAPPER_CLOSED	.*	500>400
+FIX-ENUM-BINDING	Fixed (JSONB filters on an enum field)	JSONB	.*	.*	PLAIN_ENUM|WIRE_ENUM	URL	.*	.*	500>200,500>400,200>200
+FIX-WIRE-ENUM	Fixed (an enum filter value by its wire value, on every backend)	JSONB|MONGO|JPA	.*	.*	WIRE_ENUM	URL	.*	.*	400>200
+FIX-WIRE-ENUM-LEDGER	Fixed (an enum filter value by its wire value, on every backend)	MONGO|JPA	ledger	-	-	URL	state	state=inProgress	400>200
+FIX-FILTER-NULL-TESTS	Fixed (JSONB `filter=` null tests, `in` and `nin`)	JSONB	.*	.*	.*	FILTER	IS_NULL	.*	500>200
+FIX-FILTER-NULL-LITERAL	Fixed (JSONB `filter=` null tests, `in` and `nin`)	JSONB	sample	-	-	SAMPLE	EQ_NULL|NE_NULL	.*	200>200
+FIX-FILTER-IN-NIN	Fixed (JSONB `filter=` null tests, `in` and `nin`)	JSONB	.*	.*	.*	FILTER	IN|NIN	.*	500>400
+FIX-JAYWAY-WORDS	Fixed (JSONB `filter=` null tests, `in` and `nin`)	JSONB	.*	.*	.*	FILTER	JAYWAY_.*	.*	500>400
+FIX-URL-ARRAYS	Fixed (JSONB URL operators on a field inside an array)	JSONB	.*	ARRAY|ARRAY_IN_ARRAY|SPLIT	.*	URL	.*	.*	200>200,500>200,500>400
+FIX-URL-COLLECTION-LEAF	Fixed (JSONB URL operators on a field inside an array)	JSONB	not split	TOP|NESTED	STRING_LIST|OBJECT_LIST	URL	.*	.*	200>200,500>200,500>400
+FIX-LIKE-LITERAL	Fixed (JSONB `contains`, `startswith` and `endswith` match their value literally)	JSONB	.*	.*	STRING	URL	CONTAINS|CONTAINSI|STARTS_WITH|STARTS_WITHI|ENDS_WITH|ENDS_WITHI	.*	200>200
+FIX-PG-SYNTAX	Fixed (JSONB `filter=` forms PostgreSQL cannot parse are a 400, not a 500)	JSONB	sample	-	-	SAMPLE	BARE_EXISTS|BARE_EXISTS_IN_ARRAY|RECURSIVE_DESCENT|FUNCTION_COUNT|FUNCTION_MIN|FUNCTION_MAX|LENGTH_GT	.*	500>400
+FIX-REGEX-CAP	Fixed (JSONB applies the regex length cap)	JSONB	sample	-	-	SAMPLE	REGEX_CAP_URL|REGEX_CAP_FILTER	.*	200>400
