@@ -62,15 +62,18 @@ import tools.jackson.databind.node.ObjectNode;
  * attribute operator, {@code filter=} JsonPath) × the position ({@link ComboPosition}) × the entity
  * shape (not split, split); plus sort ascending and descending on each field.
  *
- * <p>Findings listed in {@code combination/expected.tsv} are EXPECTED: a behaviour held for a
- * ruling or kept by one, with its reason. Each must keep failing exactly as listed; an
- * unexpected finding, or a listed one that passes or answers differently, fails the test.
+ * <p>It runs twice: this class under the module's DEFAULTS (the 3.5.2 behaviour of every switch),
+ * {@link Tmf630JsonbCombinationOptInsIT} with every opt-in on ({@code equality=containment},
+ * {@code cast-mode=lenient}). Findings listed in {@code combination/expected-<mode>.tsv} are
+ * EXPECTED: a behaviour held for a ruling, kept by one, or the default of a switch, with its
+ * reason. Each must keep failing exactly as listed; an unexpected finding, or a listed one that
+ * passes or answers differently, fails the test.
  *
  * <p>Two verdicts per cell: (1) the answer is rows or the toolkit's own 400, never a driver error,
  * and the toolkit refuses exactly what the QueryDSL terminal refuses for the same URL; (2) the
  * rows equal an oracle computed in Java from the seeded JSON: {@link ComboOracle} for the URL
  * operators, Jayway (the toolkit's own JsonPath library) for {@code filter=}, the declared type's
- * order for sorts. Every finding is written to {@code target/combination/} and the test fails with
+ * order for sorts. Every finding is written to {@code target/combination/<mode>/} and the test fails with
  * their count, so a run lists all of them at once.
  */
 @SpringBootTest(
@@ -88,7 +91,6 @@ import tools.jackson.databind.node.ObjectNode;
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class Tmf630JsonbCombinationIT {
 
-  private static final Path REPORT_DIR = Path.of("target", "combination");
   private static final ObjectMapper JSON = JsonMapper.builder().build();
   private static final List<ComboPosition> NOT_SPLIT =
       List.of(
@@ -208,11 +210,21 @@ class Tmf630JsonbCombinationIT {
         f.entry(), f.operator(), f.request());
   }
 
+  /** The run's name: {@code defaults} here, the opt-ins in the subclass. */
+  protected String mode() {
+    return "defaults";
+  }
+
+  private Path reportDir() {
+    return Path.of("target", "combination", mode());
+  }
+
   /** The EXPECTED findings: key to {detail, reason}. */
-  private static Map<String, String[]> loadExpected() throws IOException {
+  private Map<String, String[]> loadExpected() throws IOException {
     Map<String, String[]> expected = new LinkedHashMap<>();
     try (InputStream in =
-        Tmf630JsonbCombinationIT.class.getResourceAsStream("/combination/expected.tsv")) {
+        Tmf630JsonbCombinationIT.class.getResourceAsStream(
+            "/combination/expected-" + mode() + ".tsv")) {
       if (in == null) {
         return expected;
       }
@@ -666,7 +678,7 @@ class Tmf630JsonbCombinationIT {
       Map<String, Integer> expectedByReason,
       Set<String> gone)
       throws IOException {
-    Files.createDirectories(REPORT_DIR);
+    Files.createDirectories(reportDir());
     StringBuilder tsv =
         new StringBuilder("verdict\tshape\tposition\tkind\tentry\toperator\trequest\tsql\tdetail\tgroup\n");
     for (Finding f : findings) {
@@ -676,7 +688,7 @@ class Tmf630JsonbCombinationIT {
                   .replace('\n', ' '))
           .append('\n');
     }
-    Files.writeString(REPORT_DIR.resolve("findings.tsv"), tsv);
+    Files.writeString(reportDir().resolve("findings.tsv"), tsv);
     Map<String, List<Finding>> groups =
         unexpected.stream().collect(Collectors.groupingBy(Tmf630JsonbCombinationIT::signature,
             TreeMap::new, Collectors.toList()));
@@ -694,7 +706,7 @@ class Tmf630JsonbCombinationIT {
     gone.forEach(g -> md.append("- `").append(g).append("`\n"));
     md.append("\n## UNEXPECTED\n\n");
     groups.forEach((signature, members) -> appendGroup(md, signature, members));
-    Files.writeString(REPORT_DIR.resolve("findings.md"), md);
+    Files.writeString(reportDir().resolve("findings.md"), md);
     return summary;
   }
 
