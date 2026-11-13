@@ -39,7 +39,10 @@ import tools.jackson.databind.ObjectMapper;
 
 /**
  * Proves by PLAN that the {@code filter=} queries the toolkit sends are served by the {@code GIN
- * (payload jsonb_path_ops)} index an adopter is told to create.
+ * (payload jsonb_path_ops)} index an adopter is told to create, and that under
+ * {@code opentmf.tmf630.jsonb.equality=containment} (the opt-in this class runs with) the URL
+ * equalities are too. The default's equality, served by a field's own expression index, is proven
+ * by {@link Tmf630JsonbIndexPlanDefaultsIT}.
  *
  * <p>The table holds {@value #ROWS} rows seeded server-side and is analysed, and no planner
  * setting is touched, so the planner's own choice is what is tested. The WHERE clause is built
@@ -56,13 +59,14 @@ import tools.jackson.databind.ObjectMapper;
       "spring.jpa.hibernate.ddl-auto=create-drop",
       "spring.jpa.show-sql=false",
       "spring.datasource.url=${tmf630.sql.it.datasource.url:jdbc:tc:postgresql:18.1-alpine:///db}",
-      "spring.datasource.driver-class-name=org.testcontainers.jdbc.ContainerDatabaseDriver"
+      "spring.datasource.driver-class-name=org.testcontainers.jdbc.ContainerDatabaseDriver",
+      "opentmf.tmf630.jsonb.equality=containment"
     })
 @ActiveProfiles("test")
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class Tmf630JsonbIndexPlanIT {
 
-  private static final int ROWS = 20_000;
+  static final int ROWS = 20_000;
   private static final String TABLE = JsonbIndexedRow.TABLE;
   private static final String GIN_INDEX = TABLE + "_payload_gin";
   private static final String CITY = "@.receiver.postalAddress.city";
@@ -73,7 +77,7 @@ class Tmf630JsonbIndexPlanIT {
    * 300}, two characteristics: {@code {k<g % 7>, v<g % 1000>}} and {@code {z, w<g % 3>}}, and two
    * items whose tag arrays hold {@code t<g % 50>} and {@code u<g % 5>}.
    */
-  private static final String SEED_SQL =
+  static final String SEED_SQL =
       """
       INSERT INTO jsonb_indexed_row (id, payload)
       SELECT 'r' || g, jsonb_build_object(
@@ -204,7 +208,7 @@ class Tmf630JsonbIndexPlanIT {
 
   @ParameterizedTest(name = "{0}")
   @MethodSource("indexServedEqualities")
-  @DisplayName("attribute equality: SELECT and COUNT use a Bitmap Index Scan on the GIN index")
+  @DisplayName("equality=containment: SELECT and COUNT use a Bitmap Index Scan on the GIN index")
   void attributeEqualityIsServedByTheGinIndex(
       String name, String param, String value, IntPredicate expected) {
     List<Explained> plans = runAndExplain(Map.of(param, new String[] {value}), expected);

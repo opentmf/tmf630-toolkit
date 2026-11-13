@@ -33,11 +33,13 @@ import org.springframework.test.context.ActiveProfiles;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * Pins, per scalar type, which rows an equality on a JSONB payload finds: the extraction form the
- * legacy {@link JsonbPredicateFactory#build} still emits ({@code payload->>'x' = ?}, cast by the
- * domain type), and what the URL grammar now emits on an object path ({@code payload @> ?::jsonb}
- * for String, Enum, the integer and decimal types and Boolean; the extraction for the date-time
- * types and for a positional path; any element of an array since 3.6.0).
+ * Under {@code opentmf.tmf630.jsonb.equality=containment} (the opt-in), pins per scalar type which
+ * rows an equality on a JSONB payload finds: the extraction form {@link JsonbPredicateFactory#build}
+ * emits ({@code payload->>'x' = ?}, cast by the domain type, the default's form and 3.5.2's), and
+ * what the URL grammar emits on an object path under the opt-in ({@code payload @> ?::jsonb} for
+ * String, Enum, the integer and decimal types and Boolean; the extraction for the date-time types
+ * and for a positional path; any element of an array since 3.6.0). The defaults are pinned by
+ * {@link Tmf630JsonbEqualityDefaultsIT} over the same rows.
  *
  * <p>Containment is type-exact, as on the Mongo backend: a value stored in another JSON type than
  * the field declares is no longer found. Each such case is a cell with both row sets pinned. The
@@ -49,16 +51,18 @@ import tools.jackson.databind.ObjectMapper;
       "spring.jpa.hibernate.ddl-auto=create-drop",
       "spring.jpa.show-sql=false",
       "spring.datasource.url=${tmf630.sql.it.datasource.url:jdbc:tc:postgresql:18.1-alpine:///db}",
-      "spring.datasource.driver-class-name=org.testcontainers.jdbc.ContainerDatabaseDriver"
+      "spring.datasource.driver-class-name=org.testcontainers.jdbc.ContainerDatabaseDriver",
+      "opentmf.tmf630.jsonb.equality=containment"
     })
 @ActiveProfiles("test")
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class Tmf630JsonbEqualityParityIT {
 
   private static final String TABLE = JsonbTypedRow.TABLE;
-  private static final Set<String> ERROR = Set.of("<the query fails>");
+  static final Set<String> ERROR = Set.of("<the query fails>");
 
-  private static final Map<String, String> ROWS = new LinkedHashMap<>();
+  /** The seed rows, shared with {@link Tmf630JsonbEqualityDefaultsIT}. */
+  static final Map<String, String> ROWS = new LinkedHashMap<>();
 
   static {
     ROWS.put("S1", "{\"s\":\"42\"}");
@@ -113,6 +117,11 @@ class Tmf630JsonbEqualityParityIT {
 
   @BeforeAll
   void seed() {
+    seed(jdbc);
+  }
+
+  /** Writes {@link #ROWS} into the typed table. */
+  static void seed(JdbcClient jdbc) {
     jdbc.sql("TRUNCATE " + TABLE).update();
     ROWS.forEach(
         (id, payload) ->

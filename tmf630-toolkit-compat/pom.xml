@@ -1,0 +1,197 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <!--
+    The compatibility report (TOOLKIT-COMPATIBILITY-REPORT-AGAINST-RELEASE-1). Test-only: it records
+    what one version of the toolkit answers to the combination suite's requests (and the probe
+    samples) on JSONB, Mongo and JPA. run.sh runs it once per version and switch setting and then
+    compares the answers. Listed only under the root's `compat` profile: never part of the default
+    build, never in tmf630-toolkit-all, never installed or deployed.
+
+    The parent version must equal the root's: the release plugin rewrites only the modules of its
+    reactor, so after a release this line follows by hand (run.sh refuses to run otherwise).
+  -->
+  <parent>
+    <groupId>org.opentmf.query</groupId>
+    <artifactId>tmf630-toolkit</artifactId>
+    <version>3.6.0-SNAPSHOT</version>
+    <relativePath>../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>tmf630-toolkit-compat</artifactId>
+  <name>tmf630-toolkit-compat</name>
+  <description>Compatibility report of the toolkit against its released version (test-only, never deployed)</description>
+
+  <properties>
+    <!-- the toolkit version whose answers are recorded: the released one, or the candidate -->
+    <compat.toolkit.version>${project.version}</compat.toolkit.version>
+    <!-- set by run.sh: the run id (R0..R4), the answers folder, the Spring properties of the run -->
+    <compat.run/>
+    <compat.out>${maven.multiModuleProjectDirectory}/target/compat</compat.out>
+    <compat.springProperties/>
+    <compat.compare>false</compat.compare>
+    <jacoco.skip>true</jacoco.skip>
+    <sonar.skip>true</sonar.skip>
+    <maven.install.skip>true</maven.install.skip>
+    <maven.deploy.skip>true</maven.deploy.skip>
+  </properties>
+
+  <!--
+    Every toolkit artifact is declared at ${compat.toolkit.version} on purpose: the root's
+    dependencyManagement pins them to ${project.version}, which would otherwise pull the
+    candidate's core in transitively under a released jsonb.
+  -->
+  <dependencies>
+    <dependency>
+      <groupId>org.opentmf.query</groupId>
+      <artifactId>tmf630-toolkit-paging-sorting-core</artifactId>
+      <version>${compat.toolkit.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.opentmf.query</groupId>
+      <artifactId>tmf630-toolkit-paging-sorting-autoconfigure</artifactId>
+      <version>${compat.toolkit.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.opentmf.query</groupId>
+      <artifactId>tmf630-toolkit-attribute-filtering-core</artifactId>
+      <version>${compat.toolkit.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.opentmf.query</groupId>
+      <artifactId>tmf630-toolkit-attribute-filtering-autoconfigure</artifactId>
+      <version>${compat.toolkit.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.opentmf.query</groupId>
+      <artifactId>tmf630-toolkit-mongo-aggregation</artifactId>
+      <version>${compat.toolkit.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.opentmf.query</groupId>
+      <artifactId>tmf630-toolkit-jsonb</artifactId>
+      <version>${compat.toolkit.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-webmvc</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-data-jpa</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-data-mongodb</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.querydsl</groupId>
+      <artifactId>querydsl-jpa</artifactId>
+      <version>${querydsl.version}</version>
+      <classifier>jakarta</classifier>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.querydsl</groupId>
+      <artifactId>querydsl-mongodb</artifactId>
+      <version>${querydsl.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>testcontainers-junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>testcontainers-jdbc</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>testcontainers-postgresql</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>testcontainers-mongodb</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.postgresql</groupId>
+      <artifactId>postgresql</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <!-- the combination suite's generator, compiled against the version under test -->
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>build-helper-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>add-combination-generator</id>
+            <phase>generate-test-sources</phase>
+            <goals>
+              <goal>add-test-source</goal>
+            </goals>
+            <configuration>
+              <sources>
+                <source>${project.basedir}/../tmf630-toolkit-jsonb/src/test/java</source>
+              </sources>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <configuration>
+          <!-- from the jsonb test tree, only the generator's classes; and this module's own -->
+          <testIncludes>
+            <testInclude>org/opentmf/query/tmf630/jsonb/combo/Combo*.java</testInclude>
+            <testInclude>org/opentmf/query/tmf630/jsonb/combo/Compat*.java</testInclude>
+          </testIncludes>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <systemPropertyVariables>
+            <compat.out>${compat.out}</compat.out>
+            <compat.compare>${compat.compare}</compat.compare>
+          </systemPropertyVariables>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <configuration>
+          <systemPropertyVariables>
+            <compat.run>${compat.run}</compat.run>
+            <compat.out>${compat.out}</compat.out>
+            <compat.toolkitVersion>${compat.toolkit.version}</compat.toolkitVersion>
+            <compat.springProperties>${compat.springProperties}</compat.springProperties>
+          </systemPropertyVariables>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

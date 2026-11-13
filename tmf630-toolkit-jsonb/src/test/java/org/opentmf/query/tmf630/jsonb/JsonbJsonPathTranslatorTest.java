@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
 import java.time.Duration;
+import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -399,5 +400,114 @@ class JsonbJsonPathTranslatorTest {
         .isInstanceOf(IllegalArgumentException.class);
     assertThatThrownBy(() -> new JsonbJsonPathTranslator(extractor, null))
         .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  // ---- what PostgreSQL's jsonpath cannot parse (a 500 before 3.6.0): the core's 400 ----------
+
+  private static final String EXPECTED_COMPARISON = "Expected comparison operator in jsonPath filter.";
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "$[?(@.s)]",
+        "$[?(@.s && @.n > 1)]",
+        "$[?(@.n > 1 || @.s)]",
+        "$[?(@.items[?(@.b)])]",
+        "$[?(!(@.s))]",
+        "$[?((@.s))]"
+      })
+  @DisplayName("a bare exists test is the core's 400")
+  void aBareExistsTestIsRefused(String filter) {
+    assertThatThrownBy(() -> translator.translate(filter))
+        .isInstanceOf(TmfFilteringException.class)
+        .hasMessage(EXPECTED_COMPARISON);
+  }
+
+  @Test
+  @DisplayName("recursive descent is the core's 400 (its REJECT message)")
+  void recursiveDescentIsRefused() {
+    assertThatThrownBy(() -> translator.translate("$[?(@..s == 'x')]"))
+        .isInstanceOf(TmfFilteringException.class)
+        .hasMessage("Unknown field path: .s");
+    assertThatThrownBy(() -> translator.translate("$[?(@.items..b == 'x')]"))
+        .isInstanceOf(TmfFilteringException.class)
+        .hasMessage("Unknown field path: items..b");
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "$[?(@.items.count() > 1)]",
+        "$[?(@.items.min() > 1)]",
+        "$[?(@.items.max() > 1)]",
+        "$[?(@.items.avg() > 1)]",
+        "$[?(@.s == 'a' && @.items.sum() > 1)]"
+      })
+  @DisplayName("a function PostgreSQL's jsonpath does not have is the core's 400")
+  void anUnknownFunctionIsRefused(String filter) {
+    assertThatThrownBy(() -> translator.translate(filter))
+        .isInstanceOf(TmfFilteringException.class)
+        .hasMessage(EXPECTED_COMPARISON);
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"$[?(@.items.length() > 1)]", "$[?(@.items.length() != 1)]"})
+  @DisplayName("length() compared by anything but == is the core's 400")
+  void lengthByOtherThanEqualsIsRefused(String filter) {
+    assertThatThrownBy(() -> translator.translate(filter))
+        .isInstanceOf(TmfFilteringException.class)
+        .hasMessage("length() supports only == comparison; use [?(...)] for non-empty checks.");
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "$[?(exists(@.s))]",
+        "$[?(@.s.type() == 'string')]",
+        "$[?(@.items.size() > 1)]",
+        "$[?(@.n.double() > 1)]",
+        "$[?(@.t.datetime() > \"2025-01-01\".datetime())]",
+        "$[?(@.s like_regex \"^a\")]",
+        "$[?(@.s starts with \"a\")]",
+        "$[?(@.n + 1 > 2)]",
+        "$[?(@.n > $.x)]",
+        "$[?(!(@.s == 'a'))]",
+        "$[?(@.items.length() == 2)]",
+        "$[?(@.s == @.t)]",
+        "$[?(!@.s)]"
+      })
+  @DisplayName("PostgreSQL's own jsonpath, which answers, stays accepted (an extension on JSONB)")
+  void postgresJsonpathThatAnswersStaysAccepted(String filter) {
+    assertThat(translator.translate(filter).sql()).isNotBlank();
+  }
+
+  // ---- the regex length cap (core's regex.max-length), since 3.6.0 ---------------------------
+
+  @Test
+  @DisplayName("=~ longer than the cap is the core's 400, naming the field")
+  void regexLongerThanTheCapIsRefused() {
+    JsonbJsonPathTranslator capped =
+        new JsonbJsonPathTranslator(extractor, "payload", true, IsnullSemantics.MISSING_ONLY, 8);
+    assertThat(capped.translate("$[?(@.s =~ /^abcdefg/)]").params())
+        .containsExactly("$ ? (@.s like_regex \"^abcdefg\")");
+    assertThatThrownBy(() -> capped.translate("$[?(@.s =~ /^abcdefghij/)]"))
+        .isInstanceOf(TmfFilteringException.class)
+        .hasMessage("Regex pattern too long for field: s");
+    assertThatThrownBy(() -> capped.translate("$[?(@.items[?(@.b =~ /abcdefghij/i)])]"))
+        .isInstanceOf(TmfFilteringException.class)
+        .hasMessage("Regex pattern too long for field: b");
+  }
+
+  @Test
+  @DisplayName("the three- and four-argument translators apply no cap, as before 3.6.0")
+  void noCapByDefault() {
+    String beyondTheCoreDefault = "a".repeat(JsonbJsonPathTranslator.DEFAULT_MAX_REGEX_LENGTH + 1);
+    for (JsonbJsonPathTranslator regex :
+        List.of(
+            new JsonbJsonPathTranslator(extractor, "payload", true),
+            new JsonbJsonPathTranslator(extractor, "payload", true, IsnullSemantics.MISSING_ONLY))) {
+      assertThat(regex.translate("$[?(@.s =~ /" + beyondTheCoreDefault + "/)]").sql())
+          .isNotBlank();
+    }
   }
 }

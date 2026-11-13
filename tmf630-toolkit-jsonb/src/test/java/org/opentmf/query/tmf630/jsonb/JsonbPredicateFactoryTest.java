@@ -27,6 +27,26 @@ class JsonbPredicateFactoryTest {
   private final JsonbPredicateFactory factory =
       new JsonbPredicateFactory(extractor, IsnullSemantics.MISSING_ONLY, true);
 
+  /** equality=containment alone, the casts as by default. */
+  private final JsonbPredicateFactory containment =
+      new JsonbPredicateFactory(
+          extractor,
+          IsnullSemantics.MISSING_ONLY,
+          true,
+          null,
+          JsonbEqualityMode.CONTAINMENT,
+          JsonbCastMode.STRICT);
+
+  /** The opt-ins: containment equality and the lenient (guarded) cast. */
+  private final JsonbPredicateFactory optIns =
+      new JsonbPredicateFactory(
+          extractor,
+          IsnullSemantics.MISSING_ONLY,
+          true,
+          null,
+          JsonbEqualityMode.CONTAINMENT,
+          JsonbCastMode.LENIENT);
+
   @Test
   @DisplayName("EQ / NE on String — no cast, direct text comparison")
   void equalityOnString() {
@@ -124,82 +144,101 @@ class JsonbPredicateFactoryTest {
   private static final String CONTAINS = "payload @> ?::jsonb";
 
   @Test
-  @DisplayName("EQ on an object path is containment, the value in the field's own JSON type")
+  @DisplayName("by default, EQ and IN on an object path keep the 3.5.2 extraction")
+  void equalityOnAnObjectPathKeepsTheExtractionByDefault() {
+    assertThat(factory.buildOnObjectPath(TmfOperator.EQ, "a.b", String.class, "x").sql())
+        .isEqualTo("payload#>>'{a,b}' = ?");
+    assertThat(factory.buildOnObjectPath(TmfOperator.EQ, "n", Integer.class, 42).sql())
+        .isEqualTo("(payload->>'n')::bigint = ?::bigint");
+    assertThat(
+            factory
+                .buildMultiOnObjectPath(TmfOperator.IN, "s", String.class, List.of("x", "y"))
+                .sql())
+        .isEqualTo("payload->>'s' IN (?, ?)");
+    assertThat(
+            factory.containmentThrough(
+                new JsonbFieldPath(List.of("items", "b"), List.of(true, false)),
+                String.class,
+                "x"))
+        .as("no containment through an array either")
+        .isEmpty();
+  }
+
+  @Test
+  @DisplayName("equality=containment: EQ on an object path is containment, in the field's JSON type")
   void equalityOnAnObjectPathIsContainment() {
-    assertContainment(factory.buildOnObjectPath(TmfOperator.EQ, "a.b", String.class, "x"),
+    assertContainment(containment.buildOnObjectPath(TmfOperator.EQ, "a.b", String.class, "x"),
         "{\"a\":{\"b\":\"x\"}}");
-    assertContainment(factory.buildOnObjectPath(TmfOperator.EQ, "n", Integer.class, 42),
+    assertContainment(containment.buildOnObjectPath(TmfOperator.EQ, "n", Integer.class, 42),
         "{\"n\":42}");
-    assertContainment(factory.buildOnObjectPath(TmfOperator.EQ, "n", short.class, (short) 7),
+    assertContainment(containment.buildOnObjectPath(TmfOperator.EQ, "n", short.class, (short) 7),
         "{\"n\":7}");
-    assertContainment(factory.buildOnObjectPath(TmfOperator.EQ, "n", Byte.class, (byte) 1),
+    assertContainment(containment.buildOnObjectPath(TmfOperator.EQ, "n", Byte.class, (byte) 1),
         "{\"n\":1}");
     assertContainment(
-        factory.buildOnObjectPath(
+        containment.buildOnObjectPath(
             TmfOperator.EQ, "n", BigInteger.class, new BigInteger("9007199254740993")),
         "{\"n\":9007199254740993}");
     assertContainment(
-        factory.buildOnObjectPath(TmfOperator.EQ, "d", BigDecimal.class, new BigDecimal("1.50")),
+        containment.buildOnObjectPath(TmfOperator.EQ, "d", BigDecimal.class, new BigDecimal("1.50")),
         "{\"d\":1.50}");
-    assertContainment(factory.buildOnObjectPath(TmfOperator.EQ, "d", Double.class, 0.1),
+    assertContainment(containment.buildOnObjectPath(TmfOperator.EQ, "d", Double.class, 0.1),
         "{\"d\":0.1}");
-    assertContainment(factory.buildOnObjectPath(TmfOperator.EQ, "d", float.class, 0.1f),
+    assertContainment(containment.buildOnObjectPath(TmfOperator.EQ, "d", float.class, 0.1f),
         "{\"d\":0.1}");
-    assertContainment(factory.buildOnObjectPath(TmfOperator.EQ, "b", Boolean.class, true),
+    assertContainment(containment.buildOnObjectPath(TmfOperator.EQ, "b", Boolean.class, true),
         "{\"b\":true}");
     assertContainment(
-        factory.buildOnObjectPath(TmfOperator.EQ, "w", Status.class, Status.IN_PROGRESS),
+        containment.buildOnObjectPath(TmfOperator.EQ, "w", Status.class, Status.IN_PROGRESS),
         "{\"w\":\"inProgress\"}");
     assertContainment(
-        factory.buildOnObjectPath(TmfOperator.EQ, "q", String.class, "a\"b"),
+        containment.buildOnObjectPath(TmfOperator.EQ, "q", String.class, "a\"b"),
         "{\"q\":\"a\\\"b\"}");
   }
 
   @Test
-  @DisplayName("EQ keeps the extraction for date-times, other types, NaN, [N] and other operators")
+  @DisplayName("equality=containment keeps the extraction for date-times, other types, NaN, [N]")
   void equalityKeepsTheExtractionWhereContainmentWouldDiffer() {
     assertThat(
-            factory
+            containment
                 .buildOnObjectPath(TmfOperator.EQ, "ld", LocalDate.class, LocalDate.of(2025, 1, 1))
                 .sql())
-        .isEqualTo(
-            "CASE WHEN pg_input_is_valid(payload->>'ld', 'date') THEN (payload->>'ld')::date END"
-                + " = ?::date");
+        .isEqualTo("(payload->>'ld')::date = ?::date");
     assertThat(
-            factory
+            containment
                 .buildOnObjectPath(TmfOperator.EQ, "u", UUID.class, UUID.randomUUID())
                 .sql())
         .isEqualTo("payload->>'u' = ?");
-    assertThat(factory.buildOnObjectPath(TmfOperator.EQ, "d", Double.class, Double.NaN).sql())
+    assertThat(containment.buildOnObjectPath(TmfOperator.EQ, "d", Double.class, Double.NaN).sql())
         .isEqualTo("(payload->>'d')::numeric = ?::numeric");
-    assertThat(factory.buildOnObjectPath(TmfOperator.EQ, "items.0.b", String.class, "x").sql())
+    assertThat(containment.buildOnObjectPath(TmfOperator.EQ, "items.0.b", String.class, "x").sql())
         .isEqualTo("payload#>>'{items,0,b}' = ?");
-    assertThat(factory.buildOnObjectPath(TmfOperator.NE, "s", String.class, "x").sql())
+    assertThat(containment.buildOnObjectPath(TmfOperator.NE, "s", String.class, "x").sql())
         .isEqualTo("payload->>'s' <> ?");
-    assertThat(factory.buildOnObjectPath(TmfOperator.EQ, "n", Integer.class, "42").sql())
+    assertThat(containment.buildOnObjectPath(TmfOperator.EQ, "n", Integer.class, "42").sql())
         .as("a value not of the declared type keeps the extraction")
         .isEqualTo("(payload->>'n')::bigint = ?::bigint");
   }
 
   @Test
-  @DisplayName("IN on an object path is an OR of fragments; NIN and an ineligible value keep IN")
+  @DisplayName("equality=containment: IN on an object path is an OR of fragments; NIN keeps IN")
   void inOnAnObjectPathIsAnOrOfFragments() {
     JsonbClause two =
-        factory.buildMultiOnObjectPath(TmfOperator.IN, "s", String.class, List.of("x", "y"));
+        containment.buildMultiOnObjectPath(TmfOperator.IN, "s", String.class, List.of("x", "y"));
     assertThat(two.sql()).isEqualTo("(" + CONTAINS + " OR " + CONTAINS + ")");
     assertThat(two.params()).containsExactly("{\"s\":\"x\"}", "{\"s\":\"y\"}");
 
     assertContainment(
-        factory.buildMultiOnObjectPath(TmfOperator.IN, "s", String.class, List.of("x")),
+        containment.buildMultiOnObjectPath(TmfOperator.IN, "s", String.class, List.of("x")),
         "{\"s\":\"x\"}");
     assertThat(
-            factory
+            containment
                 .buildMultiOnObjectPath(
                     TmfOperator.IN, "d", Double.class, List.of(0.1, Double.NaN))
                 .sql())
         .isEqualTo("(payload->>'d')::numeric IN (?::numeric, ?::numeric)");
     assertThat(
-            factory
+            containment
                 .buildMultiOnObjectPath(TmfOperator.NIN, "s", String.class, List.of("x"))
                 .sql())
         .isEqualTo("payload->>'s' NOT IN (?)");
@@ -233,10 +272,72 @@ class JsonbPredicateFactoryTest {
   }
 
   @Test
-  @DisplayName("GT on OffsetDateTime — read as timestamptz only where pg_input_is_valid says so")
+  @DisplayName("inside an array or a split child, the default reads only the JSON or ISO form")
+  void anElementFactoryReadsOnlyTheCanonicalFormByDefault() {
+    JsonbPredicateFactory element = factory.forColumn("e1");
+    assertThat(element.build(TmfOperator.EQ, "ld", LocalDate.class, LocalDate.of(2025, 1, 1)).sql())
+        .isEqualTo(JsonbCast.DATE.readCanonical("e1->>'ld'") + " = ?::date");
+    assertThat(element.build(TmfOperator.GT, "i", Integer.class, 5).sql())
+        .isEqualTo(JsonbCast.BIGINT.readCanonical("e1->>'i'") + " > ?::bigint");
+    assertThat(
+            element
+                .buildMulti(TmfOperator.NIN, "b", Boolean.class, List.of(Boolean.TRUE))
+                .sql())
+        .isEqualTo(JsonbCast.BOOLEAN.readCanonical("e1->>'b'") + " NOT IN (?::boolean)");
+    assertThat(
+            element
+                .buildMulti(
+                    TmfOperator.BETWEEN,
+                    "d",
+                    BigDecimal.class,
+                    List.of(BigDecimal.ONE, BigDecimal.TEN))
+                .sql())
+        .isEqualTo(
+            JsonbCast.NUMERIC.readCanonical("e1->>'d'") + " BETWEEN ?::numeric AND ?::numeric");
+    assertThat(element.build(TmfOperator.EQ, "s", String.class, "a").sql())
+        .as("text is read as it is")
+        .isEqualTo("e1->>'s' = ?");
+    assertThat(factory.build(TmfOperator.GT, "i", Integer.class, 5).sql())
+        .as("the top level keeps the plain cast, as 3.5.2")
+        .isEqualTo("(payload->>'i')::bigint > ?::bigint");
+  }
+
+  @Test
+  @DisplayName("inside an array under cast-mode=lenient, pg_input_is_valid as everywhere")
+  void anElementFactoryUnderLenientKeepsTheExactCheck() {
+    assertThat(optIns.forColumn("e1").build(TmfOperator.GT, "i", Integer.class, 5).sql())
+        .isEqualTo(
+            "CASE WHEN pg_input_is_valid(e1->>'i', 'bigint') THEN (e1->>'i')::bigint END"
+                + " > ?::bigint");
+  }
+
+  @Test
+  @DisplayName("cast-mode=lenient guards numbers and booleans with pg_input_is_valid too")
+  void lenientGuardsNumbersAndBooleans() {
+    assertThat(optIns.build(TmfOperator.GT, "n", Integer.class, 5).sql())
+        .isEqualTo(
+            "CASE WHEN pg_input_is_valid(payload->>'n', 'bigint') THEN (payload->>'n')::bigint END"
+                + " > ?::bigint");
+    assertThat(optIns.build(TmfOperator.LT, "d", BigDecimal.class, BigDecimal.ONE).sql())
+        .isEqualTo(
+            "CASE WHEN pg_input_is_valid(payload->>'d', 'numeric') THEN (payload->>'d')::numeric"
+                + " END < ?::numeric");
+    assertThat(optIns.build(TmfOperator.NE, "b", Boolean.class, true).sql())
+        .isEqualTo(
+            "CASE WHEN pg_input_is_valid(payload->>'b', 'boolean') THEN (payload->>'b')::boolean"
+                + " END <> ?::boolean");
+    assertThat(optIns.build(TmfOperator.GT, "s", String.class, "a").sql())
+        .as("text needs no guard")
+        .isEqualTo("payload->>'s' > ?");
+  }
+
+  @Test
+  @DisplayName("GT on OffsetDateTime: the plain cast by default, the guarded read when lenient")
   void rangeOperatorsDatetime() {
     OffsetDateTime when = OffsetDateTime.parse("2026-01-01T00:00:00Z");
-    JsonbClause gt = factory.build(TmfOperator.GT, "createdAt", OffsetDateTime.class, when);
+    assertThat(factory.build(TmfOperator.GT, "createdAt", OffsetDateTime.class, when).sql())
+        .isEqualTo("(payload->>'createdAt')::timestamptz > ?::timestamptz");
+    JsonbClause gt = optIns.build(TmfOperator.GT, "createdAt", OffsetDateTime.class, when);
     assertThat(gt.sql())
         .isEqualTo(
             "CASE WHEN pg_input_is_valid(payload->>'createdAt', 'timestamptz')"
@@ -323,6 +424,42 @@ class JsonbPredicateFactoryTest {
         .containsExactly("x%_");
     assertThat(factory.build(TmfOperator.LIKEI, "n", String.class, "x%_").params())
         .containsExactly("x%_");
+  }
+
+  @Test
+  @DisplayName("substring operators bind a value that is not text as itself, as 3.5.2 did")
+  void substringOperatorsBindANonTextValueAsItself() {
+    // PostgreSQL renders the bound value as text (a double 1.0 as "1"); Java's "1.0" would miss
+    // a stored 0.1 for ?f.contains=1. That text never holds %, _ or !, so nothing is escaped.
+    LocalDate day = LocalDate.of(2025, 1, 1);
+    BigDecimal amount = new BigDecimal("1.50");
+    for (TmfOperator op :
+        List.of(
+            TmfOperator.CONTAINS,
+            TmfOperator.CONTAINSI,
+            TmfOperator.STARTS_WITH,
+            TmfOperator.STARTS_WITHI,
+            TmfOperator.ENDS_WITH,
+            TmfOperator.ENDS_WITHI)) {
+      assertThat(factory.build(op, "f", Double.class, 1.0d).params())
+          .as(op.suffix())
+          .containsExactly(1.0d);
+      assertThat(factory.build(op, "i", Integer.class, 5).params())
+          .as(op.suffix())
+          .containsExactly(5);
+      assertThat(factory.build(op, "a", BigDecimal.class, amount).params())
+          .as(op.suffix())
+          .containsExactly(amount);
+      assertThat(factory.build(op, "b", Boolean.class, Boolean.TRUE).params())
+          .as(op.suffix())
+          .containsExactly(Boolean.TRUE);
+      assertThat(factory.build(op, "ld", LocalDate.class, day).params())
+          .as(op.suffix())
+          .containsExactly(day);
+      assertThat(factory.build(op, "o", Object.class, "50%").params())
+          .as(op.suffix())
+          .containsExactly("50!%");
+    }
   }
 
   @Test

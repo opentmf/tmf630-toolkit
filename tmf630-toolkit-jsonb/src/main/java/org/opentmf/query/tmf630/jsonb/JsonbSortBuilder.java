@@ -37,9 +37,15 @@ public class JsonbSortBuilder {
   private final JsonbCorrelatedSortTranslator correlatedTranslator;
   private final String payloadColumn;
   private final boolean nullsLast;
+  private final JsonbCastMode castMode;
 
   public JsonbSortBuilder(JsonbPathExtractor extractor, boolean nullsLast) {
-    this(extractor, new JsonbCorrelatedSortTranslator(), "payload", nullsLast);
+    this(extractor, nullsLast, JsonbCastMode.STRICT);
+  }
+
+  /** A builder whose typed sort keys read stored values by {@code castMode}. */
+  public JsonbSortBuilder(JsonbPathExtractor extractor, boolean nullsLast, JsonbCastMode castMode) {
+    this(extractor, new JsonbCorrelatedSortTranslator(), "payload", nullsLast, castMode);
   }
 
   public JsonbSortBuilder(
@@ -47,10 +53,25 @@ public class JsonbSortBuilder {
       JsonbCorrelatedSortTranslator correlatedTranslator,
       String payloadColumn,
       boolean nullsLast) {
+    this(extractor, correlatedTranslator, payloadColumn, nullsLast, JsonbCastMode.STRICT);
+  }
+
+  /**
+   * As the four-argument constructor, with typed sort keys read by {@code castMode}: the plain cast
+   * ({@link JsonbCastMode#STRICT}, the default: a value the cast cannot read fails the query) or the
+   * guarded read ({@link JsonbCastMode#LENIENT}: it sorts as a null).
+   */
+  public JsonbSortBuilder(
+      JsonbPathExtractor extractor,
+      JsonbCorrelatedSortTranslator correlatedTranslator,
+      String payloadColumn,
+      boolean nullsLast,
+      JsonbCastMode castMode) {
     this.extractor = extractor;
     this.correlatedTranslator = correlatedTranslator;
     this.payloadColumn = payloadColumn;
     this.nullsLast = nullsLast;
+    this.castMode = castMode == null ? JsonbCastMode.STRICT : castMode;
   }
 
   /**
@@ -90,7 +111,7 @@ public class JsonbSortBuilder {
     Class<?> fieldType = fieldTypeResolver.apply(term.expression());
     JsonbCast cast = JsonbCast.forJavaType(fieldType);
     String extraction = extractor.extractAsText(term.expression());
-    return cast.read(extraction) + " " + directionKeyword(term) + nullsTail();
+    return cast.read(extraction, castMode) + " " + directionKeyword(term) + nullsTail();
   }
 
   private String correlatedTermFragment(
@@ -99,7 +120,7 @@ public class JsonbSortBuilder {
     JsonbCast cast = resolveCast(expr, term, fieldTypeResolver);
     params.add(expr.jsonPath());
     Optional<JsonbSortExpression.Aggregator> aggregator = expr.aggregator();
-    if (aggregator.isEmpty() && cast.readRepeatsText()) {
+    if (aggregator.isEmpty() && cast.readRepeatsText(castMode)) {
       // the first-match extraction carries the jsonpath parameter and the read repeats it
       params.add(expr.jsonPath());
     }
@@ -139,7 +160,7 @@ public class JsonbSortBuilder {
   private String firstMatchFragment(JsonbCast cast) {
     String extraction =
         "((jsonb_path_query_first(" + payloadColumn + ", ?::jsonpath)) #>> '{}')";
-    return cast.readParenthesized(extraction);
+    return cast.readParenthesized(extraction, castMode);
   }
 
   /**
@@ -149,7 +170,7 @@ public class JsonbSortBuilder {
    */
   private String aggregateSubqueryFragment(
       JsonbSortExpression.Aggregator aggregator, JsonbCast cast) {
-    String inner = cast.readParenthesized("(v #>> '{}')");
+    String inner = cast.readParenthesized("(v #>> '{}')", castMode);
     return "(SELECT "
         + aggregator.sqlName()
         + "("

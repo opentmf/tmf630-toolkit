@@ -1,0 +1,27 @@
+# The NAMED FIXES of 3.6.0 against the release: each line a reviewed pattern (regular expressions over the
+# request key, each matching the whole field), the answer transitions it covers and the evidence the
+# candidate's rows must carry. A difference between the release (R0) and the candidate under its defaults
+# (R1) passes only when a rule names it and its evidence holds; a rule that names no request fails the gate,
+# and so does any transition from a 2xx to a 4xx or a 5xx (a request that answered must keep answering).
+# Columns: id, CHANGELOG entry, backend, shape, position, kind, entry, operator, request, transitions
+# (FROM>TO statuses; 200>200 = other rows), evidence (- none; name-twin: 3.5.2's rows for the request with
+# each wire value written as its constant's name; candidate-twin: the candidate's own rows for that request,
+# where 3.5.2 answered an error for both spellings; oracle: the oracle's rows).
+FIX-FILTER-ARRAY-PREDICATE	Fixed (JSONB `filter=` and the GIN index)	JSONB	not split	ARRAY|ARRAY_IN_ARRAY	.*	FILTER	.*	.*	500>200,500>400	-
+FIX-FILTER-ARRAY-PREDICATE-LIST	Fixed (JSONB `filter=` and the GIN index)	JSONB	not split|split	TOP|NESTED|SPLIT	OBJECT_LIST	FILTER	.*	.*	500>200	-
+FIX-WRAPPER	Fixed (JSONB `filter=` and the GIN index)	JSONB	sample	-	-	SAMPLE	WRAPPER_CLOSED	.*	500>400	-
+FIX-ENUM-BINDING	Fixed (JSONB filters on an enum field)	JSONB	.*	.*	PLAIN_ENUM|WIRE_ENUM	URL	.*	.*	500>200,500>400,200>200	-
+FIX-WIRE-ENUM-JSONB	Fixed (an enum filter value by its wire value, on every backend)	JSONB	.*	.*	WIRE_ENUM	URL	EQ|NE|IN|NIN	.*	400>200	oracle
+FIX-WIRE-ENUM-JSONB-ORDER	Fixed (an enum filter value by its wire value, on every backend)	JSONB	.*	.*	WIRE_ENUM	URL	GT|GTE|LT|LTE|BETWEEN	.*	400>200	candidate-twin
+FIX-WIRE-ENUM	Fixed (an enum filter value by its wire value, on every backend)	MONGO|JPA	.*	.*	WIRE_ENUM	URL|FILTER	EQ|NE|IN|NIN	.*	400>200	name-twin
+FIX-WIRE-ENUM-ORDER	Fixed (an enum filter value by its wire value, on every backend)	MONGO|JPA	.*	.*	WIRE_ENUM	URL|FILTER	GT|GTE|LT|LTE|BETWEEN	.*	400>200	name-twin
+FIX-WIRE-ENUM-LEDGER	Fixed (an enum filter value by its wire value, on every backend)	MONGO|JPA	ledger	-	-	URL	state	state=inProgress	400>200	name-twin
+FIX-FILTER-NULL-TESTS	Fixed (JSONB `filter=` null tests, `in` and `nin`)	JSONB	.*	.*	.*	FILTER	IS_NULL	.*	500>200	-
+FIX-FILTER-NULL-LITERAL	Fixed (JSONB `filter=` null tests, `in` and `nin`)	JSONB	sample	-	-	SAMPLE	EQ_NULL|NE_NULL	.*	200>200	-
+FIX-FILTER-IN-NIN	Fixed (JSONB `filter=` null tests, `in` and `nin`)	JSONB	.*	.*	.*	FILTER	IN|NIN	.*	500>400	-
+FIX-JAYWAY-WORDS	Fixed (JSONB `filter=` null tests, `in` and `nin`)	JSONB	.*	.*	.*	FILTER	JAYWAY_.*	.*	500>400	-
+FIX-URL-ARRAYS	Fixed (JSONB URL operators on a field inside an array)	JSONB	not split|split	ARRAY|ARRAY_IN_ARRAY|SPLIT	.*	URL	.*	.*	200>200,500>200,500>400	-
+FIX-URL-ARRAYS-ELEMENTS	Fixed (JSONB URL operators on a field inside an array)	JSONB	elements	ARRAY|ARRAY_IN_ARRAY	.*	URL	.*	.*	200>200	oracle
+FIX-URL-COLLECTION-LEAF	Fixed (JSONB URL operators on a field inside an array)	JSONB	not split	TOP|NESTED	STRING_LIST|OBJECT_LIST	URL	.*	.*	200>200,500>200,500>400	-
+FIX-LIKE-LITERAL	Fixed (JSONB `contains`, `startswith` and `endswith` match their value literally)	JSONB	.*	.*	STRING	URL	CONTAINS|CONTAINSI|STARTS_WITH|STARTS_WITHI|ENDS_WITH|ENDS_WITHI	.*	200>200	-
+FIX-PG-SYNTAX	Fixed (JSONB `filter=` forms PostgreSQL cannot parse are a 400, not a 500)	JSONB	sample	-	-	SAMPLE	BARE_EXISTS|BARE_EXISTS_IN_ARRAY|RECURSIVE_DESCENT|FUNCTION_COUNT|FUNCTION_MIN|FUNCTION_MAX|LENGTH_GT	.*	500>400	-

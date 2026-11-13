@@ -23,6 +23,8 @@ import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.format.support.DefaultFormattingConversionService;
@@ -51,6 +53,7 @@ import tools.jackson.databind.ObjectMapper;
 @AutoConfiguration(
     afterName = "org.opentmf.query.tmf630.filtering.Tmf630AttributeFilteringAutoConfiguration")
 @ConditionalOnClass({EntityManager.class, Tmf630JsonbBacked.class})
+@EnableConfigurationProperties(Tmf630JsonbProperties.class)
 public class Tmf630JsonbAutoConfiguration {
 
   private static final Logger log = LoggerFactory.getLogger(Tmf630JsonbAutoConfiguration.class);
@@ -108,7 +111,8 @@ public class Tmf630JsonbAutoConfiguration {
   public JsonbPredicateFactory tmf630JsonbPredicateFactory(
       JsonbPathExtractor extractor,
       ObjectProvider<Tmf630FilterSettings> filterSettings,
-      ObjectProvider<ObjectMapper> objectMapper) {
+      ObjectProvider<ObjectMapper> objectMapper,
+      Tmf630JsonbProperties properties) {
     Tmf630FilterSettings settings = filterSettings.getIfAvailable();
     boolean regexEnabled = settings != null && settings.regexEnabled();
     // The service's mapper writes the payloads, so it decides an enum's stored form; without
@@ -117,17 +121,36 @@ public class Tmf630JsonbAutoConfiguration {
         extractor,
         settings != null ? settings.isnullSemantics() : null,
         regexEnabled,
-        objectMapper.getIfAvailable());
+        objectMapper.getIfAvailable(),
+        properties.getEquality(),
+        properties.getCastMode());
   }
 
   @Bean
   @ConditionalOnMissingBean
   public JsonbJsonPathTranslator tmf630JsonbJsonPathTranslator(
-      JsonbPathExtractor extractor, ObjectProvider<Tmf630FilterSettings> filterSettings) {
+      JsonbPathExtractor extractor,
+      ObjectProvider<Tmf630FilterSettings> filterSettings,
+      Tmf630JsonbProperties properties) {
     Tmf630FilterSettings settings = filterSettings.getIfAvailable();
     boolean regexEnabled = settings != null && settings.regexEnabled();
     return new JsonbJsonPathTranslator(
-        extractor, "payload", regexEnabled, settings != null ? settings.isnullSemantics() : null);
+        extractor,
+        "payload",
+        regexEnabled,
+        settings != null ? settings.isnullSemantics() : null,
+        maxRegexLength(settings, properties));
+  }
+
+  /** The {@code =~} cap: none by default; the core's {@code regex.max-length} when opted in. */
+  private static int maxRegexLength(
+      Tmf630FilterSettings settings, Tmf630JsonbProperties properties) {
+    if (!properties.isApplyRegexMaxLength()) {
+      return JsonbJsonPathTranslator.NO_REGEX_LENGTH_CAP;
+    }
+    return settings != null
+        ? settings.limits().maxRegexLength()
+        : JsonbJsonPathTranslator.DEFAULT_MAX_REGEX_LENGTH;
   }
 
   @Bean
@@ -140,10 +163,12 @@ public class Tmf630JsonbAutoConfiguration {
   @Bean
   @ConditionalOnMissingBean
   public JsonbSortBuilder tmf630JsonbSortBuilder(
-      JsonbPathExtractor extractor, ObjectProvider<Tmf630PagingSettings> pagingSettings) {
+      JsonbPathExtractor extractor,
+      ObjectProvider<Tmf630PagingSettings> pagingSettings,
+      Tmf630JsonbProperties properties) {
     Tmf630PagingSettings settings = pagingSettings.getIfAvailable();
     boolean nullsLast = settings != null && settings.nullsLast();
-    return new JsonbSortBuilder(extractor, nullsLast);
+    return new JsonbSortBuilder(extractor, nullsLast, properties.getCastMode());
   }
 
   @Bean
@@ -154,21 +179,28 @@ public class Tmf630JsonbAutoConfiguration {
   }
 
   /**
-   * Refuses to start on a PostgreSQL older than 16, which the date and time filters and sorts need
-   * ({@code pg_input_is_valid}). The check is replaceable, the requirement is not: an application
-   * that replaces this bean and runs below 16 starts, and then every filter and sort on a date or
-   * time field fails with "function pg_input_is_valid does not exist".
+   * Under {@code opentmf.tmf630.jsonb.cast-mode=lenient} only, refuses to start on a PostgreSQL
+   * older than 16, which the guarded read needs ({@code pg_input_is_valid}). The default,
+   * {@code strict}, needs nothing beyond PostgreSQL 15. The check is replaceable, the requirement
+   * is not: an application that replaces this bean and runs lenient below 16 starts, and then every
+   * typed filter and sort fails with "function pg_input_is_valid does not exist".
    */
   @Bean
   @ConditionalOnMissingBean
-  @ConditionalOnBean(DataSource.class)
-  public Tmf630JsonbPostgresVersionCheck tmf630JsonbPostgresVersionCheck(DataSource dataSource) {
-    JdbcClient jdbc = JdbcClient.create(dataSource);
+  @ConditionalOnProperty(prefix = "opentmf.tmf630.jsonb", name = "cast-mode", havingValue = "lenient")
+  public Tmf630JsonbPostgresVersionCheck tmf630JsonbPostgresVersionCheck(
+      ObjectProvider<JdbcClient> jdbcClient) {
+    // The JdbcClient the executors query with, resolved when the check runs; without a single one
+    // there is no database to check (and no executor can run either).
     return new Tmf630JsonbPostgresVersionCheck(
-        () ->
-            jdbc.sql("SELECT current_setting('server_version_num')::int")
-                .query(Integer.class)
-                .single());
+        () -> {
+          JdbcClient jdbc = jdbcClient.getIfUnique();
+          return jdbc == null
+              ? Tmf630JsonbPostgresVersionCheck.MINIMUM_SERVER_VERSION_NUM
+              : jdbc.sql("SELECT current_setting('server_version_num')::int")
+                  .query(Integer.class)
+                  .single();
+        });
   }
 
   @Bean
@@ -228,7 +260,8 @@ public class Tmf630JsonbAutoConfiguration {
         ObjectProvider<ValueConverter> valueConverter,
         ObjectProvider<ObjectMapper> objectMapper,
         JsonbPredicateFactory predicateFactory,
-        JsonbSplitAwareFilterTranslator filterTranslator) {
+        JsonbSplitAwareFilterTranslator filterTranslator,
+        Tmf630JsonbProperties properties) {
       Tmf630FilterParser parser =
           new Tmf630FilterParser(
               keyParser.getIfAvailable(
@@ -245,7 +278,8 @@ public class Tmf630JsonbAutoConfiguration {
                       new DefaultFormattingConversionService(),
                       new JacksonEnumTextReader(objectMapper.getIfAvailable()))),
           predicateFactory,
-          filterTranslator);
+          filterTranslator,
+          properties.isApplyRegexMaxLength());
     }
 
     @Bean

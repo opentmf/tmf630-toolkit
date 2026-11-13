@@ -112,10 +112,32 @@ public class JsonbJsonPathTranslator {
           .filter(text -> text.chars().noneMatch(Character::isLetter))
           .toList();
 
+  /** The core's default {@code regex.max-length}. */
+  static final int DEFAULT_MAX_REGEX_LENGTH = 256;
+
+  /** No cap on an {@code =~} pattern's length: the default, as before 3.6.0. */
+  public static final int NO_REGEX_LENGTH_CAP = Integer.MAX_VALUE;
+
+  /**
+   * PostgreSQL's jsonpath item methods (PostgreSQL 18). A method call by any other name is a
+   * jsonpath syntax error there, so it is refused before any SQL ({@link #refuseWhatPostgresRefuses}).
+   */
+  private static final Set<String> POSTGRES_ITEM_METHODS =
+      Set.of(
+          "type", "size", "double", "ceiling", "floor", "abs", "datetime", "keyvalue", "bigint",
+          "boolean", "date", "decimal", "integer", "number", "string", "time", "time_tz",
+          "timestamp", "timestamp_tz");
+
+  /** The core's message for a path that is no comparison (a bare exists test, a function call). */
+  private static final String EXPECTED_COMPARISON = "Expected comparison operator in jsonPath filter.";
+
+  private static final String LENGTH_METHOD = "length";
+
   private final JsonbPathExtractor extractor;
   private final String payloadColumn;
   private final boolean regexEnabled;
   private final IsnullSemantics isnullSemantics;
+  private final int maxRegexLength;
 
   /** Regex-disabled translator: {@code =~} is rejected, matching the attribute side's default. */
   public JsonbJsonPathTranslator(JsonbPathExtractor extractor, String payloadColumn) {
@@ -130,13 +152,29 @@ public class JsonbJsonPathTranslator {
 
   /**
    * A translator whose null tests ({@code !@.field}, {@code == null}, {@code != null}) follow
-   * {@code isnullSemantics}, as the attribute {@code isnull} does.
+   * {@code isnullSemantics}, as the attribute {@code isnull} does. No cap on an {@code =~}
+   * pattern's length, as before 3.6.0.
    */
   public JsonbJsonPathTranslator(
       JsonbPathExtractor extractor,
       String payloadColumn,
       boolean regexEnabled,
       IsnullSemantics isnullSemantics) {
+    this(extractor, payloadColumn, regexEnabled, isnullSemantics, NO_REGEX_LENGTH_CAP);
+  }
+
+  /**
+   * As the four-argument constructor, with the longest {@code =~} pattern accepted (a longer one is
+   * the core's 400): the core's {@code opentmf.tmf630.attribute-filtering.regex.max-length} under
+   * {@code opentmf.tmf630.jsonb.apply-regex-max-length=true} (an opt-in, since 3.6.0), so the cap
+   * is the same on every backend; {@link #NO_REGEX_LENGTH_CAP} for none.
+   */
+  public JsonbJsonPathTranslator(
+      JsonbPathExtractor extractor,
+      String payloadColumn,
+      boolean regexEnabled,
+      IsnullSemantics isnullSemantics,
+      int maxRegexLength) {
     if (extractor == null) {
       throw new IllegalArgumentException("extractor must not be null");
     }
@@ -148,6 +186,7 @@ public class JsonbJsonPathTranslator {
     this.regexEnabled = regexEnabled;
     this.isnullSemantics =
         isnullSemantics == null ? IsnullSemantics.MISSING_ONLY : isnullSemantics;
+    this.maxRegexLength = maxRegexLength;
   }
 
   /**
@@ -416,6 +455,7 @@ public class JsonbJsonPathTranslator {
       }
     }
     if (c == '@' || c == '$') {
+      refuseWhatPostgresRefuses(input, i);
       int nullTest = translateNullComparison(input, i, out);
       if (nullTest > 0) {
         return nullTest;
@@ -511,6 +551,99 @@ public class JsonbJsonPathTranslator {
     }
   }
 
+  /**
+   * The {@code filter=} forms PostgreSQL's jsonpath cannot parse, which were a 500 before 3.6.0,
+   * refused at the path starting at {@code i} with the core's 400:
+   *
+   * <ul>
+   *   <li>recursive descent ({@code @..name}): "Unknown field path: …", as the core says under
+   *       {@code on-unknown-json-path-field: REJECT};
+   *   <li>a method PostgreSQL does not have ({@code count()}, {@code min()}, {@code max()}, …):
+   *       "Expected comparison operator in jsonPath filter.";
+   *   <li>{@code length()} compared by anything but {@code ==}: "length() supports only ==
+   *       comparison; …";
+   *   <li>a bare exists test ({@code $[?(@.name)]}, a path standing as a predicate on its own):
+   *       "Expected comparison operator in jsonPath filter.".
+   * </ul>
+   *
+   * PostgreSQL's own item methods ({@code type()}, {@code size()}, {@code double()}, …),
+   * {@code exists(…)}, {@code like_regex} and the rest of its jsonpath stay accepted: they answer.
+   */
+  private static void refuseWhatPostgresRefuses(String input, int i) {
+    int end = pathEnd(input, i);
+    String path = input.substring(i, end);
+    if (path.contains("..")) {
+      throw new TmfFilteringException("Unknown field path: " + path.substring(2));
+    }
+    int next = skipSpaces(input, end);
+    if (next < input.length() && input.charAt(next) == '(') {
+      refuseUnknownMethod(input, path, next);
+      return;
+    }
+    if (standsAlone(input, i, next)) {
+      throw new TmfFilteringException(EXPECTED_COMPARISON);
+    }
+  }
+
+  /** {@code path(} at {@code open}: a method call, refused unless PostgreSQL has the method. */
+  private static void refuseUnknownMethod(String input, String path, int open) {
+    int dot = path.lastIndexOf('.');
+    String method = dot < 0 ? "" : path.substring(dot + 1);
+    if (LENGTH_METHOD.equals(method)) {
+      int close = skipSpaces(input, open + 1);
+      int operator =
+          close < input.length() && input.charAt(close) == ')' ? skipSpaces(input, close + 1) : -1;
+      if (operator >= 0 && operator < input.length() && !input.startsWith("==", operator)) {
+        throw new TmfFilteringException(
+            "length() supports only == comparison; use [?(...)] for non-empty checks.");
+      }
+      return;
+    }
+    if (dot >= 0 && !POSTGRES_ITEM_METHODS.contains(method)) {
+      throw new TmfFilteringException(EXPECTED_COMPARISON);
+    }
+  }
+
+  /**
+   * Whether the path from {@code start} (its end followed by {@code next}) stands as a predicate on
+   * its own: it begins the body, a group, {@code &&} or {@code ||}, and ends the body, a group,
+   * {@code &&} or {@code ||}. A path compared, negated ({@code !@.f}), passed to a function
+   * ({@code exists(@.f)}) or filtered ({@code @.a[?(…)]}) does not.
+   */
+  private static boolean standsAlone(String input, int start, int next) {
+    boolean endsPredicate =
+        next >= input.length()
+            || input.charAt(next) == ')'
+            || input.startsWith("&&", next)
+            || input.startsWith("||", next);
+    return endsPredicate && beginsPredicate(input, start);
+  }
+
+  private static boolean beginsPredicate(String input, int start) {
+    int before = skipSpacesBackward(input, start, 0);
+    if (before == 0) {
+      return true;
+    }
+    char c = input.charAt(before - 1);
+    if (c == '(') {
+      int call = skipSpacesBackward(input, before - 1, 0);
+      return call == 0 || !isFieldChar(input.charAt(call - 1));
+    }
+    return before >= 2 && (input.startsWith("&&", before - 2) || input.startsWith("||", before - 2));
+  }
+
+  /** The field path before the operator at {@code operatorAt}, without its {@code @.} / {@code $.}. */
+  private static String fieldBefore(String input, int operatorAt) {
+    int end = skipSpacesBackward(input, operatorAt, 0);
+    int start = end;
+    while (start > 0 && (isFieldChar(input.charAt(start - 1)) || input.charAt(start - 1) == ']'
+        || input.charAt(start - 1) == '[' || input.charAt(start - 1) == '*')) {
+      start--;
+    }
+    String path = input.substring(start, end);
+    return path.startsWith(".") ? path.substring(1) : path;
+  }
+
   private static TmfFilteringException unsupportedToken(String input, int at) {
     return new TmfFilteringException(
         "Unsupported token in jsonPath filter near: " + input.substring(at));
@@ -596,6 +729,10 @@ public class JsonbJsonPathTranslator {
           "Unsupported regex flags '" + flags + "' in jsonPath filter; supported: i");
     }
     String pattern = input.substring(open + 1, close);
+    if (pattern.length() > maxRegexLength) {
+      throw new TmfFilteringException(
+          "Regex pattern too long for field: " + fieldBefore(input, i));
+    }
     out.append("like_regex \"")
         .append(JsonbStringEscape.escapeForDoubleQuoted(pattern))
         .append('"');

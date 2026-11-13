@@ -482,6 +482,44 @@ counted separately.
 backend: `surname.contains=50%` finds "50% off", not "500 off", and a `_` or a backslash in the
 value is a plain character. `like` and `likei` take a pattern, in which `%` and `_` are wildcards.
 
+#### What `ne`, `nin` and `!=` mean on each backend
+
+The negative operators do not mean the same thing on every backend when the value is missing or
+null, or when the path crosses an array. Mongo reads "not equal" as "every row `eq` would not
+return"; SQL (JPA, and the JSONB URL operators) as "a value is present and differs".
+
+| Request | Mongo | JPA | JSONB |
+| --- | --- | --- | --- |
+| `t.ne=v` (or `t.nin=v`), `t` missing or null | matches | no match (SQL `NULL <> 'v'` is unknown) | no match |
+| `filter=$[?(@.t != 'v')]`, `t` missing | matches | no match | no match |
+| `filter=$[?(@.t != 'v')]`, `t` a JSON null | matches | no match (a column has no "present but null") | matches |
+| `items.b.ne=x`, through an array | no element's `b` equals `x` (also an empty array, and a row without the array) | not supported: Hibernate refuses a URL path through a `@OneToMany` (HTTP 500); use `filter=` | some element's `b` is a value other than `x` |
+| `filter=$[?(@.items[?(@.b != 'x')])]` | some element whose `b` is not `x`, missing or null | some element whose `b` is a value other than `x` | some element whose `b` is not `x`, or is a JSON null |
+
+A scalar or an object stored where a `List` field is declared: on Mongo it matches as one element
+(`?tags=alpha` finds a stored `"alpha"` as well as `["alpha","bravo"]`), as Mongo's query language
+does; on JSONB it holds no element and matches nothing; a JPA collection cannot hold it. Measured by
+the compatibility report (Mongo 8.0.5, PostgreSQL 18.1). Mongo answered the same in 3.5.2; JSONB
+then compared the field's text, so it found the scalar and missed the list (fixed in 3.6.0).
+
+#### What an ordering operator means on an enum field
+
+`gt`, `gte`, `lt`, `lte` and `between` on an enum field compare the **stored value as text**,
+never the declaration order of the constants. The URL value is read as the constant first (by its
+name or, since 3.6.0, by its wire value), then written as that backend stores it. Measured by the
+compatibility report, with `enum Color { RED, GREEN }` and
+`enum Stage { IN_PROGRESS("inProgress"), DONE("done") }` (`@JsonValue` on the wire value):
+
+| Backend | What is compared | `?color.gt=GREEN` | `?stage.gt=done` (or `=DONE`) |
+| --- | --- | --- | --- |
+| JSONB | the payload's text (the name of a plain enum, the wire value of a `@JsonValue` one) with the constant's stored text, in the database's collation | finds `RED` | finds `"inProgress"`; `?stage.lt=done` finds a stored `"IN_PROGRESS"` and a number `7`, by their text, in the report database's order |
+| Mongo | the stored string with the constant's **name**, which Spring Data writes for an enum, in binary order | finds `RED` | compares with `"DONE"`: finds `"IN_PROGRESS"` (and any stored `"inProgress"` or `"done"`) |
+| JPA, `@Enumerated(EnumType.STRING)` | the column's name, in the database's collation | finds `RED` | finds `IN_PROGRESS` |
+| JPA, `@Enumerated(EnumType.ORDINAL)` (JPA's default) | the column holds the ordinal | not covered by the report | not covered by the report |
+
+So an ordering on an enum whose names and wire values sort differently answers differently per
+backend: compare by an explicit field, or avoid ordering an enum, where the order matters.
+
 #### URL-encoded operator literal forms (TMF-630 Part 1 §4.4)
 
 Per TMF-630 Part 1 §4.4, the operator can also be embedded in the parameter *name*
@@ -501,7 +539,10 @@ carrying two expressions) folds the same way as repeated parameters.
 
 - `regex` / `regexi` require `opentmf.tmf630.attribute-filtering.regex.enabled=true`
   (default `false`). Max pattern length is bounded by
-  `opentmf.tmf630.attribute-filtering.regex.max-length` (default `256`).
+  `opentmf.tmf630.attribute-filtering.regex.max-length` (default `256`). **On JSONB the cap is
+  an opt-in**, `opentmf.tmf630.jsonb.apply-regex-max-length=true` (since 3.6.0; before, JSONB
+  never applied it, and the default keeps that). A service that accepts regex from its callers
+  should turn it on: the pattern runs on the database.
 - **JPA roots render the LIKE-expressible subset (3.4.0).** On an `@Entity` root the
   toolkit translates the pattern to an escaped SQL `LIKE` itself: literal characters
   (a typed `%` or `_` matches itself), `\`-escaped metacharacters, `.` (any one
@@ -522,7 +563,11 @@ carrying two expressions) folds the same way as repeated parameters.
 - Unknown fields/operators are validated by `on-unknown-field` and
   `on-unknown-operator` (both default `REJECT`).
 - JSONPath `filter=` uses a separate policy `on-unknown-json-path-field` (default
-  `IGNORE`) so that unmatched paths yield an empty result per TMF-630 Part 6.
+  `IGNORE`). **Under `IGNORE` the Mongo and JPA terminals drop the comparison on an unknown
+  field**, so the request answers as if that part of the filter were not there: a mistyped field
+  in `filter=$[?(@.stauts == 'NEW')]` returns every row. Set `REJECT` to answer such a request
+  with a 400 instead. The JSONB terminal never drops it: an unknown field matches nothing, under
+  either setting.
 
 #### Null-check widening (`MISSING_ONLY` vs `NULLISH`)
 
@@ -793,6 +838,15 @@ Escape hatches for the excluded cases:
 
 For anything the restricted subset doesn't cover, either use the attribute-side operators
 (`.regex`, `.in`, `.isnull`, `.between`, …) or write repository-level QueryDSL directly.
+
+**On JSONB** (`tmf630-toolkit-jsonb`), these are refused with 400 too: `IN` / `NIN` and the
+other Jayway words, a bare exists check, recursive descent, functions PostgreSQL's jsonpath does
+not have (`count()`, `min()`, `max()`, …), `length()` other than `== N`, and script expressions.
+Since 3.6.0; before, most of them failed with a 500. **PostgreSQL's own jsonpath is accepted on
+JSONB as an extension** that the Mongo and JPA terminals refuse with 400. That covers
+`exists(…)`, the item methods (`.type()`, `.size()`, `.double()`, `.datetime()`, `.keyvalue()`,
+…), `like_regex`, `starts with`, arithmetic, `$` references and a negated group `!(…)`. A filter
+written with them works on JSONB only.
 
 ### 4) Paging, sorting, and response headers
 
@@ -2305,11 +2359,38 @@ Page<ProductOrder> search(
 against it, with unknown fields honoring `on-unknown-field` and nested paths gated by
 `allow-nested-paths-docdb`. The binding registers automatically when Spring MVC and the
 `Tmf630FilterSettings` bean are present (the attribute-filtering starter provides the
-bean out of the box), and the same URL returns the same result set as a
-QueryDSL-terminal endpoint — pinned by the `Tmf630JsonbUrlBindingParityIT` battery. The
-one intended divergence: `.regex` runs natively here (Postgres `~`/`~*`) while the JPA
-column backend renders only the LIKE-expressible subset and answers `400` outside it
-(JPA gap analysis §3.6, resolved in 3.4.0).
+bean out of the box). For the URLs of the `Tmf630JsonbUrlBindingParityIT` battery, the same URL
+returns the same result set as a QueryDSL-terminal endpoint. Where JSONB answers differently:
+
+- `.regex` runs natively here (Postgres `~`/`~*`), while the JPA column backend renders only the
+  LIKE-expressible subset and answers `400` outside it (JPA gap analysis §3.6, resolved in 3.4.0);
+- an operator the QueryDSL terminal refuses for the field's declared type (a string operator such
+  as `contains` on a number, an ordering on an `Object` field, `=~` on a non-string, a literal its
+  type cannot read) answers on JSONB by the stored text;
+- `filter=` accepts PostgreSQL's own jsonpath (see "What `filter=` does NOT support");
+- `ne` / `nin` / `!=` (see "What `ne`, `nin` and `!=` mean on each backend");
+- an unknown field inside `filter=` matches nothing on JSONB, where the QueryDSL terminal drops
+  it under `IGNORE`;
+- `regex.max-length` applies on JSONB only under the opt-in below.
+
+#### Behaviour switches (since 3.6.0)
+
+Every default is the 3.5.2 behaviour; each switch is an opt-in.
+
+| Property | Default | Opt-in | What the opt-in changes |
+| --- | --- | --- | --- |
+| `opentmf.tmf630.jsonb.equality` | `extraction`: `payload->>'f' = ?`, cast by the field's type; an expression index on that exact expression serves it; a value stored in another JSON type is found through its text (`?s=42` finds the number 42 in a String field) | `containment` | `EQ` / `IN` are `payload @> ?::jsonb`, served by `GIN (payload jsonb_path_ops)` and type-exact as on Mongo (`?s=42` no longer finds the number 42); an expression index made for equality no longer serves it |
+| `opentmf.tmf630.jsonb.cast-mode` | `strict`: one stored value the field's cast cannot read (`"someday"` in a date, `"abc"` in a number) fails every typed filter and sort on that field at the top level and in nested objects, as the design's §6 recommends; inside an array an unreadable element is skipped (see below) | `lenient` | every typed cast reads only text PostgreSQL's input function accepts, so such a value is no match and sorts as a null; needs PostgreSQL 16 (the module refuses to start lenient below 16); no expression index serves a lenient typed range |
+| `opentmf.tmf630.jsonb.apply-regex-max-length` | `false`: no length cap on a regex pattern, as before 3.6.0 | `true` | `.regex` / `.regexi` and `=~` longer than `opentmf.tmf630.attribute-filtering.regex.max-length` are the core's 400, as on JPA and Mongo; turn it on when callers send regex, because the pattern runs on the database |
+
+**Inside an array an unreadable element is skipped; at the top level strict fails as before;
+`cast-mode=lenient` skips everywhere.** Inside an array (or a split collection) the default reads
+a value only in its type's JSON or ISO-8601 form (`5`, `-1.5e3`, `true`, `2025-01-01`,
+`08:00:00`, `2025-01-01T08:00:00Z`), so forms the cast would also read are skipped there:
+`20250101`, `yes`, `t`, `1` as a boolean, `+7`, `.5`, `NaN`, `24:00:00`, `2025-1-1`, a lower-case
+`z`. This needs nothing beyond PostgreSQL 15.
+
+The module needs PostgreSQL 15 or later; 16 or later with `cast-mode=lenient`.
 
 #### Level 2 — list endpoint via the read executor (programmatic control)
 
@@ -3124,7 +3205,7 @@ reached before the container's untyped one.
 | `opentmf.tmf630.attribute-filtering.allow-nested-paths-jpa`                  | `false`        | Whether `?address.city=X` is allowed on JPA-backed entities             |
 | `opentmf.tmf630.attribute-filtering.allow-nested-paths-docdb`                | `true`         | Whether `?address.city=X` is allowed on Mongo-backed entities           |
 | `opentmf.tmf630.attribute-filtering.regex.enabled`                           | `false`        | Whether `.regex` / `.regexi` operators are accepted                     |
-| `opentmf.tmf630.attribute-filtering.regex.max-length`                        | `256`          | Max regex pattern length                                                |
+| `opentmf.tmf630.attribute-filtering.regex.max-length`                        | `256`          | Max regex pattern length (on JSONB only with `opentmf.tmf630.jsonb.apply-regex-max-length=true`) |
 | `opentmf.tmf630.attribute-filtering.limits.max-clauses`                      | `50`           | Max total attribute clauses in a single request                         |
 | `opentmf.tmf630.attribute-filtering.limits.max-values-per-key`               | `20`           | Max values for a single attribute key                                   |
 | `opentmf.tmf630.attribute-filtering.allowlist.mode`                          | `ALLOW_ALL`    | `ALLOW_ALL` or `DENY_ALL`                                               |
@@ -3395,6 +3476,9 @@ expression" 400.
 - `length()` outside the `== N` on collection-field scope
 - Script expressions
 
+On JSONB, PostgreSQL's own jsonpath is accepted besides (see section 3, "What `filter=` does NOT
+support").
+
 ### Mongo `filter=` support scope
 
 Supported subset (Mongo/document backends):
@@ -3407,7 +3491,8 @@ Supported subset (Mongo/document backends):
 - comparisons: `==`, `!=`, `>`, `>=`, `<`, `<=`
 - regex match: `=~` with a `/pattern/` or `/pattern/i` literal; requires
   `regex.enabled=true` and honours `regex.max-length`, exactly like the attribute-side
-  `.regex` / `.regexi` operators. Only the `i` flag is supported — other flags are
+  `.regex` / `.regexi` operators (on JSONB only under
+  `opentmf.tmf630.jsonb.apply-regex-max-length=true`). Only the `i` flag is supported — other flags are
   rejected. On JPA roots the pattern is rendered as an escaped SQL `LIKE` for the
   LIKE-expressible subset (literals, `\`-escapes, `.`, `.*`, `.*?`, `^…$` anchors, `i`)
   and rejected with `400` outside it (3.4.0).
@@ -3764,6 +3849,29 @@ repository. `install` writes the built `-SNAPSHOT` artifacts to `~/.m2/repositor
 making them resolvable from downstream projects on the same machine. `verify` runs all
 tests and integration tests but stops before installation, so a downstream project
 building against the current `-SNAPSHOT` would not find the artifacts.
+
+### Compatibility report against the released version
+
+Backward compatibility is proven, not argued. `tmf630-toolkit-compat` (a test-only module, built
+only under the `compat` profile, never deployed) asks the released version and the working tree
+every request of the JSONB combination suite, the suite's cells on a Mongo twin, the typeable
+cells on a JPA twin and the samples of the 3.6.0 compatibility ledger. It records each answer
+(status and rows) and compares them:
+
+```bash
+JAVA_HOME=/usr/lib64/openjdk-17 tmf630-toolkit-compat/run.sh   # COMPAT_RELEASE=3.5.2 by default
+```
+
+Run R0 is the release and R1 the candidate under its defaults; R2 to R5 turn the JSONB opt-ins
+on. The gate compares R0 with R1. A request that answered 200 must answer the same rows, and one
+that answered a 4xx or a 5xx the same status. Every difference must be a fix named in
+`tmf630-toolkit-compat/src/test/resources/compat/named-differences.tsv`, with its evidence where
+the rule asks for it: the oracle's rows, or 3.5.2's rows for the same request with an enum named
+by its constant. A named fix that no request exercises fails too, and so does a rule that lets a
+request that answered 200 answer a 4xx or a 5xx.
+
+`target/compat/report.md` starts with what the report does not cover, then lists every verdict
+and what each switch changes. Each run starts PostgreSQL and Mongo containers.
 
 ### Local Sonar analysis (opt-in)
 
