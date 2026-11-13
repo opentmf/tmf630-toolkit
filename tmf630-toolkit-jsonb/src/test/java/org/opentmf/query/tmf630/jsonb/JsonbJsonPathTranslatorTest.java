@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
 import java.time.Duration;
+import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -498,14 +499,15 @@ class JsonbJsonPathTranslatorTest {
   }
 
   @Test
-  @DisplayName("the four-argument translator caps =~ at the core's default, 256")
-  void theDefaultCapIs256() {
-    JsonbJsonPathTranslator regex =
-        new JsonbJsonPathTranslator(extractor, "payload", true, IsnullSemantics.MISSING_ONLY);
-    String fits = "a".repeat(256);
-    assertThat(regex.translate("$[?(@.s =~ /" + fits + "/)]").sql()).isNotBlank();
-    assertThatThrownBy(() -> regex.translate("$[?(@.s =~ /" + fits + "a/)]"))
-        .isInstanceOf(TmfFilteringException.class)
-        .hasMessage("Regex pattern too long for field: s");
+  @DisplayName("the three- and four-argument translators apply no cap, as before 3.6.0")
+  void noCapByDefault() {
+    String beyondTheCoreDefault = "a".repeat(JsonbJsonPathTranslator.DEFAULT_MAX_REGEX_LENGTH + 1);
+    for (JsonbJsonPathTranslator regex :
+        List.of(
+            new JsonbJsonPathTranslator(extractor, "payload", true),
+            new JsonbJsonPathTranslator(extractor, "payload", true, IsnullSemantics.MISSING_ONLY))) {
+      assertThat(regex.translate("$[?(@.s =~ /" + beyondTheCoreDefault + "/)]").sql())
+          .isNotBlank();
+    }
   }
 }

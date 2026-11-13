@@ -31,6 +31,24 @@ public enum JsonbCast {
   TIMESTAMP("::timestamp"),
   TIMESTAMPTZ("::timestamptz");
 
+  // The JSON / ISO-8601 forms readCanonical reads, as PostgreSQL regular expressions. No "?" (an
+  // optional part is {0,1}), so nothing reads as a bind parameter; no backslash (a dot is [.]), so
+  // the pattern is the same under standard_conforming_strings=off.
+  private static final String YEAR =
+      "([0-9]{3}[1-9]|[0-9]{2}[1-9][0-9]|[0-9][1-9][0-9]{2}|[1-9][0-9]{3})";
+  private static final String MONTH_DAY =
+      "((0[1-9]|1[0-2])-(0[1-9]|1[0-9]|2[0-8])|(0[13-9]|1[0-2])-(29|30)|(0[13578]|1[02])-31)";
+  private static final String LEAP_DAY =
+      "([0-9]{2}(0[48]|[2468][048]|[13579][26])|(0[48]|[2468][048]|[13579][26])00)-02-29";
+  private static final String ISO_DATE = "(" + YEAR + "-" + MONTH_DAY + "|" + LEAP_DAY + ")";
+  private static final String ISO_TIME =
+      "([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9]([.][0-9]{1,9}){0,1}){0,1}";
+  private static final String ISO_OFFSET = "(Z|[+-](0[0-9]|1[0-5])(:{0,1}[0-5][0-9]){0,1})";
+  private static final String JSON_INTEGER = "-{0,1}[0-9]{1,19}";
+  private static final String JSON_NUMBER =
+      "-{0,1}[0-9]+([.][0-9]+){0,1}([eE][+-]{0,1}[0-9]{1,3}){0,1}";
+  private static final int JSON_NUMBER_MAX_LENGTH = 1000;
+
   private final String suffix;
 
   JsonbCast(String suffix) {
@@ -63,10 +81,66 @@ public enum JsonbCast {
       return text;
     }
     if (mode == JsonbCastMode.LENIENT) {
-      return "CASE WHEN pg_input_is_valid(" + text + ", '" + suffix.substring(2) + "') THEN ("
-          + text + ")" + suffix + " END";
+      return caseWhen(
+          "pg_input_is_valid(" + text + ", '" + suffix.substring(2) + "')",
+          "(" + text + ")" + suffix);
     }
     return "(" + text + ")" + suffix;
+  }
+
+  /**
+   * {@code text} read as this type only when it is in the type's JSON or ISO-8601 form; any other
+   * text is {@code NULL} (no match). It never raises, on any PostgreSQL 15 or later: only text the
+   * plain cast always reads passes the test before the cast. The default
+   * ({@link JsonbCastMode#STRICT}) inside an array or a split collection (since 3.6.0; 3.5.2 read
+   * nothing there), so an element no cast reads is skipped rather than failing the request:
+   *
+   * <ul>
+   *   <li>integer types: a decimal numeral of at most 19 digits within the {@code bigint} range;
+   *   <li>decimal types: a JSON number ({@code -1.5e3}), at most 1000 characters, exponent of at
+   *       most three digits;
+   *   <li>boolean: {@code true} or {@code false};
+   *   <li>dates: {@code YYYY-MM-DD}, a real calendar day of a year 0001–9999;
+   *   <li>times: {@code HH:MM}, {@code HH:MM:SS}, {@code HH:MM:SS.fraction} (up to 9 digits);
+   *   <li>local date-times: an ISO date, {@code T} or a space, an ISO time;
+   *   <li>offset date-times: the same, then optionally {@code Z} or an offset up to
+   *       {@code ±15:59} ({@code +02:00}, {@code +0200}, {@code +02}).
+   * </ul>
+   *
+   * <p>Text the cast would also read in another form ({@code 20250101}, {@code yes}, {@code +7})
+   * is skipped. {@code text} appears more than once, so it must hold no bind parameter.
+   */
+  String readCanonical(String text) {
+    String cast = "(" + text + ")" + suffix;
+    return switch (this) {
+      case TEXT -> text;
+      // the range test reads the numeral as numeric, which a 19-digit numeral never overflows
+      case BIGINT ->
+          caseWhen(
+              matches(text, JSON_INTEGER),
+              caseWhen(
+                  "(" + text + ")::numeric BETWEEN " + Long.MIN_VALUE + " AND " + Long.MAX_VALUE,
+                  cast));
+      case NUMERIC ->
+          caseWhen(
+              "length(" + text + ") <= " + JSON_NUMBER_MAX_LENGTH + " AND "
+                  + matches(text, JSON_NUMBER),
+              cast);
+      case BOOLEAN -> caseWhen("(" + text + ") IN ('true', 'false')", cast);
+      case DATE -> caseWhen(matches(text, ISO_DATE), cast);
+      case TIME -> caseWhen(matches(text, ISO_TIME), cast);
+      case TIMESTAMP -> caseWhen(matches(text, ISO_DATE + "[T ]" + ISO_TIME), cast);
+      case TIMESTAMPTZ ->
+          caseWhen(matches(text, ISO_DATE + "[T ]" + ISO_TIME + ISO_OFFSET + "{0,1}"), cast);
+    };
+  }
+
+  private static String caseWhen(String condition, String then) {
+    return "CASE WHEN " + condition + " THEN " + then + " END";
+  }
+
+  private static String matches(String text, String form) {
+    return "(" + text + ") ~ '^" + form + "$'";
   }
 
   /**

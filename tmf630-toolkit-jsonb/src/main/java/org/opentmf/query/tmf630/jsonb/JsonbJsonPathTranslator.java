@@ -115,6 +115,9 @@ public class JsonbJsonPathTranslator {
   /** The core's default {@code regex.max-length}. */
   static final int DEFAULT_MAX_REGEX_LENGTH = 256;
 
+  /** No cap on an {@code =~} pattern's length: the default, as before 3.6.0. */
+  public static final int NO_REGEX_LENGTH_CAP = Integer.MAX_VALUE;
+
   /**
    * PostgreSQL's jsonpath item methods (PostgreSQL 18). A method call by any other name is a
    * jsonpath syntax error there, so it is refused before any SQL ({@link #refuseWhatPostgresRefuses}).
@@ -149,20 +152,22 @@ public class JsonbJsonPathTranslator {
 
   /**
    * A translator whose null tests ({@code !@.field}, {@code == null}, {@code != null}) follow
-   * {@code isnullSemantics}, as the attribute {@code isnull} does.
+   * {@code isnullSemantics}, as the attribute {@code isnull} does. No cap on an {@code =~}
+   * pattern's length, as before 3.6.0.
    */
   public JsonbJsonPathTranslator(
       JsonbPathExtractor extractor,
       String payloadColumn,
       boolean regexEnabled,
       IsnullSemantics isnullSemantics) {
-    this(extractor, payloadColumn, regexEnabled, isnullSemantics, DEFAULT_MAX_REGEX_LENGTH);
+    this(extractor, payloadColumn, regexEnabled, isnullSemantics, NO_REGEX_LENGTH_CAP);
   }
 
   /**
-   * As the four-argument constructor, with the longest {@code =~} pattern accepted: the core's
-   * {@code opentmf.tmf630.attribute-filtering.regex.max-length}, so the cap is the same on every
-   * backend (a longer pattern is the core's 400, since 3.6.0).
+   * As the four-argument constructor, with the longest {@code =~} pattern accepted (a longer one is
+   * the core's 400): the core's {@code opentmf.tmf630.attribute-filtering.regex.max-length} under
+   * {@code opentmf.tmf630.jsonb.apply-regex-max-length=true} (an opt-in, since 3.6.0), so the cap
+   * is the same on every backend; {@link #NO_REGEX_LENGTH_CAP} for none.
    */
   public JsonbJsonPathTranslator(
       JsonbPathExtractor extractor,

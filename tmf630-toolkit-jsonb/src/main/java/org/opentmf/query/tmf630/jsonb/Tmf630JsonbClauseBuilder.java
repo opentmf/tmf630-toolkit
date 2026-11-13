@@ -55,7 +55,9 @@ public class Tmf630JsonbClauseBuilder {
   private final JsonbPredicateFactory predicateFactory;
   private final JsonbSplitAwareFilterTranslator filterTranslator;
   private final JsonbPathPredicates pathPredicates;
+  private final boolean applyRegexMaxLength;
 
+  /** A clause builder that applies no regex length cap, as before 3.6.0. */
   public Tmf630JsonbClauseBuilder(
       Tmf630FilterParser filterParser,
       Tmf630FilterSettings settings,
@@ -63,6 +65,30 @@ public class Tmf630JsonbClauseBuilder {
       ValueConverter valueConverter,
       JsonbPredicateFactory predicateFactory,
       JsonbSplitAwareFilterTranslator filterTranslator) {
+    this(
+        filterParser,
+        settings,
+        fieldPathResolver,
+        valueConverter,
+        predicateFactory,
+        filterTranslator,
+        false);
+  }
+
+  /**
+   * As the six-argument constructor; {@code applyRegexMaxLength} applies the core's
+   * {@code regex.max-length} to {@code .regex} / {@code .regexi}
+   * ({@code opentmf.tmf630.jsonb.apply-regex-max-length}, an opt-in since 3.6.0).
+   */
+  public Tmf630JsonbClauseBuilder(
+      Tmf630FilterParser filterParser,
+      Tmf630FilterSettings settings,
+      FieldPathResolver fieldPathResolver,
+      ValueConverter valueConverter,
+      JsonbPredicateFactory predicateFactory,
+      JsonbSplitAwareFilterTranslator filterTranslator,
+      boolean applyRegexMaxLength) {
+    this.applyRegexMaxLength = applyRegexMaxLength;
     this.filterParser = filterParser;
     this.settings = settings;
     this.fieldPathResolver = fieldPathResolver;
@@ -250,9 +276,10 @@ public class Tmf630JsonbClauseBuilder {
   }
 
   /**
-   * The regex length cap, {@code opentmf.tmf630.attribute-filtering.regex.max-length}, as the core
-   * applies it to {@code .regex} / {@code .regexi}, with its messages and order (the switch, then
-   * the length); before 3.6.0 the JSONB terminal never applied it.
+   * The regex switch, then (under {@code opentmf.tmf630.jsonb.apply-regex-max-length=true}, an
+   * opt-in since 3.6.0) the length cap, {@code opentmf.tmf630.attribute-filtering.regex.max-length},
+   * as the core applies them to {@code .regex} / {@code .regexi}, with its messages and order. By
+   * default no cap applies, as before 3.6.0.
    */
   private void requireRegexWithinCap(TmfOperator operator, ResolvedField field, Object value) {
     if (operator != TmfOperator.REGEX && operator != TmfOperator.REGEXI) {
@@ -261,7 +288,8 @@ public class Tmf630JsonbClauseBuilder {
     if (!settings.regexEnabled()) {
       throw new TmfFilteringException("Regex operator is disabled.");
     }
-    if (String.valueOf(value).length() > settings.limits().maxRegexLength()) {
+    if (applyRegexMaxLength
+        && String.valueOf(value).length() > settings.limits().maxRegexLength()) {
       throw new TmfFilteringException("Regex pattern too long for field: " + field.fieldPath());
     }
   }

@@ -15,6 +15,8 @@ import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.opentmf.query.tmf630.jsonb.it.JsonbElementDomain;
+import org.opentmf.query.tmf630.jsonb.it.JsonbElementRow;
 import org.opentmf.query.tmf630.jsonb.it.JsonbTestRow;
 import org.opentmf.query.tmf630.jsonb.it.JsonbTypedDomain;
 import org.opentmf.query.tmf630.jsonb.it.JsonbTypedRow;
@@ -35,7 +37,7 @@ import tools.jackson.databind.ObjectMapper;
  * The module under its DEFAULTS on PostgreSQL 15, the minimum the design (§10) states: the context
  * starts (no PostgreSQL 16 check runs under {@code cast-mode=strict}) and the default forms answer,
  * the 3.6.0 fixes included (any element through an array, {@code filter=} array matches and null
- * tests, literal substring values).
+ * tests, literal substring values), and an element no cast reads inside an array is skipped.
  */
 @SpringBootTest(
     classes = Tmf630JsonbPostgres15IT.TestApp.class,
@@ -69,6 +71,7 @@ class Tmf630JsonbPostgres15IT {
                 jdbc.sql("INSERT INTO " + TABLE + " (id, payload) VALUES (?, ?::jsonb)")
                     .params(id, payload)
                     .update());
+    Tmf630JsonbUnreadableElementIT.seed(jdbc);
   }
 
   @Test
@@ -96,6 +99,25 @@ class Tmf630JsonbPostgres15IT {
 
     List<String> ids =
         jdbc.sql("SELECT id FROM " + TABLE + " WHERE " + where.sql())
+            .params(where.params())
+            .query(String.class)
+            .list();
+    assertThat(ids).as(where.sql()).containsExactlyInAnyOrderElementsOf(expected);
+  }
+
+  static Stream<Arguments> elementFilters() {
+    return Tmf630JsonbUnreadableElementIT.filters();
+  }
+
+  /** The default's reading inside an array never raises on 15 either (no pg_input_is_valid). */
+  @ParameterizedTest(name = "{0}={1}")
+  @MethodSource("elementFilters")
+  void anUnreadableElementIsSkippedOnPostgres15(String param, String value, Set<String> expected) {
+    JsonbClause where =
+        clauseBuilder.build(JsonbElementDomain.class, Map.of(param, new String[] {value}));
+
+    List<String> ids =
+        jdbc.sql("SELECT id FROM " + JsonbElementRow.TABLE + " WHERE " + where.sql())
             .params(where.params())
             .query(String.class)
             .list();

@@ -148,6 +148,8 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 
   Every URL that worked keeps working. A text that is one constant's name and another
   constant's wire value still resolves by the name.
+- The same holds for a `filter=` literal on JPA and Mongo: `filter=$[?(@.state == 'inProgress')]`
+  was the same 400 and now answers. JSONB's `filter=` always compared the stored text.
 - **The mapper's answer counts only when it is exact.** The constant it reads must write back
   as exactly the text. So a typo stays a 400 under a mapper with
   `READ_UNKNOWN_ENUM_VALUES_USING_DEFAULT_VALUE` (which would map it to the
@@ -167,7 +169,9 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 - **Opt-in; the default is unchanged.** `opentmf.tmf630.jsonb.cast-mode=lenient`; the default is
   `strict`. These are the property and the default the design (§6) gives.
 - **The default, `strict`, is the 3.5.2 behaviour and the design's recommended "fail fast":**
-  one stored value the cast cannot read fails every typed filter and sort on that field. Examples:
+  one stored value the cast cannot read fails every typed filter and sort on that field, outside
+  arrays (at the top level and in nested objects). Inside an array or a split collection such an
+  element is skipped (see "JSONB URL operators on a field inside an array"). Examples:
   `"someday"` in a LocalDate field, `"abc"` or `42.0` in an Integer field, `"maybe"` in a Boolean
   field. The error is, for instance, `invalid input syntax for type date`
   (`Tmf630JsonbUnreadableValueDefaultsIT`).
@@ -238,6 +242,18 @@ All notable changes to `tmf630-toolkit` are documented in this file.
   every row and `isnotnull` none. A field of a list of strings (`?tags=x`) compared the list's
   text and missed `["x","y"]`. This affected every operator on such a path, on every type, since
   3.0.0. TMF resources are full of such arrays (`characteristic`, `relatedParty`, items).
+- **Under the default `cast-mode=strict`, an element no cast reads is skipped inside an array or
+  a split collection**, so such a request answers instead of failing: 3.5.2 answered every such
+  request (with no row), and an upgrade must not turn that answer into a 500.
+  - Only a value in its type's JSON or ISO-8601 form is read there: `5`, `-1.5e3`, `true`,
+    `2025-01-01`, `08:00:00`, `2025-01-01T08:00:00`, `2025-01-01T08:00:00Z` or `+02:00`.
+  - Other forms the cast would also read are skipped there too: `20250101`, `yes`, `t`, `1` (as a
+    boolean), `+7`, `.5`, `NaN`, `24:00:00`, `2025-1-1`, a lower-case `z`.
+  - Outside arrays (the top level and nested objects) strict fails as before;
+    `cast-mode=lenient` skips everywhere, by PostgreSQL's own input check.
+  - The test needs nothing beyond PostgreSQL 15 and never raises: measured on 15 and 18 for
+    every typed cast (`Tmf630JsonbUnreadableElementIT`, `Tmf630JsonbPostgres15IT`; the design
+    note §6 has the table).
 - **What the toolkit emits now:**
   - Every operator, `EQ` and `IN` included under the default `equality=extraction`: one
     `EXISTS (SELECT 1 FROM jsonb_array_elements(…) AS e1 WHERE …)` per array step, with the
@@ -298,14 +314,17 @@ All notable changes to `tmf630-toolkit` are documented in this file.
   `.datetime()`, `.keyvalue()`, …), `like_regex`, `starts with`, arithmetic, `$` references, and
   a negated group `!(…)` (`Tmf630JsonbFilterDefaultRefusalsIT`).
 
-### Fixed (JSONB applies the regex length cap)
+### Added (JSONB, opt-in, default unchanged): the regex length cap
 
-- **Fix.** The released README bounds the regex operators by
+- **Opt-in; the default is unchanged.** `opentmf.tmf630.jsonb.apply-regex-max-length=true`. The
+  default, `false`, is the 3.5.2 behaviour: JSONB applies no length cap to a regex pattern.
+- The released README bounds the regex operators by
   `opentmf.tmf630.attribute-filtering.regex.max-length` (default 256), and the Mongo and JPA
-  terminals apply it. JSONB never did.
-- `.regex` / `.regexi` and `=~` with a longer pattern are now the core's 400 on JSONB too:
-  `Regex pattern too long for field: name`. Since a pattern of up to 256 characters stays
-  accepted by default, only longer ones change.
+  terminals apply it. Under the opt-in, `.regex` / `.regexi` and `=~` with a longer pattern are
+  the core's 400 on JSONB too: `Regex pattern too long for field: name`
+  (`Tmf630JsonbRegexCapOptInIT`).
+- **Why turn it on:** the pattern runs on the database. A service that accepts regex from its
+  callers should bound it as the other backends do.
 
 ### Documentation
 
