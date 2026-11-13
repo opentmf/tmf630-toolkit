@@ -4,53 +4,49 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 
 ## [3.6.0] - 2026-11-12
 
-### Changed (JSONB equality is served by the GIN index)
+### Added (JSONB, opt-in, default unchanged): equality by containment, served by the GIN index
 
-- **On JSONB, `EQ` and `IN` on an object path are now a containment test, which a GIN index
-  on the payload serves.**
-  - Before: a URL equality such as `?receiver.postalAddress.city=Berlin` or `?status.in=A,B` was
-    emitted as an extraction, `payload#>>'{receiver,postalAddress,city}' = ?`, cast by the
-    field's type. No GIN index serves that, so every equality filter read the whole table
-    unless the field had its own expression index.
-  - Now, when every step of the path is an object field (no collection on the way, no
-    positional `[N]`) and the field is a String or CharSequence, an enum, an integer or decimal
-    type, or a Boolean:
+- **Opt-in; the default is unchanged.** `opentmf.tmf630.jsonb.equality=containment`; the default
+  is `extraction`.
+- **The default, `extraction`, is the 3.5.2 behaviour:**
+  - `EQ` and `IN` compare the extracted text, cast by the field's declared type:
+    `payload#>>'{receiver,postalAddress,city}' = ?`, `(payload->>'priority')::bigint = ?::bigint`.
+  - An expression index on exactly that expression serves it, as the design (§2.2) tells adopters
+    (`Tmf630JsonbIndexPlanDefaultsIT`).
+  - A value stored in another JSON type is found through its text or cast, as before:
+    `?s=42` finds a String field holding the number `42` (`Tmf630JsonbEqualityDefaultsIT`).
+- **The opt-in, `containment`:**
+  - On an object path (no collection on the way, no positional `[N]`), and for a String or
+    CharSequence, an enum, an integer or decimal type, or a Boolean field:
     - `EQ` is `payload @> ?::jsonb`, with the value nested under the path:
       `{"receiver":{"postalAddress":{"city":"Berlin"}}}`;
     - `IN` is an `OR` of such fragments.
-- **Containment is type-exact, as on the Mongo backend.** A row whose stored JSON type differs
-  from the field's declared type is no longer found. `Tmf630JsonbEqualityParityIT` pins each
-  case with both row sets:
-  - a String field holding the number `42`, the boolean `true` or the number `42.0`:
-    `?s=42`, `?s=true` and `?s=42.0` found it, and no longer do;
-  - an Integer field holding the string `"42"` or `" 42"`: no longer found by `?n=42`;
-  - a BigDecimal field holding the string `"1.5"`: no longer found by `?d=1.5`;
-  - a Boolean field holding `"true"`, `"yes"` or `1`: no longer found by `?b=true`.
-- **Unchanged:**
-  - a value stored in the declared type is found as before; a decimal compares by value, so
-    `1.5` finds `1.50`;
-  - a JSON `null`, or an array where the path expects an object, was found neither before nor
-    now.
-- **The 500 goes away.** If any row of an Integer field held a value the `bigint` cast cannot
-  read (`"abc"`, or `42.0`), every equality on that field failed with HTTP 500. Containment
-  reads no row's text, so `?n=42` now finds the rows holding `42` and `42.0`, and passes over
-  `"abc"`.
-- **These keep the extraction, unchanged:**
-  - the date-time types: they are strings in the payload, so containment would compare text
-    and miss `…+02:00` or `.000Z` forms of the same instant; they still match by instant;
-  - every other type (`UUID`, `Object`, `Map`, …);
-  - a path through a collection or with `[N]`;
-  - `NE`, `NIN`, the ranges, the case-insensitive and the pattern operators;
-  - the factory's own `build` and `buildMulti`. The new methods are `buildOnObjectPath` and
-    `buildMultiOnObjectPath`, and the URL grammar uses them.
-- **An expression index created for an equality no longer serves it.** Take
-  `((payload->>'status'))`: it still serves the forms that extract (ranges, `NE`,
-  case-insensitive), but not `?status=X`, which now needs the GIN index on the payload. A
-  service that indexed equality fields only with expression indexes will scan for those
-  filters after this change. Create `GIN (payload jsonb_path_ops)`.
+  - Through an array, `EQ` and `IN` become containment through the array (`{"tags":["x"]}`).
+  - A GIN index on the payload serves them (`Tmf630JsonbIndexPlanIT`). An expression index made
+    for equality no longer serves `?field=X`: create `GIN (payload jsonb_path_ops)`.
+  - **Containment is type-exact, as on the Mongo backend** (`Tmf630JsonbEqualityParityIT` pins
+    each case with both row sets):
+    - a String field holding the number `42`, the boolean `true` or the number `42.0` is not
+      found by `?s=42`, `?s=true` or `?s=42.0`;
+    - an Integer field holding the string `"42"` or `" 42"` is not found by `?n=42`;
+    - a BigDecimal field holding the string `"1.5"` is not found by `?d=1.5`;
+    - a Boolean field holding `"true"`, `"yes"` or `1` is not found by `?b=true`.
+  - A decimal compares by value (`1.5` finds `1.50`). Containment reads no row's text, so an
+    unreadable value in an Integer field (`"abc"`, `42.0`) does not fail `?n=42`.
+  - These keep the extraction even under the opt-in: the date-time types (they would compare
+    text and miss `…+02:00` or `.000Z` forms of the same instant), every other type (`UUID`,
+    `Object`, `Map`, …), a positional path, and `NE`, `NIN`, the ranges, the case-insensitive
+    and the pattern operators.
+- **New API:**
+  - the enum `JsonbEqualityMode`;
+  - the constructor `JsonbPredicateFactory(extractor, isnullSemantics, regexEnabled, mapper,
+    equalityMode, castMode)`; the older constructors keep the defaults;
+  - `buildOnObjectPath` / `buildMultiOnObjectPath`, which follow the factory's mode.
 
 ### Fixed (JSONB `filter=` and the GIN index)
 
+- **Fix.** The same rows on every request that answered. A request that failed with a 500 now
+  answers rows or a 400.
 - **On a JSONB-backed entity, a GIN index on the payload can now serve `filter=`.** The
   translator emitted the function `jsonb_path_exists(payload, ?::jsonpath)`. PostgreSQL serves
   a `GIN (payload jsonb_path_ops)` (or `jsonb_ops`) index only through the operators `@>`, `@?`
@@ -113,6 +109,8 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 
 ### Fixed (JSONB filters on an enum field)
 
+- **Fix.** A request that failed with a 500 now answers. `.eqi` / `.nei` on an enum stored by a
+  wire value never matched; they now find it.
 - **On JSONB, a filter on a field declared as an enum no longer fails.** The defect has been
   there since 3.0.0. `EQ`, `NE`, `IN`, `NIN`, the ranges and the `LIKE` family all bound the enum
   constant itself. The PostgreSQL driver refuses that ("Can't infer the SQL type to use for an
@@ -133,6 +131,9 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 
 ### Fixed (an enum filter value by its wire value, on every backend)
 
+- **Additive, every backend (the one change to the core in 3.6.0).** A request that answered 400
+  now answers. Nothing that answered changes: the new step runs only after the String factory
+  and the constant name have both failed.
 - **A URL can now name an enum by its wire value on JPA, Mongo and JSONB.** Two shapes of enum
   were affected: a `@JsonValue` enum without a public static `String` factory, and an enum with
   `@JsonProperty` on its constants. Both could be named only by the Java constant
@@ -161,37 +162,42 @@ All notable changes to `tmf630-toolkit` are documented in this file.
   none. `jackson-databind` is an optional dependency of `tmf630-toolkit-attribute-filtering-core`
   and `-autoconfigure`; without Jackson on the classpath, the reader is simply absent.
 
-### Changed (JSONB needs PostgreSQL 16)
+### Added (JSONB, opt-in, default unchanged): a stored value no cast reads is no match
 
-- **The JSONB module now needs PostgreSQL 16 or later, and refuses to start below it.** The
-  design document said 15+.
-  - The reason: date and time values are now read with `pg_input_is_valid` (PostgreSQL 16); see
-    the next entry.
-  - Below 16 the application does not start. The `Tmf630JsonbPostgresVersionCheck` bean fails it
-    with: `tmf630-toolkit-jsonb needs PostgreSQL 16 or later: … this server reports
-    server_version_num <n>.` There is no silent fallback to a plain cast.
-  - The check is replaceable, the requirement is not. An application that replaces the bean and
-    runs below 16 starts, and then every filter and sort on a date or time field fails with
-    "function pg_input_is_valid does not exist".
-
-### Fixed (JSONB date and time values no cast reads)
-
-- **On JSONB, a stored date or date-time that no cast can read no longer turns a filter or a
-  sort on that field into a 500.** One row holding `"someday"`, or a number out of range, in a
-  `LocalDate` / `LocalTime` / `LocalDateTime` / `OffsetDateTime` / `ZonedDateTime` / `Instant`
-  field made every range, `ne`, `in`, `nin` and equality filter and every sort on the field
-  fail: `invalid input syntax for type date`, or `date/time field value out of range`.
-- **Now such a value is read only where PostgreSQL's input function accepts it.** It is then no
-  match in a filter, and sorts as a null. The emitted form is
-  `CASE WHEN pg_input_is_valid(payload->>'createdOn', 'timestamptz') THEN
-  (payload->>'createdOn')::timestamptz END`, the same in filters, plain sorts and correlated
-  sorts.
-- **No index is affected.** PostgreSQL never allowed an expression index on a text-to-date or
-  text-to-timestamptz cast, because those casts are not IMMUTABLE. Number and boolean casts are
-  unchanged here.
+- **Opt-in; the default is unchanged.** `opentmf.tmf630.jsonb.cast-mode=lenient`; the default is
+  `strict`. These are the property and the default the design (§6) gives.
+- **The default, `strict`, is the 3.5.2 behaviour and the design's recommended "fail fast":**
+  one stored value the cast cannot read fails every typed filter and sort on that field. Examples:
+  `"someday"` in a LocalDate field, `"abc"` or `42.0` in an Integer field, `"maybe"` in a Boolean
+  field. The error is, for instance, `invalid input syntax for type date`
+  (`Tmf630JsonbUnreadableValueDefaultsIT`).
+- **The opt-in, `lenient`:**
+  - Every typed cast (numbers, booleans, dates, times) reads only text PostgreSQL's input function
+    accepts: `CASE WHEN pg_input_is_valid(payload->>'ld', 'date') THEN (payload->>'ld')::date END`.
+  - This holds in filters, plain sorts and correlated sorts. Such a value is no match, and sorts
+    as a null (`Tmf630JsonbUnreadableValueIT`).
+  - Text the cast reads is read as before: `"7"` in an Integer field is 7.
+  - **It needs PostgreSQL 16 or later** (`pg_input_is_valid`). Below 16 the module refuses to
+    start lenient with `tmf630-toolkit-jsonb with opentmf.tmf630.jsonb.cast-mode=lenient needs
+    PostgreSQL 16 or later: …`. The `Tmf630JsonbPostgresVersionCheck` bean is created only
+    under `lenient`.
+  - `pg_input_is_valid` is not IMMUTABLE, so no expression index serves a lenient typed range,
+    and an index on the plain cast does not serve the guarded expression.
+- **PostgreSQL 15 stays supported under the defaults**, as the design (§10) states. No version
+  check runs (`Tmf630JsonbPostgres15IT` runs the defaults on PostgreSQL 15, and shows that lenient
+  refuses to start there).
+- **New API:**
+  - the enum `JsonbCastMode`;
+  - `JsonbCast.read(text, mode)`, `readParenthesized(text, mode)` and `readRepeatsText(mode)`;
+    `JsonbCast.read(text)` is the plain cast;
+  - `JsonbSortBuilder(extractor, nullsLast, castMode)`;
+  - the `JsonbPredicateFactory` constructor above.
 
 ### Fixed (JSONB `filter=` null tests, `in` and `nin`)
 
+- **Fix.** A 500 now answers rows or a 400. `== null` and `!= null` now answer what the
+  released README promised ("`!@.field` / `== null` matches only documents where the field is
+  missing").
 - **`filter=$[?(!@.field)]` now answers on JSONB.** It reached PostgreSQL as a jsonpath syntax
   error (HTTP 500) on every type and position. It is now the `isnull` test, as the README
   documents and the other backends do: `!(exists(@.field))`.
@@ -223,6 +229,8 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 
 ### Fixed (JSONB URL operators on a field inside an array)
 
+- **Fix.** These requests never matched (and `isnull` matched every row). They now answer for any
+  element, as on Mongo.
 - **On JSONB, a URL attribute operator on a field inside an array, or on a collection field,
   now answers for ANY element, as the Mongo and JPA backends and `filter=` already did.**
   Before, the toolkit emitted an extraction such as `payload#>>'{characteristic,name}' = ?`,
@@ -231,13 +239,15 @@ All notable changes to `tmf630-toolkit` are documented in this file.
   text and missed `["x","y"]`. This affected every operator on such a path, on every type, since
   3.0.0. TMF resources are full of such arrays (`characteristic`, `relatedParty`, items).
 - **What the toolkit emits now:**
-  - `EQ` and `IN` on a type with a containment fragment: containment through the array,
+  - Every operator, `EQ` and `IN` included under the default `equality=extraction`: one
+    `EXISTS (SELECT 1 FROM jsonb_array_elements(…) AS e1 WHERE …)` per array step, with the
+    operator's usual form on the element. A value stored where an array is declared (an object,
+    a scalar) holds no element, and raises no error.
+  - Under `equality=containment` (the opt-in above), `EQ` and `IN` on a type with a containment
+    fragment are containment through the array instead:
     `payload @> '{"characteristic":[{"name":"x"}]}'` (and `{"tags":["x"]}`, or
     `{"item":[{"tag":[{"code":"x"}]}]}` for an array inside an array). The GIN index on the
     payload serves it.
-  - Every other operator: one `EXISTS (SELECT 1 FROM jsonb_array_elements(…) AS e1 WHERE …)`
-    per array step, with the operator's usual form on the element. A value stored where an
-    array is declared (an object, a scalar) holds no element, and raises no error.
   - `isnotnull`: some element holds the field. `isnull`: no element does.
   - A path into a split collection (`?items.state=PENDING`) is answered in the child table, as
     `filter=` already was: `EXISTS (SELECT 1 FROM <child> WHERE parent_id = <parent>.id AND …)`.
@@ -246,6 +256,8 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 
 ### Fixed (JSONB `contains`, `startswith` and `endswith` match their value literally)
 
+- **Fix.** The released design promised it ("Escape `%` / `_` from the value at
+  parameter-binding time"), and the Mongo and JPA terminals have always matched literally.
 - **On JSONB, `%` and `_` in the value of `contains`, `startswith`, `endswith` and their `i`
   forms are no longer wildcards.** Since 3.0.0, `?name.contains=50%` also found "500 off" and
   `?code.startswith=a_` found "abc". The QueryDSL terminal (JPA and Mongo) matches them
@@ -256,8 +268,10 @@ All notable changes to `tmf630-toolkit` are documented in this file.
   inside an array, in a split collection).
 - `like` and `likei` are unchanged: their value is the pattern.
 
-### Changed (JSONB: a backslash in a `contains` value is a plain character)
+### Fixed (JSONB: a backslash in a `contains` value is a plain character)
 
+- **Fix**, the consequence of the literal matching above. It is listed on its own because a
+  caller may have relied on the old reading.
 - **On JSONB, a backslash in the value of `contains`, `startswith`, `endswith` or an `i` form now
   matches a backslash.** Before, it was PostgreSQL's implicit LIKE escape: `?note.contains=50\%`
   found "50%", and `?code.contains=x\y` found "xy".
@@ -265,6 +279,45 @@ All notable changes to `tmf630-toolkit` are documented in this file.
   value as it is (`?note.contains=50%`), which now matches literally.
 - This is how the QueryDSL terminal has always read a backslash. `like` / `likei` patterns keep
   PostgreSQL's backslash escape.
+
+### Fixed (JSONB `filter=` forms PostgreSQL cannot parse are a 400, not a 500)
+
+- **Fix.** These reached PostgreSQL as a jsonpath syntax error (HTTP 500, measured on 18.6). The
+  released README lists them under "What `filter=` does NOT support (rejected with 400)". They are
+  now the core's 400, before any SQL:
+  - a bare exists test, `$[?(@.field)]` (also inside an array match): "Expected comparison
+    operator in jsonPath filter.";
+  - recursive descent, `$[?(@..field == 'x')]`: "Unknown field path: .field" (the core's message
+    under `on-unknown-json-path-field: REJECT`);
+  - a function PostgreSQL's jsonpath does not have (`count()`, `min()`, `max()`, `avg()`, …):
+    "Expected comparison operator in jsonPath filter.";
+  - `length()` compared by anything but `==`: "length() supports only == comparison; use [?(...)]
+    for non-empty checks."
+- **PostgreSQL's own jsonpath that answers stays accepted on JSONB**, an extension the Mongo and
+  JPA terminals refuse with 400: `exists(…)`, the item methods (`.type()`, `.size()`, `.double()`,
+  `.datetime()`, `.keyvalue()`, …), `like_regex`, `starts with`, arithmetic, `$` references, and
+  a negated group `!(…)` (`Tmf630JsonbFilterDefaultRefusalsIT`).
+
+### Fixed (JSONB applies the regex length cap)
+
+- **Fix.** The released README bounds the regex operators by
+  `opentmf.tmf630.attribute-filtering.regex.max-length` (default 256), and the Mongo and JPA
+  terminals apply it. JSONB never did.
+- `.regex` / `.regexi` and `=~` with a longer pattern are now the core's 400 on JSONB too:
+  `Regex pattern too long for field: name`. Since a pattern of up to 256 characters stays
+  accepted by default, only longer ones change.
+
+### Documentation
+
+- README: under `on-unknown-json-path-field: IGNORE` (the default), the Mongo and JPA terminals
+  DROP an unknown field's comparison. The request answers as if that part of the filter were not
+  there, so a mistyped field returns every row. The README had promised "an empty result"; it now
+  says what the code does and advises `REJECT`. The code is unchanged. JSONB answers an unknown
+  field with no match.
+- README: what `ne` / `nin` / `!=` mean on each backend, through an array and on a missing or null
+  value; the backends differ, and the table says how.
+- README: JSONB's `filter=` accepts PostgreSQL's own jsonpath (above).
+- Design: §5 (equality), §6 (the cast mode) and §10 (PostgreSQL 15, 16 for lenient).
 
 ## [3.5.2] - 2026-11-04
 

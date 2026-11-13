@@ -34,10 +34,12 @@ import tools.jackson.databind.json.JsonMapper;
  * {@code toString()} by default ({@code EnumFeature.WRITE_ENUMS_USING_TO_STRING}), which equals
  * {@link Enum#name()} unless the enum overrides it.
  *
- * <p>{@link #buildOnObjectPath} / {@link #buildMultiOnObjectPath} emit {@code EQ} / {@code IN} on
- * an object path as containment, {@code payload @> ?::jsonb}, which a GIN index on the payload
- * serves (since 3.6.0; the URL grammar uses them). {@link #build} / {@link #buildMulti} keep the
- * extraction for every operator.
+ * <p>{@link #buildOnObjectPath} / {@link #buildMultiOnObjectPath} (the URL grammar uses them)
+ * emit {@code EQ} / {@code IN} on an object path by the factory's {@link JsonbEqualityMode}: the
+ * extraction by default, as {@link #build} / {@link #buildMulti} always do, or containment,
+ * {@code payload @> ?::jsonb}, which a GIN index on the payload serves (an opt-in, since 3.6.0).
+ * A typed cast reads a stored value by the factory's {@link JsonbCastMode}: the plain cast by
+ * default, which fails the request on a value it cannot read, or the guarded read (an opt-in).
  *
  * <p>{@link IsnullSemantics#NULLISH} widens {@code IS_NULL}/{@code IS_NOT_NULL} to
  * include explicit JSON {@code null} values in addition to missing-key checks — per
@@ -53,6 +55,8 @@ public class JsonbPredicateFactory {
   private final IsnullSemantics isnullSemantics;
   private final boolean regexEnabled;
   private final JsonbContainment containment;
+  private final JsonbEqualityMode equalityMode;
+  private final JsonbCastMode castMode;
 
   /** A factory that writes enum values with a default {@link JsonMapper}. */
   public JsonbPredicateFactory(
@@ -71,27 +75,47 @@ public class JsonbPredicateFactory {
       IsnullSemantics isnullSemantics,
       boolean regexEnabled,
       ObjectMapper mapper) {
+    this(
+        extractor,
+        isnullSemantics,
+        regexEnabled,
+        mapper,
+        JsonbEqualityMode.EXTRACTION,
+        JsonbCastMode.STRICT);
+  }
+
+  /**
+   * A factory whose {@code EQ} / {@code IN} compare by {@code equalityMode} and whose typed casts
+   * read stored values by {@code castMode} ({@code null} means the 3.5.2 defaults,
+   * {@link JsonbEqualityMode#EXTRACTION} and {@link JsonbCastMode#STRICT}).
+   */
+  public JsonbPredicateFactory(
+      JsonbPathExtractor extractor,
+      IsnullSemantics isnullSemantics,
+      boolean regexEnabled,
+      ObjectMapper mapper,
+      JsonbEqualityMode equalityMode,
+      JsonbCastMode castMode) {
     this.extractor = extractor;
     this.isnullSemantics = isnullSemantics == null ? IsnullSemantics.MISSING_ONLY : isnullSemantics;
     this.regexEnabled = regexEnabled;
     this.containment = new JsonbContainment(mapper == null ? DEFAULT_MAPPER : mapper);
+    this.equalityMode = equalityMode == null ? JsonbEqualityMode.EXTRACTION : equalityMode;
+    this.castMode = castMode == null ? JsonbCastMode.STRICT : castMode;
   }
 
-  private JsonbPredicateFactory(
-      JsonbPathExtractor extractor,
-      IsnullSemantics isnullSemantics,
-      boolean regexEnabled,
-      JsonbContainment containment) {
+  private JsonbPredicateFactory(JsonbPredicateFactory same, JsonbPathExtractor extractor) {
     this.extractor = extractor;
-    this.isnullSemantics = isnullSemantics;
-    this.regexEnabled = regexEnabled;
-    this.containment = containment;
+    this.isnullSemantics = same.isnullSemantics;
+    this.regexEnabled = same.regexEnabled;
+    this.containment = same.containment;
+    this.equalityMode = same.equalityMode;
+    this.castMode = same.castMode;
   }
 
   /** The same factory over another JSONB column (an array element, a split child's payload). */
   JsonbPredicateFactory forColumn(String column) {
-    return new JsonbPredicateFactory(
-        new JsonbPathExtractor(column), isnullSemantics, regexEnabled, containment);
+    return new JsonbPredicateFactory(this, new JsonbPathExtractor(column));
   }
 
   JsonbPathExtractor extractor() {
@@ -103,6 +127,9 @@ public class JsonbPredicateFactory {
    * the value's type has no fragment.
    */
   Optional<JsonbClause> containmentThrough(JsonbFieldPath path, Class<?> targetType, Object value) {
+    if (equalityMode != JsonbEqualityMode.CONTAINMENT) {
+      return Optional.empty();
+    }
     String test = extractor.containsJsonb();
     return containment
         .fragment(path.segmentArray(), path.arrayFlags(), targetType, value)
@@ -111,9 +138,11 @@ public class JsonbPredicateFactory {
 
   /**
    * {@link #build} for a field whose every path step is an object field: no array on the way and
-   * no positional index. {@code EQ} on a String, CharSequence, Enum, integer, decimal or Boolean
-   * field is emitted as containment, {@code payload @> ?::jsonb}, with the value nested under the
-   * path in the JSON type the field declares; a GIN index on the payload serves it.
+   * no positional index. Under {@link JsonbEqualityMode#CONTAINMENT} (an opt-in), {@code EQ} on a
+   * String, CharSequence, Enum, integer, decimal or Boolean field is emitted as containment,
+   * {@code payload @> ?::jsonb}, with the value nested under the path in the JSON type the field
+   * declares; a GIN index on the payload serves it. Under {@link JsonbEqualityMode#EXTRACTION}
+   * (the default) it is exactly {@link #build}.
    *
    * <p>Containment is type-exact, as on the Mongo backend: it finds the value stored in the JSON
    * type the field declares, not one stored in another (a String field holding the number
@@ -124,7 +153,7 @@ public class JsonbPredicateFactory {
    */
   public JsonbClause buildOnObjectPath(
       TmfOperator operator, String fieldPath, Class<?> targetType, Object value) {
-    if (operator == TmfOperator.EQ) {
+    if (operator == TmfOperator.EQ && equalityMode == JsonbEqualityMode.CONTAINMENT) {
       Optional<JsonbClause> contained = containment(fieldPath, targetType, value);
       if (contained.isPresent()) {
         return contained.get();
@@ -134,14 +163,18 @@ public class JsonbPredicateFactory {
   }
 
   /**
-   * {@link #buildMulti} for a field whose every path step is an object field: {@code IN} is an
-   * {@code OR} of containment fragments, one per value, when every value has one (see
+   * {@link #buildMulti} for a field whose every path step is an object field: under
+   * {@link JsonbEqualityMode#CONTAINMENT}, {@code IN} is an {@code OR} of containment fragments,
+   * one per value, when every value has one (see
    * {@link #buildOnObjectPath}); otherwise, and for every other operator, exactly
    * {@link #buildMulti}.
    */
   public JsonbClause buildMultiOnObjectPath(
       TmfOperator operator, String fieldPath, Class<?> targetType, List<Object> values) {
-    if (operator == TmfOperator.IN && values != null && !values.isEmpty()) {
+    if (operator == TmfOperator.IN
+        && equalityMode == JsonbEqualityMode.CONTAINMENT
+        && values != null
+        && !values.isEmpty()) {
       Optional<JsonbClause> anyOf = containmentAnyOf(fieldPath, targetType, values);
       if (anyOf.isPresent()) {
         return anyOf.get();
@@ -159,7 +192,7 @@ public class JsonbPredicateFactory {
     // Parenthesise the extraction before applying the cast — Postgres's :: binds
     // tighter than the ->> / #>> operators, so payload->>'x'::bigint would try to
     // cast the literal string 'x' to bigint instead of the extracted value.
-    String castedLhs = cast.read(text);
+    String castedLhs = cast.read(text, castMode);
     return switch (operator) {
       case EQ -> JsonbClause.of(castedLhs + " = ?" + cast.suffix(), value);
       case NE -> JsonbClause.of(castedLhs + " <> ?" + cast.suffix(), value);
@@ -271,7 +304,7 @@ public class JsonbPredicateFactory {
   }
 
   private JsonbClause inClause(String text, JsonbCast cast, List<Object> values, boolean negate) {
-    String lhs = cast.read(text);
+    String lhs = cast.read(text, castMode);
     StringBuilder sb = new StringBuilder(lhs);
     sb.append(negate ? " NOT IN (" : " IN (");
     for (int i = 0; i < values.size(); i++) {
@@ -288,7 +321,7 @@ public class JsonbPredicateFactory {
       throw new TmfFilteringException(
           "BETWEEN requires exactly two values for field: " + fieldPath);
     }
-    String casted = cast.read(text);
+    String casted = cast.read(text, castMode);
     return JsonbClause.of(
         casted + " BETWEEN ?" + cast.suffix() + " AND ?" + cast.suffix(),
         values.get(0),

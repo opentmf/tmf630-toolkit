@@ -4,15 +4,16 @@ import java.util.function.IntSupplier;
 import org.springframework.beans.factory.InitializingBean;
 
 /**
- * Refuses to start the JSONB module on a PostgreSQL older than 16: filters and sorts on date and
- * time fields read stored text with {@code pg_input_is_valid} (PostgreSQL 16), so that a value no
- * cast reads is no match instead of an error that fails the whole query. Below 16 that function
- * does not exist; rather than fall back silently to a plain cast, the application does not start,
- * and says why.
+ * Under {@code opentmf.tmf630.jsonb.cast-mode=lenient} (the auto-configuration creates it only
+ * then), refuses to start the JSONB module on a PostgreSQL older than 16: lenient typed filters and
+ * sorts read stored text with {@code pg_input_is_valid} (PostgreSQL 16), so that a value no cast
+ * reads is no match instead of an error that fails the whole query. Below 16 that function does not
+ * exist; rather than fall back silently to the plain cast, the application does not start, and says
+ * why. The default, {@code strict}, needs PostgreSQL 15 or later and no check.
  *
  * <p>The check is replaceable (it is an ordinary bean), the requirement is not: an application that
- * replaces it and runs below 16 starts, and then every filter and sort on a date or time field
- * fails with "function pg_input_is_valid does not exist".
+ * replaces it and runs lenient below 16 starts, and then every typed filter and sort fails with
+ * "function pg_input_is_valid does not exist".
  */
 public class Tmf630JsonbPostgresVersionCheck implements InitializingBean {
 
@@ -31,10 +32,10 @@ public class Tmf630JsonbPostgresVersionCheck implements InitializingBean {
     int version = serverVersionNum.getAsInt();
     if (version < MINIMUM_SERVER_VERSION_NUM) {
       throw new Tmf630JsonbConfigurationException(
-          "tmf630-toolkit-jsonb needs PostgreSQL 16 or later: filters and sorts on date and time"
-              + " fields read stored text with pg_input_is_valid (PostgreSQL 16), so a value no"
-              + " cast reads is no match instead of an error; this server reports"
-              + " server_version_num "
+          "tmf630-toolkit-jsonb with opentmf.tmf630.jsonb.cast-mode=lenient needs PostgreSQL 16"
+              + " or later: lenient typed filters and sorts read stored text with pg_input_is_valid"
+              + " (PostgreSQL 16), so a value no cast reads is no match instead of an error; use"
+              + " cast-mode=strict (the default) below 16. This server reports server_version_num "
               + version
               + ".");
     }

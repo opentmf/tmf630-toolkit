@@ -18,6 +18,8 @@ class JsonbSortBuilderTest {
   private final JsonbPathExtractor extractor = new JsonbPathExtractor("payload");
   private final JsonbSortBuilder builderNullsLast = new JsonbSortBuilder(extractor, true);
   private final JsonbSortBuilder builderNoNullsLast = new JsonbSortBuilder(extractor, false);
+  private final JsonbSortBuilder builderLenient =
+      new JsonbSortBuilder(extractor, true, JsonbCastMode.LENIENT);
 
   @Test
   @DisplayName("empty / null sort produces empty JsonbClause")
@@ -47,8 +49,8 @@ class JsonbSortBuilderTest {
   }
 
   @Test
-  @DisplayName("correlated date-time sort: the guarded read repeats the jsonpath, bound twice")
-  void correlatedDateTimeSortBindsTheJsonpathTwice() {
+  @DisplayName("correlated date-time sort: the 3.5.2 plain cast by default, bound once")
+  void correlatedDateTimeSortKeepsThePlainCastByDefault() {
     TmfSort sort =
         new TmfSort(
             List.of(
@@ -57,6 +59,23 @@ class JsonbSortBuilderTest {
                     TmfSortTerm.Kind.SIMPLE_RICH,
                     "relatedParty[role=owner].createdAt")));
     JsonbClause c = builderNullsLast.buildOrderByClause(sort, f -> OffsetDateTime.class);
+    assertThat(c.sql())
+        .isEqualTo(
+            "((jsonb_path_query_first(payload, ?::jsonpath)) #>> '{}')::timestamptz ASC NULLS LAST");
+    assertThat(c.params()).hasSize(1);
+  }
+
+  @Test
+  @DisplayName("cast-mode=lenient, correlated date-time sort: the guarded read binds the jsonpath twice")
+  void correlatedDateTimeSortBindsTheJsonpathTwice() {
+    TmfSort sort =
+        new TmfSort(
+            List.of(
+                new TmfSortTerm(
+                    Sort.Direction.ASC,
+                    TmfSortTerm.Kind.SIMPLE_RICH,
+                    "relatedParty[role=owner].createdAt")));
+    JsonbClause c = builderLenient.buildOrderByClause(sort, f -> OffsetDateTime.class);
     String first = "((jsonb_path_query_first(payload, ?::jsonpath)) #>> '{}')";
     assertThat(c.sql())
         .isEqualTo(
@@ -66,21 +85,33 @@ class JsonbSortBuilderTest {
   }
 
   @Test
-  @DisplayName("LocalDate, LocalTime and LocalDateTime read through pg_input_is_valid as well")
+  @DisplayName("the plain cast by default; every typed cast through pg_input_is_valid when lenient")
   void otherDateAndTimeTypesAreGuarded() {
-    assertThat(JsonbCast.DATE.read("t")).isEqualTo("CASE WHEN pg_input_is_valid(t, 'date') THEN (t)::date END");
-    assertThat(JsonbCast.TIME.read("t")).isEqualTo("CASE WHEN pg_input_is_valid(t, 'time') THEN (t)::time END");
-    assertThat(JsonbCast.TIMESTAMP.read("t"))
+    assertThat(JsonbCast.DATE.read("t")).isEqualTo("(t)::date");
+    assertThat(JsonbCast.TIMESTAMPTZ.read("t", JsonbCastMode.STRICT)).isEqualTo("(t)::timestamptz");
+    assertThat(JsonbCast.DATE.read("t", JsonbCastMode.LENIENT))
+        .isEqualTo("CASE WHEN pg_input_is_valid(t, 'date') THEN (t)::date END");
+    assertThat(JsonbCast.TIME.read("t", JsonbCastMode.LENIENT))
+        .isEqualTo("CASE WHEN pg_input_is_valid(t, 'time') THEN (t)::time END");
+    assertThat(JsonbCast.TIMESTAMP.read("t", JsonbCastMode.LENIENT))
         .isEqualTo("CASE WHEN pg_input_is_valid(t, 'timestamp') THEN (t)::timestamp END");
+    assertThat(JsonbCast.BIGINT.read("t", JsonbCastMode.LENIENT))
+        .isEqualTo("CASE WHEN pg_input_is_valid(t, 'bigint') THEN (t)::bigint END");
+    assertThat(JsonbCast.BOOLEAN.read("t", JsonbCastMode.LENIENT))
+        .isEqualTo("CASE WHEN pg_input_is_valid(t, 'boolean') THEN (t)::boolean END");
     assertThat(JsonbCast.BIGINT.read("t")).isEqualTo("(t)::bigint");
-    assertThat(JsonbCast.TEXT.read("t")).isEqualTo("t");
+    assertThat(JsonbCast.TEXT.read("t", JsonbCastMode.LENIENT)).isEqualTo("t");
+    assertThat(JsonbCast.NUMERIC.readRepeatsText(JsonbCastMode.STRICT)).isFalse();
+    assertThat(JsonbCast.NUMERIC.readRepeatsText(JsonbCastMode.LENIENT)).isTrue();
   }
 
   @Test
-  @DisplayName("plain ASC OffsetDateTime — read as timestamptz only where pg_input_is_valid says so")
+  @DisplayName("plain ASC OffsetDateTime: the plain cast by default, the guarded read when lenient")
   void plainAscDateTime() {
     TmfSort sort = plain(Sort.Direction.ASC, "createdAt");
     assertThat(builderNullsLast.buildOrderByClause(sort, type(OffsetDateTime.class)).sql())
+        .isEqualTo("(payload->>'createdAt')::timestamptz ASC NULLS LAST");
+    assertThat(builderLenient.buildOrderByClause(sort, type(OffsetDateTime.class)).sql())
         .isEqualTo(
             "CASE WHEN pg_input_is_valid(payload->>'createdAt', 'timestamptz')"
                 + " THEN (payload->>'createdAt')::timestamptz END ASC NULLS LAST");
@@ -162,8 +193,7 @@ class JsonbSortBuilderTest {
     assertThat(c.sql())
         .isEqualTo(
             "((jsonb_path_query_first(payload, ?::jsonpath)) #>> '{}') ASC NULLS LAST, "
-                + "CASE WHEN pg_input_is_valid(payload->>'createdAt', 'timestamptz')"
-                + " THEN (payload->>'createdAt')::timestamptz END DESC NULLS LAST");
+                + "(payload->>'createdAt')::timestamptz DESC NULLS LAST");
     assertThat(c.params())
         .containsExactly("$.characteristics[*] ? (@.name == \"price\").value");
   }
