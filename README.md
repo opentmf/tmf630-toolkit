@@ -3838,11 +3838,13 @@ cells on a JPA twin and the samples of the 3.6.0 compatibility ledger. It record
 JAVA_HOME=/usr/lib64/openjdk-17 tmf630-toolkit-compat/run.sh   # COMPAT_RELEASE=3.5.2 by default
 ```
 
-Run R0 is the release and R1 the candidate under its defaults; R2 to R4 turn the JSONB opt-ins
+Run R0 is the release and R1 the candidate under its defaults; R2 to R5 turn the JSONB opt-ins
 on. The gate compares R0 with R1. A request that answered 200 must answer the same rows, and one
 that answered a 4xx or a 5xx the same status. Every difference must be a fix named in
-`tmf630-toolkit-compat/src/test/resources/compat/named-differences.tsv`, and a named fix that no
-request exercises fails too.
+`tmf630-toolkit-compat/src/test/resources/compat/named-differences.tsv`, with its evidence where
+the rule asks for it: the oracle's rows, or 3.5.2's rows for the same request with an enum named
+by its constant. A named fix that no request exercises fails too, and so does a rule that lets a
+request that answered 200 answer a 4xx or a 5xx.
 
 `target/compat/report.md` starts with what the report does not cover, then lists every verdict
 and what each switch changes. Each run starts PostgreSQL and Mongo containers.

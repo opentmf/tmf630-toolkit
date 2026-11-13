@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The compatibility report (TOOLKIT-COMPATIBILITY-REPORT-AGAINST-RELEASE-1).
 #
-# Records what the released toolkit (R0) and the candidate (R1 defaults, R2-R4 opt-ins) answer to
+# Records what the released toolkit (R0) and the candidate (R1 defaults, R2-R5 opt-ins) answer to
 # the combination suite's requests and the ledger's samples, one Maven invocation per run, then
 # compares them. HEAVY: each run starts PostgreSQL and Mongo containers.
 #
@@ -60,6 +60,7 @@ run R1 "$CANDIDATE" ""
 run R2 "$CANDIDATE" "opentmf.tmf630.jsonb.equality=containment"
 run R3 "$CANDIDATE" "opentmf.tmf630.jsonb.cast-mode=lenient"
 run R4 "$CANDIDATE" "opentmf.tmf630.jsonb.equality=containment,opentmf.tmf630.jsonb.cast-mode=lenient"
+run R5 "$CANDIDATE" "opentmf.tmf630.jsonb.apply-regex-max-length=true"
 
 echo "comparing"
 status=0

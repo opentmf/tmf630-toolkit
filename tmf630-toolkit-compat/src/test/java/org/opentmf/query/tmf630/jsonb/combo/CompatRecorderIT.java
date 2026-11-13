@@ -18,7 +18,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import org.bson.Document;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
@@ -54,6 +56,7 @@ import org.testcontainers.mongodb.MongoDBContainer;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * The compatibility report's recorder (TOOLKIT-COMPATIBILITY-REPORT-AGAINST-RELEASE-1): asks one
@@ -67,6 +70,11 @@ import tools.jackson.databind.json.JsonMapper;
  * Jayway cells on {@link CompatMongoCombo}, not split, plus the ledger samples); JPA (the suite's
  * top-level cells a typed column can hold on {@link CompatJpaCombo}, plus the ledger samples); and
  * the QueryDSL terminal's acceptance on JSON-typed fields ({@link CompatLedgerJson}).
+ *
+ * <p>Each suite cell also carries the oracle's rows ({@link ComboOracle}, over the documents the
+ * backend holds; {@code -} where it has none), and a request naming a wire-value enum is asked a
+ * second time by the constant's name ({@link CompatNames}), the evidence for the wire value.
+ * {@link CompatElementSamples} asks typed fields inside arrays, each with its stated rows.
  */
 @SpringBootTest(classes = CompatRecorderIT.TestApp.class)
 @Testcontainers
@@ -115,8 +123,11 @@ class CompatRecorderIT {
   @Autowired private TransactionTemplate tx;
 
   private final Map<String, CompatAnswer> answers = new TreeMap<>();
+  private final Map<String, String> oracles = new TreeMap<>();
   private final Map<String, JsonNode> rows = new LinkedHashMap<>();
   private final Map<String, JsonNode> splitRows = new LinkedHashMap<>();
+  /** What the JPA twin's typed columns hold, as documents: a NULL column is an absent key. */
+  private final Map<String, JsonNode> jpaDocs = new LinkedHashMap<>();
 
   @Test
   void recordEveryAnswer() throws IOException {
@@ -127,12 +138,14 @@ class CompatRecorderIT {
     tx.executeWithoutResult(status -> seedJpaTwin());
     CompatLedgerSamples.seedMongo(mongoTemplate);
     tx.executeWithoutResult(status -> CompatLedgerSamples.seedJpa(em));
+    CompatElementSamples.seed(jdbc);
     long seeded = System.currentTimeMillis();
 
     recordJsonb();
     recordMongo();
     recordJpa();
     recordLedger();
+    recordElements();
     write(start, seeded, System.currentTimeMillis());
   }
 
@@ -141,10 +154,11 @@ class CompatRecorderIT {
   private void recordJsonb() {
     for (ComboKind kind : ComboKind.values()) {
       for (ComboPosition position : ComboRequests.NOT_SPLIT) {
-        everyOperator("JSONB", false, position, kind, params -> jsonb(false, params));
+        everyOperator("JSONB", false, position, kind, rows, params -> jsonb(false, params));
         everySort(position, kind);
       }
-      everyOperator("JSONB", true, ComboPosition.SPLIT, kind, params -> jsonb(true, params));
+      everyOperator(
+          "JSONB", true, ComboPosition.SPLIT, kind, splitRows, params -> jsonb(true, params));
     }
     for (String[] sample : CompatJsonbSamples.REQUESTS) {
       Map<String, String[]> params = Map.of(sample[1], new String[] {sample[2]});
@@ -153,15 +167,20 @@ class CompatRecorderIT {
   }
 
   private CompatAnswer jsonb(boolean split, Map<String, String[]> params) {
+    return split
+        ? jsonb(ComboSplitDomain.class, ComboSplitRow.TABLE, params)
+        : jsonb(ComboDomain.class, ComboRow.TABLE, params);
+  }
+
+  private CompatAnswer jsonb(Class<?> domain, String table, Map<String, String[]> params) {
     JsonbClause where;
     try {
-      where = clauseBuilder.build(split ? ComboSplitDomain.class : ComboDomain.class, params);
+      where = clauseBuilder.build(domain, params);
     } catch (TmfFilteringException refused) {
       return CompatAnswer.refused(refused.getMessage());
     } catch (RuntimeException crashed) {
       return CompatAnswer.failed(crashed);
     }
-    String table = split ? ComboSplitRow.TABLE : ComboRow.TABLE;
     try {
       return CompatAnswer.rows(
           jdbc.sql("SELECT id FROM " + table + " WHERE " + where.sql())
@@ -220,7 +239,7 @@ class CompatRecorderIT {
     for (ComboKind kind : ComboKind.values()) {
       for (ComboPosition position : ComboRequests.NOT_SPLIT) {
         everyOperator(
-            "MONGO", false, position, kind, params -> mongo(CompatMongoCombo.class, params));
+            "MONGO", false, position, kind, rows, params -> mongo(CompatMongoCombo.class, params));
       }
     }
   }
@@ -266,10 +285,13 @@ class CompatRecorderIT {
         }
         CompatJpaCombo row = new CompatJpaCombo();
         row.id = "top." + kind.key() + "." + stored[0];
+        ObjectNode doc = JSON.createObjectNode();
         if (!"nul".equals(stored[0])) {
           set(row, kind, JSON.readTree(stored[1]));
+          doc.set(kind.key(), JSON.readTree(stored[1]));
         }
         em.persist(row);
+        jpaDocs.put(row.id, doc);
       }
     }
   }
@@ -302,7 +324,8 @@ class CompatRecorderIT {
 
   private void recordJpa() {
     for (ComboKind kind : TYPEABLE) {
-      everyOperator("JPA", false, ComboPosition.TOP, kind, params -> jpa(CompatJpaCombo.class, params));
+      everyOperator(
+          "JPA", false, ComboPosition.TOP, kind, jpaDocs, params -> jpa(CompatJpaCombo.class, params));
     }
   }
 
@@ -355,6 +378,16 @@ class CompatRecorderIT {
     }
   }
 
+  // ---- typed fields inside arrays ---------------------------------------------------------
+
+  private void recordElements() {
+    for (CompatElementSamples.Request r : CompatElementSamples.REQUESTS) {
+      Map<String, String[]> params = Map.of(r.param(), new String[] {r.value()});
+      put("JSONB", "elements", r.position(), r.kind(), "URL", r.operator(), params,
+          jsonb(CompatElementDomain.class, CompatElementRow.TABLE, params), r.rows());
+    }
+  }
+
   // ---- the suite's cells, per backend --------------------------------------------------------
 
   @FunctionalInterface
@@ -362,18 +395,33 @@ class CompatRecorderIT {
     CompatAnswer answer(Map<String, String[]> params);
   }
 
+  /**
+   * Every operator of the suite on one backend, with the oracle's rows over {@code docs}, the
+   * documents that backend holds; a request on a wire-value enum is asked by name too.
+   */
   private void everyOperator(
-      String backend, boolean split, ComboPosition position, ComboKind kind, Ask ask) {
+      String backend,
+      boolean split,
+      ComboPosition position,
+      ComboKind kind,
+      Map<String, JsonNode> docs,
+      Ask ask) {
     String shape = split ? "split" : "not split";
     for (TmfOperator op : TmfOperator.values()) {
       Map<String, String[]> url = ComboRequests.urlParams(position, kind, op);
-      put(backend, shape, position.name(), kind.name(), "URL", op.name(), url, ask.answer(url));
+      String urlOracle = rowsOf(ComboOracle.urlExpected(docs, position, kind, op));
+      put(backend, shape, position.name(), kind.name(), "URL", op.name(), url, ask.answer(url),
+          urlOracle);
+      askByName(backend, shape, position, kind, "URL", op, url, ask);
       Optional<String> leaf = ComboRequests.filterLeaf(kind, op);
       if (leaf.isPresent()) {
         Map<String, String[]> filter =
             Map.of("filter", new String[] {ComboRequests.filterExpression(position, kind, leaf.get())});
+        String filterOracle =
+            ComboOracle.filterExpected(docs, position, kind, op).map(this::rowsOf).orElse("-");
         put(backend, shape, position.name(), kind.name(), "FILTER", op.name(), filter,
-            ask.answer(filter));
+            ask.answer(filter), filterOracle);
+        askByName(backend, shape, position, kind, "FILTER", op, filter, ask);
       }
     }
     for (String[] word : ComboRequests.JAYWAY_OPERATORS_NOT_IN_THE_GRAMMAR) {
@@ -386,6 +434,27 @@ class CompatRecorderIT {
       put(backend, shape, position.name(), kind.name(), "FILTER", "JAYWAY_" + word[0], filter,
           ask.answer(filter));
     }
+  }
+
+  /** The request by the constant's name, when it names a wire value: the evidence for it. */
+  private void askByName(
+      String backend,
+      String shape,
+      ComboPosition position,
+      ComboKind kind,
+      String entry,
+      TmfOperator op,
+      Map<String, String[]> params,
+      Ask ask) {
+    if (kind != ComboKind.WIRE_ENUM || !CompatNames.namesAWireValue(ComboRequests.request(params))) {
+      return;
+    }
+    Map<String, String[]> named = CompatNames.byName(params);
+    put(backend, shape, position.name(), kind.name(), entry, op.name(), named, ask.answer(named));
+  }
+
+  private String rowsOf(Set<String> ids) {
+    return String.join(",", new TreeSet<>(ids));
   }
 
   private Predicate predicate(Class<?> root, Map<String, String[]> params) {
@@ -449,7 +518,22 @@ class CompatRecorderIT {
       String operator,
       Map<String, String[]> params,
       CompatAnswer answer) {
-    put(backend, shape, position, kind, entry, operator, ComboRequests.request(params), answer);
+    put(backend, shape, position, kind, entry, operator, params, answer, "-");
+  }
+
+  private void put(
+      String backend,
+      String shape,
+      String position,
+      String kind,
+      String entry,
+      String operator,
+      Map<String, String[]> params,
+      CompatAnswer answer,
+      String oracle) {
+    String request = ComboRequests.request(params);
+    put(backend, shape, position, kind, entry, operator, request, answer);
+    oracles.put(String.join("\t", backend, shape, position, kind, entry, operator, request), oracle);
   }
 
   private void put(
@@ -470,8 +554,12 @@ class CompatRecorderIT {
     Path dir = Path.of(System.getProperty("compat.out", "target/compat"), run);
     Files.createDirectories(dir);
     List<String> lines = new ArrayList<>();
-    lines.add("backend\tshape\tposition\tkind\tentry\toperator\trequest\tstatus\tanswer");
-    answers.forEach((key, a) -> lines.add(key + "\t" + a.status() + "\t" + a.answer()));
+    lines.add("backend\tshape\tposition\tkind\tentry\toperator\trequest\tstatus\tanswer\toracle");
+    answers.forEach(
+        (key, a) ->
+            lines.add(
+                key + "\t" + a.status() + "\t" + a.answer() + "\t"
+                    + oracles.getOrDefault(key, "-")));
     Files.write(dir.resolve("answers.tsv"), lines);
     Files.write(
         dir.resolve("meta.tsv"),

@@ -5,8 +5,8 @@ import java.util.List;
 /**
  * Requests on the combination suite's JSONB rows that its generated cells do not ask: the samples
  * of the 3.6.0 CHANGELOG entries (so every named fix is exercised) and the documented
- * PostgreSQL extensions of {@code filter=} (so their unchanged answers are proven). Each is a
- * label and the parameter's name and value.
+ * PostgreSQL extensions of {@code filter=} (so their unchanged answers are proven), and number
+ * fields read as text. Each is a label and the parameter's name and value.
  */
 final class CompatJsonbSamples {
 
@@ -45,7 +45,20 @@ final class CompatJsonbSamples {
           new String[] {"LITERAL_UNREADABLE", "filter", "$[?(@.i == 'abc')]"},
           new String[] {"STRING_OPERATOR_ON_NUMBER", "i.contains", "5"},
           new String[] {"ORDER_ON_OBJECT", "o.gt", "5"},
-          new String[] {"BETWEEN_THREE_VALUES", "i.between", "1,2,3"});
+          new String[] {"BETWEEN_THREE_VALUES", "i.between", "1,2,3"},
+          // a number field's value as text: where Java's rendering of the bound value could
+          // differ from PostgreSQL's (the suite's own cells use one value per operator)
+          new String[] {"NUMBER_EQI_DECIMAL_SCALE", "d.eqi", "2.50"},
+          new String[] {"NUMBER_NEI_DECIMAL_SCALE", "d.nei", "2.50"},
+          new String[] {"NUMBER_EQI_DOUBLE_EXPONENT", "f.eqi", "1e-1"},
+          new String[] {"NUMBER_NEI_DOUBLE_EXPONENT", "f.nei", "1e-1"},
+          new String[] {"NUMBER_EQI_DOUBLE_INTEGRAL", "f.eqi", "2"},
+          new String[] {"NUMBER_EQI_LONG_BEYOND_DOUBLE", "l.eqi", "9007199254740993"},
+          new String[] {"NUMBER_REGEX_DOUBLE", "f.regex", "^0"},
+          new String[] {"NUMBER_REGEXI_INTEGER", "i.regexi", "5"},
+          new String[] {"NUMBER_STARTSWITH_DECIMAL_SCALE", "d.startswith", "2.5"},
+          new String[] {"NUMBER_ENDSWITH_DOUBLE_INTEGRAL", "f.endswith", "5"},
+          new String[] {"NUMBER_CONTAINS_DOUBLE_EXPONENT", "f.contains", "1e0"});
 
   private CompatJsonbSamples() {}
 }
