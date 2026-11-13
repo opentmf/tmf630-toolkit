@@ -50,8 +50,6 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.web.context.request.ServletWebRequest;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.json.JsonMapper;
-import tools.jackson.databind.node.ObjectNode;
 
 /**
  * TOOLKIT-JSONB-COMBINATION-SUITE-1: a generated combination suite of the JSONB filter, sort and
@@ -91,13 +89,7 @@ import tools.jackson.databind.node.ObjectNode;
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class Tmf630JsonbCombinationIT {
 
-  private static final ObjectMapper JSON = JsonMapper.builder().build();
-  private static final List<ComboPosition> NOT_SPLIT =
-      List.of(
-          ComboPosition.TOP,
-          ComboPosition.NESTED,
-          ComboPosition.ARRAY,
-          ComboPosition.ARRAY_IN_ARRAY);
+  private static final List<ComboPosition> NOT_SPLIT = ComboRequests.NOT_SPLIT;
 
   @Autowired private JdbcClient jdbc;
   @Autowired private Tmf630JsonbClauseBuilder clauseBuilder;
@@ -127,50 +119,8 @@ class Tmf630JsonbCombinationIT {
 
   @BeforeAll
   void seed() {
-    jdbc.sql("DROP TABLE IF EXISTS " + ComboSplitRow.CHILD_TABLE + " CASCADE").update();
-    jdbc.sql("DROP TABLE IF EXISTS " + ComboSplitRow.TABLE + " CASCADE").update();
-    jdbc.sql("DROP TABLE IF EXISTS " + ComboRow.TABLE + " CASCADE").update();
-    jdbc.sql("CREATE TABLE " + ComboRow.TABLE + " (id VARCHAR(80) PRIMARY KEY, payload JSONB NOT NULL)")
-        .update();
-    jdbc.sql(
-            "CREATE TABLE " + ComboSplitRow.TABLE
-                + " (id VARCHAR(80) PRIMARY KEY, payload JSONB NOT NULL)")
-        .update();
-    jdbc.sql(
-            "CREATE TABLE " + ComboSplitRow.CHILD_TABLE + " (parent_id VARCHAR(80) NOT NULL"
-                + " REFERENCES " + ComboSplitRow.TABLE + "(id) ON DELETE CASCADE,"
-                + " item_id VARCHAR(50) NOT NULL, item_order INTEGER NOT NULL,"
-                + " payload JSONB NOT NULL, PRIMARY KEY (parent_id, item_id))")
-        .update();
-    for (ComboKind kind : ComboKind.values()) {
-      for (String[] stored : kind.storedValues()) {
-        ObjectNode leaf = JSON.createObjectNode().set(kind.key(), JSON.readTree(stored[1]));
-        for (ComboPosition position : NOT_SPLIT) {
-          String id = position.name().toLowerCase() + "." + kind.key() + "." + stored[0];
-          ObjectNode doc = position.payload(id, leaf);
-          rows.put(id, doc);
-          insert(ComboRow.TABLE, id, doc);
-        }
-        String id = "split." + kind.key() + "." + stored[0];
-        ObjectNode doc = ComboPosition.SPLIT.payload(id, leaf);
-        splitRows.put(id, doc);
-        insert(ComboSplitRow.TABLE, id, JSON.createObjectNode().put("id", id));
-        List<JsonNode> items = doc.get("items").valueStream().toList();
-        for (int order = 0; order < items.size(); order++) {
-          jdbc.sql(
-                  "INSERT INTO " + ComboSplitRow.CHILD_TABLE
-                      + " (parent_id, item_id, item_order, payload) VALUES (?, ?, ?, ?::jsonb)")
-              .params(id, "c" + order, order, items.get(order).toString())
-              .update();
-        }
-      }
-    }
-  }
-
-  private void insert(String table, String id, JsonNode payload) {
-    jdbc.sql("INSERT INTO " + table + " (id, payload) VALUES (?, ?::jsonb)")
-        .params(id, payload.toString())
-        .update();
+    ComboSeed.documents(rows, splitRows);
+    ComboSeed.write(jdbc, rows, splitRows);
   }
 
   // ---- the run ----------------------------------------------------------------------------
@@ -245,33 +195,15 @@ class Tmf630JsonbCombinationIT {
       urlCell(split, position, kind, operator);
       filterCell(split, position, kind, operator);
     }
-    for (String[] word : JAYWAY_OPERATORS_NOT_IN_THE_GRAMMAR) {
+    for (String[] word : ComboRequests.JAYWAY_OPERATORS_NOT_IN_THE_GRAMMAR) {
       jaywayWordCell(split, position, kind, word[0], word[1]);
     }
   }
 
-  /**
-   * Jayway's filter operators the toolkit's {@code filter=} grammar does not have (README: "What
-   * filter= does NOT support (rejected with 400)"), each with a value of its kind. Both the
-   * QueryDSL terminal and JSONB must answer the toolkit's 400.
-   */
-  private static final String[][] JAYWAY_OPERATORS_NOT_IN_THE_GRAMMAR = {
-    {"in", "['x', 'y']"}, {"nin", "['x']"}, {"size", "2"}, {"empty", "true"},
-    {"contains", "'x'"}, {"anyof", "['x']"}, {"noneof", "['x']"}, {"subsetof", "['x']"},
-    {"all", "['x']"}, {"exists", "true"}, {"type", "'string'"}, {"matches", "'x'"},
-    {"IN", "['x']"}, {"===", "'x'"}, {"!==", "'x'"}
-  };
 
   private void jaywayWordCell(
       boolean split, ComboPosition position, ComboKind kind, String word, String value) {
-    List<Step> steps = new ArrayList<>(position.steps());
-    String leafKey = kind.key();
-    if (kind == ComboKind.OBJECT_LIST) {
-      steps.add(new Step("lo", true));
-      leafKey = "code";
-    }
-    String expression =
-        "$[?(" + nest(steps, 0, "@.", leafKey, "%s " + word + " " + value) + ")]";
+    String expression = ComboRequests.filterExpression(position, kind, "%s " + word + " " + value);
     evaluate(split, position, kind, "FILTER", "JAYWAY_" + word, Map.of("filter",
         new String[] {expression}), Optional.empty());
   }
@@ -279,58 +211,29 @@ class Tmf630JsonbCombinationIT {
   // ---- URL attribute operators ------------------------------------------------------------
 
   private void urlCell(boolean split, ComboPosition position, ComboKind kind, TmfOperator op) {
-    List<String> query = urlQuery(kind, op);
-    String value = op.isNoValueOperator() ? "true" : String.join(",", query);
-    String name = position.urlPrefix() + kind.leafPath() + "." + op.suffix();
-    Map<String, String[]> params = Map.of(name, new String[] {value});
+    List<String> query = ComboRequests.urlQuery(kind, op);
+    Map<String, String[]> params = ComboRequests.urlParams(position, kind, op);
     Set<String> expected =
         ids(split, doc -> ComboOracle.matches(op, kind, ComboOracle.find(doc, position, kind), query));
     evaluate(split, position, kind, "URL", op.name(), params, Optional.of(expected));
   }
 
-  /** The query values of a URL operator, from the kind's probe. */
-  private static List<String> urlQuery(ComboKind kind, TmfOperator op) {
-    ComboKind.Probe p = kind.probe();
-    return switch (op) {
-      case EQ, NE -> List.of(p.eq());
-      case EQI, NEI -> List.of(ComboKind.upper(p.eq()));
-      case GT, GTE, LT, LTE -> List.of(p.above());
-      case BETWEEN -> List.of(p.low(), p.high());
-      case IN, NIN -> List.of(p.inA(), p.inB());
-      case IS_NULL, IS_NOT_NULL -> List.of();
-      case LIKE -> List.of(p.prefix() + "%");
-      case LIKEI -> List.of(ComboKind.upper(p.prefix()) + "%");
-      case CONTAINS -> List.of(p.infix());
-      case CONTAINSI -> List.of(ComboKind.upper(p.infix()));
-      case STARTS_WITH -> List.of(p.prefix());
-      case STARTS_WITHI -> List.of(ComboKind.upper(p.prefix()));
-      case ENDS_WITH -> List.of(p.suffix());
-      case ENDS_WITHI -> List.of(ComboKind.upper(p.suffix()));
-      case REGEX -> List.of("^" + p.prefix());
-      case REGEXI -> List.of("^" + ComboKind.upper(p.prefix()));
-    };
-  }
-
   // ---- filter= JsonPath -------------------------------------------------------------------
 
   private void filterCell(boolean split, ComboPosition position, ComboKind kind, TmfOperator op) {
-    Optional<String> leaf = filterLeaf(kind, op);
+    Optional<String> leaf = ComboRequests.filterLeaf(kind, op);
     if (leaf.isEmpty()) {
       skip("FILTER_HAS_NO_FORM_FOR_" + op.name());
       return;
     }
-    List<Step> steps = new ArrayList<>(position.steps());
-    String leafKey = kind.key();
-    if (kind == ComboKind.OBJECT_LIST) {
-      steps.add(new Step("lo", true));
-      leafKey = "code";
-    }
-    String expression = "$[?(" + nest(steps, 0, "@.", leafKey, leaf.get()) + ")]";
+    List<Step> steps = ComboRequests.filterSteps(position, kind);
+    String leafKey = ComboRequests.filterLeafKey(kind);
+    String expression = ComboRequests.filterExpression(position, kind, leaf.get());
     Map<String, String[]> params = Map.of("filter", new String[] {expression});
     Optional<Set<String>> expected;
     if (op == TmfOperator.REGEX || op == TmfOperator.REGEXI) {
       // Jayway full-matches =~; the toolkit's =~ searches, as .regex and Mongo's $regex (3.4.0)
-      List<String> query = urlQuery(kind, op);
+      List<String> query = ComboRequests.urlQuery(kind, op);
       expected =
           Optional.of(
               ids(split, doc -> ComboOracle.matches(op, kind, ComboOracle.find(doc, position, kind), query)));
@@ -339,41 +242,6 @@ class Tmf630JsonbCombinationIT {
       expected = filterOracle(split, steps, leafKey, leaf.get());
     }
     evaluate(split, position, kind, "FILTER", op.name(), params, expected);
-  }
-
-  /** The predicate template of a {@code filter=} operator, {@code %s} standing for the path. */
-  private static Optional<String> filterLeaf(ComboKind kind, TmfOperator op) {
-    ComboKind.Probe p = kind.probe();
-    return Optional.ofNullable(
-        switch (op) {
-          case EQ -> "%s == " + kind.filterLiteral(p.eq());
-          case NE -> "%s != " + kind.filterLiteral(p.eq());
-          case GT -> "%s > " + kind.filterLiteral(p.above());
-          case GTE -> "%s >= " + kind.filterLiteral(p.above());
-          case LT -> "%s < " + kind.filterLiteral(p.above());
-          case LTE -> "%s <= " + kind.filterLiteral(p.above());
-          case BETWEEN ->
-              "%s >= " + kind.filterLiteral(p.low()) + " && %s <= " + kind.filterLiteral(p.high());
-          case IN -> "%s in [" + kind.filterLiteral(p.inA()) + ", " + kind.filterLiteral(p.inB()) + "]";
-          case NIN ->
-              "%s nin [" + kind.filterLiteral(p.inA()) + ", " + kind.filterLiteral(p.inB()) + "]";
-          case IS_NULL -> "!%s";
-          case REGEX -> "%s =~ /^" + p.prefix() + "/";
-          case REGEXI -> "%s =~ /^" + ComboKind.upper(p.prefix()) + "/i";
-          default -> null;
-        });
-  }
-
-  /** Builds the predicate: object steps extend the path, array steps correlate into elements. */
-  private static String nest(List<Step> steps, int from, String prefix, String leafKey, String leaf) {
-    if (from == steps.size()) {
-      return leaf.replace("%s", prefix + leafKey);
-    }
-    Step step = steps.get(from);
-    if (!step.array()) {
-      return nest(steps, from + 1, prefix + step.name() + ".", leafKey, leaf);
-    }
-    return prefix + step.name() + "[?(" + nest(steps, from + 1, "@.", leafKey, leaf) + ")]";
   }
 
   /**
@@ -502,7 +370,7 @@ class Tmf630JsonbCombinationIT {
     }
     for (Sort.Direction direction : Sort.Direction.values()) {
       cells++;
-      String path = position.urlPrefix() + kind.leafPath();
+      String path = ComboRequests.sortPath(position, kind);
       String request = "sort=" + (direction == Sort.Direction.DESC ? "-" : "") + path;
       JsonbClause order;
       try {
@@ -629,9 +497,7 @@ class Tmf630JsonbCombinationIT {
   }
 
   private static String request(Map<String, String[]> params) {
-    return params.entrySet().stream()
-        .map(e -> e.getKey() + "=" + String.join(",", e.getValue()))
-        .collect(Collectors.joining("&"));
+    return ComboRequests.request(params);
   }
 
   private static String params(JsonbClause clause) {
