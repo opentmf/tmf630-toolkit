@@ -67,6 +67,46 @@ class JsonbCastTest {
     assertThat(JsonbCast.forJavaType(Object.class)).isEqualTo(JsonbCast.TEXT);
   }
 
+  @Test
+  @DisplayName("readCanonical reads a value only in its JSON or ISO form, else NULL")
+  void readCanonicalReadsOnlyTheJsonOrIsoForm() {
+    assertThat(JsonbCast.TEXT.readCanonical("e1->>'s'")).isEqualTo("e1->>'s'");
+    assertThat(JsonbCast.BIGINT.readCanonical("e1->>'i'"))
+        .isEqualTo(
+            "CASE WHEN (e1->>'i') ~ '^-{0,1}[0-9]{1,19}$' THEN CASE WHEN (e1->>'i')::numeric"
+                + " BETWEEN -9223372036854775808 AND 9223372036854775807 THEN (e1->>'i')::bigint"
+                + " END END");
+    assertThat(JsonbCast.NUMERIC.readCanonical("e1->>'d'"))
+        .isEqualTo(
+            "CASE WHEN length(e1->>'d') <= 1000 AND (e1->>'d') ~"
+                + " '^-{0,1}[0-9]+([.][0-9]+){0,1}([eE][+-]{0,1}[0-9]{1,3}){0,1}$'"
+                + " THEN (e1->>'d')::numeric END");
+    assertThat(JsonbCast.BOOLEAN.readCanonical("e1->>'b'"))
+        .isEqualTo("CASE WHEN (e1->>'b') IN ('true', 'false') THEN (e1->>'b')::boolean END");
+    assertThat(JsonbCast.TIME.readCanonical("e1->>'lt'"))
+        .isEqualTo(
+            "CASE WHEN (e1->>'lt') ~ '^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9]([.][0-9]{1,9}){0,1})"
+                + "{0,1}$' THEN (e1->>'lt')::time END");
+    for (JsonbCast dated : new JsonbCast[] {JsonbCast.DATE, JsonbCast.TIMESTAMP,
+        JsonbCast.TIMESTAMPTZ}) {
+      assertThat(dated.readCanonical("e1->>'x'"))
+          .as(dated.name())
+          .startsWith("CASE WHEN (e1->>'x') ~ '^(([0-9]{3}[1-9]|")
+          .endsWith("$' THEN (e1->>'x')" + dated.suffix() + " END");
+    }
+    assertThat(JsonbCast.TIMESTAMP.readCanonical("e1->>'x'")).doesNotContain("(Z|");
+    assertThat(JsonbCast.TIMESTAMPTZ.readCanonical("e1->>'x'"))
+        .contains("(Z|[+-](0[0-9]|1[0-5])(:{0,1}[0-5][0-9]){0,1}){0,1}$'");
+  }
+
+  @Test
+  @DisplayName("readCanonical holds no ? and no backslash, whatever the cast")
+  void readCanonicalHoldsNoPlaceholderAndNoBackslash() {
+    for (JsonbCast cast : JsonbCast.values()) {
+      assertThat(cast.readCanonical("e1->>'x'")).as(cast.name()).doesNotContain("?", "\\");
+    }
+  }
+
   enum SampleEnum {
     A,
     B

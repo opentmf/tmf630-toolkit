@@ -40,6 +40,8 @@ import tools.jackson.databind.json.JsonMapper;
  * {@code payload @> ?::jsonb}, which a GIN index on the payload serves (an opt-in, since 3.6.0).
  * A typed cast reads a stored value by the factory's {@link JsonbCastMode}: the plain cast by
  * default, which fails the request on a value it cannot read, or the guarded read (an opt-in).
+ * Inside an array or a split collection the default reads only a value in the type's JSON or ISO
+ * form and skips any other ({@link JsonbCast#readCanonical}).
  *
  * <p>{@link IsnullSemantics#NULLISH} widens {@code IS_NULL}/{@code IS_NOT_NULL} to
  * include explicit JSON {@code null} values in addition to missing-key checks — per
@@ -57,6 +59,8 @@ public class JsonbPredicateFactory {
   private final JsonbContainment containment;
   private final JsonbEqualityMode equalityMode;
   private final JsonbCastMode castMode;
+  /** Over an array element or a split child's payload (made by {@link #forColumn}). */
+  private final boolean element;
 
   /** A factory that writes enum values with a default {@link JsonMapper}. */
   public JsonbPredicateFactory(
@@ -102,6 +106,7 @@ public class JsonbPredicateFactory {
     this.containment = new JsonbContainment(mapper == null ? DEFAULT_MAPPER : mapper);
     this.equalityMode = equalityMode == null ? JsonbEqualityMode.EXTRACTION : equalityMode;
     this.castMode = castMode == null ? JsonbCastMode.STRICT : castMode;
+    this.element = false;
   }
 
   private JsonbPredicateFactory(JsonbPredicateFactory same, JsonbPathExtractor extractor) {
@@ -111,9 +116,15 @@ public class JsonbPredicateFactory {
     this.containment = same.containment;
     this.equalityMode = same.equalityMode;
     this.castMode = same.castMode;
+    this.element = true;
   }
 
-  /** The same factory over another JSONB column (an array element, a split child's payload). */
+  /**
+   * The same factory over another JSONB column (an array element, a split child's payload). Under
+   * {@link JsonbCastMode#STRICT} its typed casts read only a value in the type's JSON or ISO form
+   * ({@link JsonbCast#readCanonical}) and skip any other: 3.5.2 read nothing there, so an element
+   * it cannot read must not fail a request that used to answer.
+   */
   JsonbPredicateFactory forColumn(String column) {
     return new JsonbPredicateFactory(this, new JsonbPathExtractor(column));
   }
@@ -192,7 +203,7 @@ public class JsonbPredicateFactory {
     // Parenthesise the extraction before applying the cast — Postgres's :: binds
     // tighter than the ->> / #>> operators, so payload->>'x'::bigint would try to
     // cast the literal string 'x' to bigint instead of the extracted value.
-    String castedLhs = cast.read(text, castMode);
+    String castedLhs = read(cast, text);
     return switch (operator) {
       case EQ -> JsonbClause.of(castedLhs + " = ?" + cast.suffix(), value);
       case NE -> JsonbClause.of(castedLhs + " <> ?" + cast.suffix(), value);
@@ -260,6 +271,13 @@ public class JsonbPredicateFactory {
 
   // --- helpers ---
 
+  /** {@code text} read as {@code cast}'s type, by the cast mode and where this factory reads. */
+  private String read(JsonbCast cast, String text) {
+    return element && castMode == JsonbCastMode.STRICT
+        ? cast.readCanonical(text)
+        : cast.read(text, castMode);
+  }
+
   /**
    * A substring operator ({@code contains}, {@code startswith}, {@code endswith} and the
    * case-insensitive forms): {@code value} is matched literally, its {@code %}, {@code _} and
@@ -312,7 +330,7 @@ public class JsonbPredicateFactory {
   }
 
   private JsonbClause inClause(String text, JsonbCast cast, List<Object> values, boolean negate) {
-    String lhs = cast.read(text, castMode);
+    String lhs = read(cast, text);
     StringBuilder sb = new StringBuilder(lhs);
     sb.append(negate ? " NOT IN (" : " IN (");
     for (int i = 0; i < values.size(); i++) {
@@ -329,7 +347,7 @@ public class JsonbPredicateFactory {
       throw new TmfFilteringException(
           "BETWEEN requires exactly two values for field: " + fieldPath);
     }
-    String casted = cast.read(text, castMode);
+    String casted = read(cast, text);
     return JsonbClause.of(
         casted + " BETWEEN ?" + cast.suffix() + " AND ?" + cast.suffix(),
         values.get(0),

@@ -31,8 +31,10 @@ import tools.jackson.databind.ObjectMapper;
  *   <li>the {@code filter=} forms PostgreSQL's jsonpath cannot parse, which were a 500, are the
  *       core's 400 (a bare exists test, recursive descent, a function PostgreSQL does not have,
  *       {@code length()} compared by anything but {@code ==});
- *   <li>the regex length cap, the core's {@code regex.max-length} (lowered to 8 here, so a refused
- *       11-character pattern shows the setting is read), applies to {@code .regex} and {@code =~};
+ *   <li>the regex length cap, the core's {@code regex.max-length}, does NOT apply on JSONB, as
+ *       before 3.6.0: it is lowered to 8 here and an 11-character pattern still answers (the
+ *       opt-in, {@code opentmf.tmf630.jsonb.apply-regex-max-length=true}, is
+ *       {@link Tmf630JsonbRegexCapOptInIT});
  *   <li>PostgreSQL's own jsonpath that answers ({@code exists()}, item methods, {@code like_regex},
  *       {@code starts with}, arithmetic, a negated group) still answers: an extension on JSONB,
  *       which the Mongo and JPA terminals refuse.
@@ -55,7 +57,6 @@ class Tmf630JsonbFilterDefaultRefusalsIT {
   private static final String TABLE = JsonbTypedRow.TABLE;
   private static final String EXPECTED_COMPARISON =
       "Expected comparison operator in jsonPath filter.";
-  private static final String TOO_LONG = "Regex pattern too long for field: ";
 
   @Autowired private JdbcClient jdbc;
   @Autowired private Tmf630JsonbClauseBuilder clauseBuilder;
@@ -82,10 +83,7 @@ class Tmf630JsonbFilterDefaultRefusalsIT {
         filter("$[?(@.items.count() > 1)]", EXPECTED_COMPARISON),
         filter(
             "$[?(@.items.length() > 1)]",
-            "length() supports only == comparison; use [?(...)] for non-empty checks."),
-        filter("$[?(@.s =~ /^abcdefghij/)]", TOO_LONG + "s"),
-        Arguments.of("s.regex", "^abcdefghij", TOO_LONG + "s"),
-        Arguments.of("items.b.regexi", "^abcdefghij", TOO_LONG + "items.b"));
+            "length() supports only == comparison; use [?(...)] for non-empty checks."));
   }
 
   private static Arguments filter(String expression, String message) {
@@ -112,7 +110,11 @@ class Tmf630JsonbFilterDefaultRefusalsIT {
         answered("$[?(!(@.s == 'alpha'))]", "B", "C"),
         answered("$[?(@.items.length() == 2)]", "B"),
         answered("$[?(@.s =~ /^br/)]", "B"),
-        Arguments.of("s.regex", "^al", Set.of("A")));
+        Arguments.of("s.regex", "^al", Set.of("A")),
+        // longer than regex.max-length (8): no cap by default
+        answered("$[?(@.s =~ /^alpha|^bravo/)]", "A", "B"),
+        Arguments.of("s.regex", "^alpha|^bravo", Set.of("A", "B")),
+        Arguments.of("items.b.regexi", "^X|^Y|^nothing", Set.of("A", "B")));
   }
 
   private static Arguments answered(String expression, String... ids) {

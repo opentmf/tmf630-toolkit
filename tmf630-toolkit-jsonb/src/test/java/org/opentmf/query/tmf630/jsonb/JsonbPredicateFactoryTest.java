@@ -272,6 +272,46 @@ class JsonbPredicateFactoryTest {
   }
 
   @Test
+  @DisplayName("inside an array or a split child, the default reads only the JSON or ISO form")
+  void anElementFactoryReadsOnlyTheCanonicalFormByDefault() {
+    JsonbPredicateFactory element = factory.forColumn("e1");
+    assertThat(element.build(TmfOperator.EQ, "ld", LocalDate.class, LocalDate.of(2025, 1, 1)).sql())
+        .isEqualTo(JsonbCast.DATE.readCanonical("e1->>'ld'") + " = ?::date");
+    assertThat(element.build(TmfOperator.GT, "i", Integer.class, 5).sql())
+        .isEqualTo(JsonbCast.BIGINT.readCanonical("e1->>'i'") + " > ?::bigint");
+    assertThat(
+            element
+                .buildMulti(TmfOperator.NIN, "b", Boolean.class, List.of(Boolean.TRUE))
+                .sql())
+        .isEqualTo(JsonbCast.BOOLEAN.readCanonical("e1->>'b'") + " NOT IN (?::boolean)");
+    assertThat(
+            element
+                .buildMulti(
+                    TmfOperator.BETWEEN,
+                    "d",
+                    BigDecimal.class,
+                    List.of(BigDecimal.ONE, BigDecimal.TEN))
+                .sql())
+        .isEqualTo(
+            JsonbCast.NUMERIC.readCanonical("e1->>'d'") + " BETWEEN ?::numeric AND ?::numeric");
+    assertThat(element.build(TmfOperator.EQ, "s", String.class, "a").sql())
+        .as("text is read as it is")
+        .isEqualTo("e1->>'s' = ?");
+    assertThat(factory.build(TmfOperator.GT, "i", Integer.class, 5).sql())
+        .as("the top level keeps the plain cast, as 3.5.2")
+        .isEqualTo("(payload->>'i')::bigint > ?::bigint");
+  }
+
+  @Test
+  @DisplayName("inside an array under cast-mode=lenient, pg_input_is_valid as everywhere")
+  void anElementFactoryUnderLenientKeepsTheExactCheck() {
+    assertThat(optIns.forColumn("e1").build(TmfOperator.GT, "i", Integer.class, 5).sql())
+        .isEqualTo(
+            "CASE WHEN pg_input_is_valid(e1->>'i', 'bigint') THEN (e1->>'i')::bigint END"
+                + " > ?::bigint");
+  }
+
+  @Test
   @DisplayName("cast-mode=lenient guards numbers and booleans with pg_input_is_valid too")
   void lenientGuardsNumbersAndBooleans() {
     assertThat(optIns.build(TmfOperator.GT, "n", Integer.class, 5).sql())
