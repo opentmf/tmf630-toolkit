@@ -2,7 +2,6 @@ package org.opentmf.query.tmf630.jsonb.combo;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.jayway.jsonpath.JsonPath;
 import com.querydsl.core.types.Predicate;
 import java.io.IOException;
 import java.io.InputStream;
@@ -33,7 +32,6 @@ import org.opentmf.query.tmf630.jsonb.JsonbClause;
 import org.opentmf.query.tmf630.jsonb.JsonbSortBuilder;
 import org.opentmf.query.tmf630.jsonb.Tmf630JsonbClauseBuilder;
 import org.opentmf.query.tmf630.jsonb.combo.ComboOracle.Found;
-import org.opentmf.query.tmf630.jsonb.combo.ComboPosition.Step;
 import org.opentmf.query.tmf630.paging.TmfSort;
 import org.opentmf.query.tmf630.paging.TmfSortTerm;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -211,10 +209,8 @@ class Tmf630JsonbCombinationIT {
   // ---- URL attribute operators ------------------------------------------------------------
 
   private void urlCell(boolean split, ComboPosition position, ComboKind kind, TmfOperator op) {
-    List<String> query = ComboRequests.urlQuery(kind, op);
     Map<String, String[]> params = ComboRequests.urlParams(position, kind, op);
-    Set<String> expected =
-        ids(split, doc -> ComboOracle.matches(op, kind, ComboOracle.find(doc, position, kind), query));
+    Set<String> expected = ComboOracle.urlExpected(split ? splitRows : rows, position, kind, op);
     evaluate(split, position, kind, "URL", op.name(), params, Optional.of(expected));
   }
 
@@ -226,62 +222,15 @@ class Tmf630JsonbCombinationIT {
       skip("FILTER_HAS_NO_FORM_FOR_" + op.name());
       return;
     }
-    List<Step> steps = ComboRequests.filterSteps(position, kind);
-    String leafKey = ComboRequests.filterLeafKey(kind);
     String expression = ComboRequests.filterExpression(position, kind, leaf.get());
     Map<String, String[]> params = Map.of("filter", new String[] {expression});
-    Optional<Set<String>> expected;
+    Optional<Set<String>> expected =
+        ComboOracle.filterExpected(split ? splitRows : rows, position, kind, op);
     if (op == TmfOperator.REGEX || op == TmfOperator.REGEXI) {
       // Jayway full-matches =~; the toolkit's =~ searches, as .regex and Mongo's $regex (3.4.0)
-      List<String> query = ComboRequests.urlQuery(kind, op);
-      expected =
-          Optional.of(
-              ids(split, doc -> ComboOracle.matches(op, kind, ComboOracle.find(doc, position, kind), query)));
       skip("FILTER_REGEX_JUDGED_BY_SEARCH_NOT_JAYWAY_FULL_MATCH");
-    } else {
-      expected = filterOracle(split, steps, leafKey, leaf.get());
     }
     evaluate(split, position, kind, "FILTER", op.name(), params, expected);
-  }
-
-  /**
-   * The rows the {@code filter=} selects by its documented meaning: a {@code [?(...)]} step matches
-   * when SOME element satisfies the inner predicate (Mongo's elemMatch, the JPA join), and the
-   * comparison at the leaf is Jayway's, the toolkit's own JsonPath library. (Jayway alone treats
-   * a correlated path inside a filter as true whenever the array exists, whatever the inner
-   * predicate says; it is used here only at the leaf.) Empty when Jayway cannot run the leaf.
-   */
-  private Optional<Set<String>> filterOracle(
-      boolean split, List<Step> steps, String leafKey, String leaf) {
-    try {
-      return Optional.of(ids(split, doc -> filterMatches(doc, steps, 0, List.of(), leafKey, leaf)));
-    } catch (RuntimeException jaywayCannot) {
-      return Optional.empty();
-    }
-  }
-
-  private static boolean filterMatches(
-      JsonNode node, List<Step> steps, int from, List<String> fields, String leafKey, String leaf) {
-    if (from == steps.size()) {
-      String path = "@." + String.join("", fields.stream().map(f -> f + ".").toList()) + leafKey;
-      String expression = "$[?(" + leaf.replace("%s", path) + ")]";
-      return !JsonPath.parse("[" + node + "]").read(expression, List.class).isEmpty();
-    }
-    Step step = steps.get(from);
-    List<String> along = new ArrayList<>(fields);
-    along.add(step.name());
-    if (!step.array()) {
-      return filterMatches(node, steps, from + 1, along, leafKey, leaf);
-    }
-    JsonNode array = node;
-    for (String field : along) {
-      array = array == null ? null : array.get(field);
-    }
-    if (array == null || !array.isArray()) {
-      return false;
-    }
-    return array.valueStream()
-        .anyMatch(element -> filterMatches(element, steps, from + 1, List.of(), leafKey, leaf));
   }
 
   // ---- one cell ---------------------------------------------------------------------------
@@ -460,14 +409,6 @@ class Tmf630JsonbCombinationIT {
   }
 
   // ---- helpers ----------------------------------------------------------------------------
-
-  private Set<String> ids(boolean split, Function<JsonNode, Boolean> match) {
-    return (split ? splitRows : rows)
-        .entrySet().stream()
-            .filter(e -> match.apply(e.getValue()))
-            .map(Map.Entry::getKey)
-            .collect(Collectors.toCollection(TreeSet::new));
-  }
 
   private void add(
       String verdict,

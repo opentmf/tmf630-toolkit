@@ -1,14 +1,19 @@
 package org.opentmf.query.tmf630.jsonb.combo;
 
+import com.jayway.jsonpath.JsonPath;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.OptionalInt;
 import java.util.function.IntPredicate;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
 import org.opentmf.query.tmf630.filtering.TmfOperator;
+import org.opentmf.query.tmf630.jsonb.combo.ComboPosition.Step;
 import tools.jackson.databind.JsonNode;
 
 /**
@@ -37,6 +42,77 @@ import tools.jackson.databind.JsonNode;
 final class ComboOracle {
 
   private ComboOracle() {}
+
+  /** The rows of {@code docs} (id to payload) that a URL cell selects by its documented meaning. */
+  static Set<String> urlExpected(
+      Map<String, JsonNode> docs, ComboPosition position, ComboKind kind, TmfOperator op) {
+    List<String> query = ComboRequests.urlQuery(kind, op);
+    return ids(docs, doc -> matches(op, kind, find(doc, position, kind), query));
+  }
+
+  /**
+   * The rows of {@code docs} that a {@code filter=} cell selects by its documented meaning: a
+   * {@code [?(...)]} step matches when SOME element satisfies the inner predicate (Mongo's
+   * elemMatch, the JPA join), and the comparison at the leaf is Jayway's, the toolkit's own
+   * JsonPath library. (Jayway alone treats a correlated path inside a filter as true whenever the
+   * array exists, whatever the inner predicate says; it is used here only at the leaf.) A regex
+   * is judged as the URL's, by search ({@code =~} searches on the toolkit, as {@code .regex} and
+   * Mongo's {@code $regex}; Jayway full-matches). Empty when the operator has no {@code filter=}
+   * form or Jayway cannot run the leaf.
+   */
+  static Optional<Set<String>> filterExpected(
+      Map<String, JsonNode> docs, ComboPosition position, ComboKind kind, TmfOperator op) {
+    Optional<String> leaf = ComboRequests.filterLeaf(kind, op);
+    if (leaf.isEmpty()) {
+      return Optional.empty();
+    }
+    if (op == TmfOperator.REGEX || op == TmfOperator.REGEXI) {
+      return Optional.of(urlExpected(docs, position, kind, op));
+    }
+    List<Step> steps = ComboRequests.filterSteps(position, kind);
+    String leafKey = ComboRequests.filterLeafKey(kind);
+    try {
+      return Optional.of(
+          ids(docs, doc -> filterMatches(doc, steps, 0, List.of(), leafKey, leaf.get())));
+    } catch (RuntimeException jaywayCannot) {
+      return Optional.empty();
+    }
+  }
+
+  private static boolean filterMatches(
+      JsonNode node, List<Step> steps, int from, List<String> fields, String leafKey, String leaf) {
+    if (from == steps.size()) {
+      String path = "@." + String.join("", fields.stream().map(f -> f + ".").toList()) + leafKey;
+      String expression = "$[?(" + leaf.replace("%s", path) + ")]";
+      return !JsonPath.parse("[" + node + "]").read(expression, List.class).isEmpty();
+    }
+    Step step = steps.get(from);
+    List<String> along = new ArrayList<>(fields);
+    along.add(step.name());
+    if (!step.array()) {
+      return filterMatches(node, steps, from + 1, along, leafKey, leaf);
+    }
+    JsonNode array = node;
+    for (String field : along) {
+      array = array == null ? null : array.get(field);
+    }
+    if (array == null || !array.isArray()) {
+      return false;
+    }
+    return array.valueStream()
+        .anyMatch(element -> filterMatches(element, steps, from + 1, List.of(), leafKey, leaf));
+  }
+
+  private static Set<String> ids(Map<String, JsonNode> docs, Predicate<JsonNode> match) {
+    Set<String> ids = new TreeSet<>();
+    docs.forEach(
+        (id, doc) -> {
+          if (match.test(doc)) {
+            ids.add(id);
+          }
+        });
+    return ids;
+  }
 
   /** What a row holds at the position: whether the path is present, and the values found. */
   record Found(boolean present, List<JsonNode> values) {}
