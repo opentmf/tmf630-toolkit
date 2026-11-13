@@ -21,7 +21,6 @@ import java.util.Optional;
 import java.util.TreeMap;
 import org.bson.Document;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.opentmf.query.tmf630.filtering.TmfFilteringException;
 import org.opentmf.query.tmf630.filtering.TmfOperator;
@@ -71,7 +70,6 @@ import tools.jackson.databind.json.JsonMapper;
  */
 @SpringBootTest(classes = CompatRecorderIT.TestApp.class)
 @Testcontainers
-@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @EnabledIfSystemProperty(named = "compat.run", matches = "R[0-9]+")
 class CompatRecorderIT {
 
