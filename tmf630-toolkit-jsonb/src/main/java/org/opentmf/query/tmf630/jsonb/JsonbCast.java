@@ -13,8 +13,8 @@ import java.util.Optional;
 /**
  * Resolves the Postgres cast needed to compare a JSONB scalar (extracted via
  * {@code payload->>'field'}, which always returns {@code text}) against a typed value.
- * See {@code docs/JSONB_BACKEND_DESIGN.md} §6 for the full mapping table and the
- * fail-fast rationale.
+ * See {@code docs/JSONB_BACKEND_DESIGN.md} §6 for the full mapping table, the fail-fast default
+ * ({@link JsonbCastMode#STRICT}) and the lenient opt-in.
  *
  * <p>Returned {@link #suffix()} is empty for the {@code String}/enum case (no cast
  * needed — direct text comparison); for every other type it is a Postgres cast
@@ -42,36 +42,49 @@ public enum JsonbCast {
   }
 
   /**
-   * {@code text}, a SQL text expression, read as this type. The date and time types read only
-   * text PostgreSQL's input function accepts, {@code CASE WHEN pg_input_is_valid(text, 'date')
-   * THEN (text)::date END}, so a stored value no cast reads is {@code NULL} (no match, and a null
-   * in a sort) instead of an error that fails the whole query. Needs PostgreSQL 16 or later; the
-   * module refuses to start below it ({@link Tmf630JsonbPostgresVersionCheck}). {@code text}
-   * appears twice in the result. The number and boolean casts are plain casts for now.
+   * {@code text}, a SQL text expression, read as this type with the plain cast, {@code (text)::date}
+   * (the 3.5.2 form, {@link JsonbCastMode#STRICT}): a stored value the cast cannot read fails the
+   * query. {@link #TEXT} returns {@code text} unchanged.
    */
   public String read(String text) {
-    return switch (this) {
-      case TEXT -> text;
-      case DATE, TIME, TIMESTAMP, TIMESTAMPTZ ->
-          "CASE WHEN pg_input_is_valid(" + text + ", '" + suffix.substring(2) + "') THEN ("
-              + text + ")" + suffix + " END";
-      default -> "(" + text + ")" + suffix;
-    };
+    return read(text, JsonbCastMode.STRICT);
   }
 
   /**
-   * As {@link #read}, for a text expression that is already parenthesized: the plain casts add no
-   * second pair of parentheses, so their SQL stays as it was.
+   * {@code text} read as this type under {@code mode}. {@link JsonbCastMode#STRICT}: the plain cast,
+   * {@code (text)::bigint}. {@link JsonbCastMode#LENIENT}: only text PostgreSQL's input function
+   * accepts, {@code CASE WHEN pg_input_is_valid(text, 'bigint') THEN (text)::bigint END}, so a
+   * stored value no cast reads is {@code NULL} (no match, and a null in a sort) instead of an error
+   * that fails the whole query; {@code text} then appears twice. Lenient needs PostgreSQL 16 or
+   * later.
    */
-  public String readParenthesized(String parenthesizedText) {
-    return readRepeatsText() || this == TEXT
-        ? read(parenthesizedText)
+  public String read(String text, JsonbCastMode mode) {
+    if (this == TEXT) {
+      return text;
+    }
+    if (mode == JsonbCastMode.LENIENT) {
+      return "CASE WHEN pg_input_is_valid(" + text + ", '" + suffix.substring(2) + "') THEN ("
+          + text + ")" + suffix + " END";
+    }
+    return "(" + text + ")" + suffix;
+  }
+
+  /**
+   * As {@link #read(String, JsonbCastMode)}, for a text expression that is already parenthesized:
+   * the plain cast adds no second pair of parentheses, so its SQL stays as it was in 3.5.2.
+   */
+  public String readParenthesized(String parenthesizedText, JsonbCastMode mode) {
+    return readRepeatsText(mode) || this == TEXT
+        ? read(parenthesizedText, mode)
         : parenthesizedText + suffix;
   }
 
-  /** Whether {@link #read} repeats its text expression (so a bind parameter in it repeats too). */
-  public boolean readRepeatsText() {
-    return this == DATE || this == TIME || this == TIMESTAMP || this == TIMESTAMPTZ;
+  /**
+   * Whether {@link #read(String, JsonbCastMode)} repeats its text expression under {@code mode}
+   * (so a bind parameter in it repeats too).
+   */
+  public boolean readRepeatsText(JsonbCastMode mode) {
+    return mode == JsonbCastMode.LENIENT && this != TEXT;
   }
 
   /**

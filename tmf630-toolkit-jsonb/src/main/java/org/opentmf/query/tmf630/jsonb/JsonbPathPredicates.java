@@ -10,10 +10,11 @@ import org.opentmf.query.tmf630.filtering.TmfOperator;
  * backends and {@code filter=} do:
  *
  * <ul>
- *   <li>{@code EQ} and {@code IN} on a type with a containment fragment are containment through
- *       the arrays, {@code payload @> '{"arr":[{"s":"x"}]}'}, which a GIN index on the payload
- *       serves;
- *   <li>every other operator is a nested {@code EXISTS} over {@code jsonb_array_elements}, one per
+ *   <li>under {@code opentmf.tmf630.jsonb.equality=containment} (an opt-in), {@code EQ} and
+ *       {@code IN} on a type with a containment fragment are containment through the arrays,
+ *       {@code payload @> '{"arr":[{"s":"x"}]}'}, which a GIN index on the payload serves;
+ *   <li>every other operator, and {@code EQ} / {@code IN} under the default
+ *       {@code equality=extraction}, is a nested {@code EXISTS} over {@code jsonb_array_elements}, one per
  *       array step, with the operator's scalar form on the element; a value where an array is
  *       declared holds no element, and raises no error;
  *   <li>the elements of a collection leaf are its values;

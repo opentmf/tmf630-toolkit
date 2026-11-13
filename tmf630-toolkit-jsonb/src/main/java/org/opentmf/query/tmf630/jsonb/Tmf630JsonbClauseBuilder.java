@@ -35,8 +35,9 @@ import org.opentmf.query.tmf630.jsonb.JsonbPathPredicates.SplitChild;
  *
  * <p>On an object path (every step an object field: no collection on the way, no positional
  * index), {@code EQ} and {@code IN} go through {@link JsonbPredicateFactory#buildOnObjectPath} /
- * {@link JsonbPredicateFactory#buildMultiOnObjectPath}, so a GIN index on the payload serves them
- * (since 3.6.0).
+ * {@link JsonbPredicateFactory#buildMultiOnObjectPath}: the extraction by default, as in 3.5.2, or
+ * containment served by a GIN index on the payload under {@code opentmf.tmf630.jsonb.equality=
+ * containment} (an opt-in since 3.6.0).
  *
  * <p>Field paths resolve against the <em>domain type</em> (the payload POJO, not the row
  * entity) with the same {@link FieldPathResolver} the QueryDSL terminal uses — identical
@@ -239,12 +240,30 @@ public class Tmf630JsonbClauseBuilder {
       Tmf630AttributeClause clause, ResolvedField field, Target target, String element) {
     Object value = convert(element, field);
     TmfOperator operator = clause.operator();
+    requireRegexWithinCap(operator, field, value);
     if (target.anyElementForValues()) {
       return pathPredicates.single(operator, target.path(), field.javaType(), value, target.split());
     }
     return target.objectPath()
         ? predicateFactory.buildOnObjectPath(operator, field.fieldPath(), field.javaType(), value)
         : predicateFactory.build(operator, field.fieldPath(), field.javaType(), value);
+  }
+
+  /**
+   * The regex length cap, {@code opentmf.tmf630.attribute-filtering.regex.max-length}, as the core
+   * applies it to {@code .regex} / {@code .regexi}, with its messages and order (the switch, then
+   * the length); before 3.6.0 the JSONB terminal never applied it.
+   */
+  private void requireRegexWithinCap(TmfOperator operator, ResolvedField field, Object value) {
+    if (operator != TmfOperator.REGEX && operator != TmfOperator.REGEXI) {
+      return;
+    }
+    if (!settings.regexEnabled()) {
+      throw new TmfFilteringException("Regex operator is disabled.");
+    }
+    if (String.valueOf(value).length() > settings.limits().maxRegexLength()) {
+      throw new TmfFilteringException("Regex pattern too long for field: " + field.fieldPath());
+    }
   }
 
   private Object convert(String element, ResolvedField resolvedField) {

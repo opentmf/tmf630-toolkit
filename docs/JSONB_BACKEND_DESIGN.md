@@ -740,7 +740,7 @@ JSONB path (single-hop or dotted); `?` is a JDBC parameter binding.
 
 | `TmfOperator` | Primary template | Alt (GIN-accelerated where possible) | Notes |
 |---|---|---|---|
-| `EQ` | `payload->>'<field>' = ?` | `payload @> ?::jsonb` (containment; GIN-indexed via `jsonb_path_ops`) | Alt only usable when `<field>` is a top-level scalar — for nested paths the containment shape gets complex |
+| `EQ` | `payload->>'<field>' = ?` | `payload @> ?::jsonb` (containment; GIN-indexed via `jsonb_path_ops`) | Alt only usable when `<field>` is a top-level scalar — for nested paths the containment shape gets complex. Since 3.6.0 the primary form stays the default (cast by the field's type, as §6); `opentmf.tmf630.jsonb.equality=containment` (opt-in) emits the Alt on every object path and through arrays, type-exact, and no expression index serves it |
 | `NE` | `payload->>'<field>' != ?` | — | No GIN acceleration; consider expression index |
 | `EQI` | `LOWER(payload->>'<field>') = LOWER(?)` | — | |
 | `NEI` | `LOWER(payload->>'<field>') != LOWER(?)` | — | |
@@ -885,6 +885,15 @@ target Java type via `FieldPathResolver` and coerces the input value via
 an opt-in `tmf630.jsonb.cast-mode: strict|lenient` property if downstream services
 need it. This is exactly the "scope down, add later if asked" pattern from
 [[feedback_scoped_rejection_over_architectural_change]].
+
+**Implemented in 3.6.0:** `opentmf.tmf630.jsonb.cast-mode`, default `strict` (option (a), the
+plain cast; a value the cast cannot read fails the request, as before). `lenient` is the opt-in:
+every typed cast (numbers, booleans, dates, times) reads only text PostgreSQL's input function
+accepts, `CASE WHEN pg_input_is_valid(payload->>'f', 'bigint') THEN (payload->>'f')::bigint END`,
+in filters, plain sorts and correlated sorts, so such a value is no match and sorts as a null. It
+needs PostgreSQL 16 (§10). An expression index on the plain cast does not serve the guarded
+expression, and `pg_input_is_valid` is not IMMUTABLE, so no expression index can serve a lenient
+typed range at all.
 
 ---
 
@@ -1127,10 +1136,11 @@ For a service currently on JPA-relational migrating to JSONB:
 
 ## 10. Testing strategy
 
-- **Testcontainers Postgres 16+** (corrected 2026-11-12, 3.6.0: the module reads date and time
-  values with `pg_input_is_valid`, PostgreSQL 16, and refuses to start below it). Postgres 15 was
-  the floor for full JSONB path
-  expression support (`?` predicate operator, `jsonb_path_query_first`, etc.).
+- **Testcontainers Postgres 15+**. Postgres 15 is required for full JSONB path
+  expression support (`?` predicate operator, `jsonb_path_query_first`, etc.). Since 3.6.0 the
+  opt-in `opentmf.tmf630.jsonb.cast-mode=lenient` (§6) needs PostgreSQL 16 (`pg_input_is_valid`),
+  and the module refuses to start lenient below 16; the default, `strict`, needs 15.
+  `Tmf630JsonbPostgres15IT` runs the defaults on PostgreSQL 15.
 - **Parity IT** — `Tmf630PredicateJsonbIT`, mirroring the existing
   `Tmf630PredicateMongoIT` and `Tmf630PredicateJpaParityIT`. Same URL fixtures,
   same expected result sets. Verifies the URL-grammar parity claim.
