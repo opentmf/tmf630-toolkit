@@ -387,6 +387,42 @@ class JsonbPredicateFactoryTest {
   }
 
   @Test
+  @DisplayName("substring operators bind a value that is not text as itself, as 3.5.2 did")
+  void substringOperatorsBindANonTextValueAsItself() {
+    // PostgreSQL renders the bound value as text (a double 1.0 as "1"); Java's "1.0" would miss
+    // a stored 0.1 for ?f.contains=1. That text never holds %, _ or !, so nothing is escaped.
+    LocalDate day = LocalDate.of(2025, 1, 1);
+    BigDecimal amount = new BigDecimal("1.50");
+    for (TmfOperator op :
+        List.of(
+            TmfOperator.CONTAINS,
+            TmfOperator.CONTAINSI,
+            TmfOperator.STARTS_WITH,
+            TmfOperator.STARTS_WITHI,
+            TmfOperator.ENDS_WITH,
+            TmfOperator.ENDS_WITHI)) {
+      assertThat(factory.build(op, "f", Double.class, 1.0d).params())
+          .as(op.suffix())
+          .containsExactly(1.0d);
+      assertThat(factory.build(op, "i", Integer.class, 5).params())
+          .as(op.suffix())
+          .containsExactly(5);
+      assertThat(factory.build(op, "a", BigDecimal.class, amount).params())
+          .as(op.suffix())
+          .containsExactly(amount);
+      assertThat(factory.build(op, "b", Boolean.class, Boolean.TRUE).params())
+          .as(op.suffix())
+          .containsExactly(Boolean.TRUE);
+      assertThat(factory.build(op, "ld", LocalDate.class, day).params())
+          .as(op.suffix())
+          .containsExactly(day);
+      assertThat(factory.build(op, "o", Object.class, "50%").params())
+          .as(op.suffix())
+          .containsExactly("50!%");
+    }
+  }
+
+  @Test
   @DisplayName("REGEX / REGEXI use Postgres native ~ / ~* operators")
   void regex() {
     assertThat(factory.build(TmfOperator.REGEX, "n", String.class, "^A.*").sql())

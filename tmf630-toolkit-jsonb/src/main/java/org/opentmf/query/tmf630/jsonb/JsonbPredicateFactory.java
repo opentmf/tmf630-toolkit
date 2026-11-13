@@ -265,11 +265,19 @@ public class JsonbPredicateFactory {
    * case-insensitive forms): {@code value} is matched literally, its {@code %}, {@code _} and
    * {@code !} escaped under an explicit {@code ESCAPE '!'}, and only the operator's own
    * {@code '%'} is a wildcard. {@code like} / {@code likei} bind their value as the pattern.
+   *
+   * <p>A value that is not text (a number, a boolean, a date) is bound as itself, as before 3.6.0:
+   * PostgreSQL renders it as text ({@code 1.0} as {@code 1}, where Java's {@code "1.0"} would miss
+   * a stored {@code 0.1} for {@code ?f.contains=1}), and that text holds no {@code %}, {@code _} or
+   * {@code !}.
    */
   private static JsonbClause literalLike(String text, String operatorAndPattern, Object value) {
+    Object bound =
+        value instanceof CharSequence || value instanceof Character
+            ? JsonbStringEscape.escapeLikeValue(String.valueOf(value))
+            : value;
     return JsonbClause.of(
-        text + operatorAndPattern + " ESCAPE '" + JsonbStringEscape.LIKE_ESCAPE + "'",
-        JsonbStringEscape.escapeLikeValue(String.valueOf(value)));
+        text + operatorAndPattern + " ESCAPE '" + JsonbStringEscape.LIKE_ESCAPE + "'", bound);
   }
 
   /**
