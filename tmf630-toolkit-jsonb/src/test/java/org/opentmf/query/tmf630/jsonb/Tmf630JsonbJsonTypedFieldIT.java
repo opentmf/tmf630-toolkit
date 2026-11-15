@@ -104,6 +104,10 @@ class Tmf630JsonbJsonTypedFieldIT {
         Arguments.of("j.startswith", "4", List.of("j.s42")),
         Arguments.of("j.regex", "^4", List.of("j.s42")),
         Arguments.of("j.eqi", "ALPHA", List.of("j.salpha")),
+        Arguments.of(
+            "j.nei",
+            "ALPHA",
+            List.of("j.btrue", "j.n42", "j.n42.0", "j.n7", "j.obj", "j.s42", "j.strue")),
         Arguments.of("j.like", "al%", List.of("j.salpha")),
         Arguments.of("m.eq", "42", List.of("m.n42", "m.n42.0", "m.s42")),
         Arguments.of("m.gt", "10", List.of("m.n42", "m.n42.0")),

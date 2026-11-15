@@ -43,7 +43,10 @@ class JsonbJsonTypedPredicatesTest {
     JsonbClause c = single(TmfOperator.NE, "j", "42");
 
     assertThat(c.sql()).isEqualTo("jsonb_path_exists(payload, ?::jsonpath)");
-    assertThat(c.params()).containsExactly("$.\"j\" ? (@ != null && !(@ == \"42\" || @ == 42))");
+    assertThat(c.params())
+        .containsExactly(
+            "$.\"j\" ? (@ != null && !((@.type() == \"string\" && @ == \"42\")"
+                + " || (@.type() == \"number\" && @ == 42)))");
   }
 
   @Test
@@ -58,6 +61,31 @@ class JsonbJsonTypedPredicatesTest {
 
     assertThat(c.sql()).isEqualTo("payload @?? ?::jsonpath");
     assertThat(c.params()).containsExactly("$.\"j\" ? (@ == \"1\" || @ == 1 || @ == \"alpha\")");
+  }
+
+  @Test
+  void notInGuardsEveryReadingByItsType() {
+    JsonbClause c =
+        predicates.multi(
+            TmfOperator.NIN,
+            "j",
+            JsonNode.class,
+            null,
+            List.of(JsonTypedValue.read("true"), JsonTypedValue.read("alpha")));
+
+    assertThat(c.params())
+        .containsExactly(
+            "$.\"j\" ? (@ != null && !((@.type() == \"string\" && @ == \"true\")"
+                + " || (@.type() == \"boolean\" && @ == true)"
+                + " || (@.type() == \"string\" && @ == \"alpha\")))");
+  }
+
+  @Test
+  void neiMatchesAnyPresentValueButTheStringEqualIgnoringCase() {
+    assertThat(single(TmfOperator.NEI, "j", "alpha").params())
+        .containsExactly(
+            "$.\"j\" ? (@ != null && !(@.type() == \"string\" && @ like_regex \"^alpha$\""
+                + " flag \"i\"))");
   }
 
   @Test

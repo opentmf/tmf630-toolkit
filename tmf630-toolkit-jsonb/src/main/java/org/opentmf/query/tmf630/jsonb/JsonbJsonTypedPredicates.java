@@ -58,7 +58,10 @@ final class JsonbJsonTypedPredicates {
           case LT -> "@ < " + number(fieldPath, value);
           case LTE -> "@ <= " + number(fieldPath, value);
           case EQI -> regex("^" + quote(value.text()) + "$", true);
-          case NEI -> "@ != null && !(" + regex("^" + quote(value.text()) + "$", true) + ")";
+          case NEI ->
+              "@ != null && !(@.type() == \"string\" && "
+                  + regex("^" + quote(value.text()) + "$", true)
+                  + ")";
           case LIKE -> regex(likeToRegex(value.text()), false);
           case LIKEI -> regex(likeToRegex(value.text()), true);
           case CONTAINS -> regex(quote(value.text()), false);
@@ -147,8 +150,22 @@ final class JsonbJsonTypedPredicates {
     return String.join(" || ", tests);
   }
 
+  /**
+   * A present, non-null value that is none of the readings. Each test is guarded by the value's
+   * JSON type: in SQL/JSON path a comparison across types is unknown, not false, and the negation
+   * of unknown would drop every value of another type.
+   */
   private static String noneOf(List<JsonTypedValue> values) {
-    return "@ != null && !(" + anyOf(values) + ")";
+    List<String> tests = new ArrayList<>();
+    for (JsonTypedValue value : values) {
+      tests.add("(@.type() == \"string\" && @ == " + JsonTypedValue.jsonString(value.text()) + ")");
+      if (value.isNumber()) {
+        tests.add("(@.type() == \"number\" && @ == " + value.text() + ")");
+      } else if (value.bool() != null) {
+        tests.add("(@.type() == \"boolean\" && @ == " + value.text() + ")");
+      }
+    }
+    return "@ != null && !(" + String.join(" || ", tests) + ")";
   }
 
   private static String number(String fieldPath, JsonTypedValue value) {
