@@ -9,10 +9,10 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Stream;
 import org.bson.Document;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.TestInstance;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -50,7 +50,6 @@ import org.testcontainers.mongodb.MongoDBContainer;
       "opentmf.tmf630.attribute-filtering.allow-nested-paths-docdb=true"
     })
 @Testcontainers
-@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class Tmf630MongoJsonTypedFieldIT {
 
   @Container static final MongoDBContainer mongo = new MongoDBContainer("mongo:8.0.5");
@@ -76,11 +75,20 @@ class Tmf630MongoJsonTypedFieldIT {
     STORED.put("abs", null);
   }
 
+  private static final AtomicBoolean SEEDED = new AtomicBoolean();
+
   @Autowired private MongoTemplate mongoTemplate;
   @Autowired private Tmf630PredicateArgumentResolver resolver;
 
-  @BeforeAll
-  void seed() {
+  /**
+   * Seeds once per class run. Not {@code @BeforeAll} with a per-class instance: that resolves the
+   * dynamic properties before the container has started.
+   */
+  @BeforeEach
+  void seedOnce() {
+    if (!SEEDED.compareAndSet(false, true)) {
+      return;
+    }
     var collection = mongoTemplate.getDb().getCollection(MongoJsonTypedDoc.COLLECTION);
     collection.drop();
     for (String field : List.of("o", "m", "j")) {
