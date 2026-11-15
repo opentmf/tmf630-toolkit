@@ -6,6 +6,7 @@ import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
+import tools.jackson.databind.JsonNode;
 
 /**
  * The non-split root of the combination suite: the {@link ComboLeaf} fields at the top level, in
@@ -28,6 +29,7 @@ public record ComboDomain(
     ComboStage w,
     Object o,
     Map<String, Object> m,
+    JsonNode j,
     List<String> ls,
     List<ComboTag> lo,
     ComboLeaf n,

@@ -6,6 +6,7 @@ import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
+import tools.jackson.databind.JsonNode;
 
 /**
  * One field per declared type of the combination suite. The same set sits at the top level of
@@ -26,5 +27,6 @@ public record ComboLeaf(
     ComboStage w,
     Object o,
     Map<String, Object> m,
+    JsonNode j,
     List<String> ls,
     List<ComboTag> lo) {}
