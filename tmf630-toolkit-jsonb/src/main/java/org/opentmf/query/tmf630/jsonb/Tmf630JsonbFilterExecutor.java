@@ -81,7 +81,11 @@ public class Tmf630JsonbFilterExecutor {
     boolean hasWhere =
         !"TRUE".equals(effectiveWhere.sql()) && !effectiveWhere.sql().isEmpty();
 
-    JsonbClause orderBy = sortBuilder.buildOrderByClause(sort, fieldTypeResolver);
+    JsonbClause orderBy =
+        sortBuilder.buildOrderByClause(
+            sort,
+            fieldTypeResolver,
+            path -> metadata.declaredColumn(path).map(JsonbDeclaredColumn::column));
     JsonbClause paging = sortBuilder.buildPagingClause(pageable);
 
     StringBuilder sql = new StringBuilder();

@@ -289,7 +289,7 @@ public class JsonbPredicateFactory {
    * a stored {@code 0.1} for {@code ?f.contains=1}), and that text holds no {@code %}, {@code _} or
    * {@code !}.
    */
-  private static JsonbClause literalLike(String text, String operatorAndPattern, Object value) {
+  static JsonbClause literalLike(String text, String operatorAndPattern, Object value) {
     Object bound =
         value instanceof CharSequence || value instanceof Character
             ? JsonbStringEscape.escapeLikeValue(String.valueOf(value))
@@ -302,6 +302,11 @@ public class JsonbPredicateFactory {
    * The value as the JDBC driver can bind it and as the payload holds it: an {@link Enum} by the
    * text the mapper writes for it ({@link Enum#name()} when the mapper writes no scalar).
    */
+  /** {@code value} as the JDBC driver binds it and the payload holds it (see {@link #bindable}). */
+  Object bindValue(Object value) {
+    return bindable(value);
+  }
+
   private Object bindable(Object value) {
     if (!(value instanceof Enum<?> constant)) {
       return value;

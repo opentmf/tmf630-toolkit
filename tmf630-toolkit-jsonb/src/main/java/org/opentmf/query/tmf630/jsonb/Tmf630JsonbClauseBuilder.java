@@ -1,8 +1,10 @@
 package org.opentmf.query.tmf630.jsonb;
 
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import org.opentmf.query.tmf630.filtering.Tmf630AttributeClause;
 import org.opentmf.query.tmf630.filtering.Tmf630FilterExpression;
@@ -10,6 +12,7 @@ import org.opentmf.query.tmf630.filtering.Tmf630FilterParser;
 import org.opentmf.query.tmf630.filtering.TmfFilteringException;
 import org.opentmf.query.tmf630.filtering.TmfOperator;
 import org.opentmf.query.tmf630.filtering.config.CombineMode;
+import org.opentmf.query.tmf630.filtering.config.IsnullSemantics;
 import org.opentmf.query.tmf630.filtering.config.Tmf630FilterSettings;
 import org.opentmf.query.tmf630.filtering.config.UnknownParamBehavior;
 import org.opentmf.query.tmf630.filtering.predicate.FieldPathResolver;
@@ -49,6 +52,22 @@ import org.opentmf.query.tmf630.jsonb.JsonbPathPredicates.SplitChild;
  * document-shaped, so the DocDB policy applies, not the JPA one.
  */
 public class Tmf630JsonbClauseBuilder {
+
+  /** The operators that compare text: on a declared column that is not text they keep the payload. */
+  private static final Set<TmfOperator> STRING_OPERATORS =
+      EnumSet.of(
+          TmfOperator.EQI,
+          TmfOperator.NEI,
+          TmfOperator.LIKE,
+          TmfOperator.LIKEI,
+          TmfOperator.CONTAINS,
+          TmfOperator.CONTAINSI,
+          TmfOperator.STARTS_WITH,
+          TmfOperator.STARTS_WITHI,
+          TmfOperator.ENDS_WITH,
+          TmfOperator.ENDS_WITHI,
+          TmfOperator.REGEX,
+          TmfOperator.REGEXI);
 
   private final Tmf630FilterParser filterParser;
   private final Tmf630FilterSettings settings;
@@ -152,6 +171,12 @@ public class Tmf630JsonbClauseBuilder {
       return null;
     }
     TmfOperator operator = clause.operator();
+    Optional<JsonbDeclaredColumn> declared =
+        declaredColumn(domainType, resolvedField.fieldPath())
+            .filter(column -> usesColumn(operator, column));
+    if (declared.isPresent()) {
+      return columnClause(clause, resolvedField, declared.get());
+    }
     Target target = target(domainType, clause.fieldPath());
     if (operator.isNoValueOperator()) {
       return target.anyElementForPresence()
@@ -162,6 +187,72 @@ public class Tmf630JsonbClauseBuilder {
       return buildMultiValueClause(clause, resolvedField, target);
     }
     return buildRepeatedValueClause(clause, resolvedField, target);
+  }
+
+  /** The column declared for {@code path} on the domain type's row entity, if any. */
+  private Optional<JsonbDeclaredColumn> declaredColumn(Class<?> domainType, String path) {
+    return filterTranslator
+        .registry()
+        .forDomainType(domainType)
+        .flatMap(metadata -> metadata.declaredColumn(path));
+  }
+
+  /**
+   * Whether {@code operator} is answered on the declared column. The null tests are, only under
+   * {@code isnull-semantics: NULLISH}: under the default the null tests ask whether the key is
+   * absent, which a NULL column cannot tell from a JSON null. The string operators are, only on a
+   * text column: on a date or a number they keep comparing the payload's text, as before.
+   */
+  private boolean usesColumn(TmfOperator operator, JsonbDeclaredColumn column) {
+    if (operator.isNoValueOperator()) {
+      return settings.isnullSemantics() == IsnullSemantics.NULLISH;
+    }
+    return column.isText() || !STRING_OPERATORS.contains(operator);
+  }
+
+  /** {@code clause} on the declared column, with the values converted and bound as typed. */
+  private JsonbClause columnClause(
+      Tmf630AttributeClause clause, ResolvedField field, JsonbDeclaredColumn column) {
+    TmfOperator operator = clause.operator();
+    if (operator.isNoValueOperator()) {
+      return JsonbColumnPredicates.noValue(operator, column.column());
+    }
+    if (operator.isMultiValueOperator()) {
+      List<Object> values = new ArrayList<>();
+      for (List<String> group : clause.valueGroups()) {
+        for (String element : group) {
+          values.add(predicateFactory.bindValue(convert(element, field)));
+        }
+      }
+      return JsonbColumnPredicates.multi(operator, column.column(), field.fieldPath(), values);
+    }
+    JsonbClause perKey = null;
+    for (List<String> group : clause.valueGroups()) {
+      JsonbClause perValue = null;
+      for (String element : group) {
+        Object value = convert(element, field);
+        requireRegexWithinCap(operator, field, value);
+        JsonbClause one =
+            JsonbColumnPredicates.single(
+                operator, column.column(), predicateFactory.bindValue(value));
+        perValue = perValue == null ? one : perValue.or(one);
+      }
+      perKey = combine(perKey, perValue);
+    }
+    return perKey;
+  }
+
+  /** {@code perKey} combined with one occurrence's clause, per {@code combineRepeatedValues}. */
+  private JsonbClause combine(JsonbClause perKey, JsonbClause perValue) {
+    if (perValue == null) {
+      return perKey;
+    }
+    if (perKey == null) {
+      return perValue;
+    }
+    return settings.combineRepeatedValues() == CombineMode.AND
+        ? perKey.and(perValue)
+        : perKey.or(perValue);
   }
 
   /**
