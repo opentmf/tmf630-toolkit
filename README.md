@@ -484,9 +484,14 @@ value is a plain character. `like` and `likei` take a pattern, in which `%` and 
 
 #### What `ne`, `nin` and `!=` mean on each backend
 
-The negative operators do not mean the same thing on every backend when the value is missing or
-null, or when the path crosses an array. Mongo reads "not equal" as "every row `eq` would not
-return"; SQL (JPA, and the JSONB URL operators) as "a value is present and differs".
+The negative operators (`ne`, `nei`, `nin`, and `!=` in `filter=`) do not mean the same thing on
+every backend when the value is missing or null, or when the path crosses an array:
+- Mongo reads "not equal" as "every row `eq` would not return";
+- SQL (JPA, and the JSONB URL operators) reads it as "a value is present and differs".
+
+Each backend keeps its released meaning. This is decided, not left open (ledger #4247): there is
+no unification and no setting. A row without the field is matched on Mongo and not on JSONB or
+JPA. Through a list, Mongo answers "no element equals" and the other two "some element differs".
 
 | Request | Mongo | JPA | JSONB |
 | --- | --- | --- | --- |

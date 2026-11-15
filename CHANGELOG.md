@@ -354,6 +354,8 @@ All notable changes to `tmf630-toolkit` are documented in this file.
     (`((payload->>'creationDate')::timestamptz)`), which PostgreSQL refuses. §2.1, §2.2 and §5
     are corrected to what the code emits.
 - README: the JSONB combination suite, with its size and run time.
+- README: "What `ne`, `nin` and `!=` mean on each backend" now states that each backend keeps its
+  released meaning, by decision (ledger #4247): there is no unification and no setting.
 - README: "A value of another JSON type: lenient on JSONB, by intention" (ledger #4246). JSONB
   reads a value stored in another JSON type than the field declares, by its text or cast, as in
   3.5.2, and this is now documented as intended rather than left unexplained. The section gives
