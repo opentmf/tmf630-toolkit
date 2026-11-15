@@ -2443,7 +2443,10 @@ public class CommunicationMessageRow {
   cast reads cannot be stored in the column at all. Where the payload's strict cast failed with a
   500, the column answers.
 - **What may be declared:** a scalar at a fixed path, with the domain field's Java type (an enum may
-  be copied into a `String`) and not a primitive. A path through a list is refused at startup.
+  be copied into a `String`). Startup refuses:
+  - a path through a list;
+  - a primitive field (`int`), which cannot hold the NULL that an absent field must be (use
+    `Integer`).
 - **Nothing changes for an entity that declares nothing.**
 
 Measured on PostgreSQL 18.1, 1,000,000 rows (design note `docs/JSONB_DECLARED_COLUMN.md`):
@@ -2476,8 +2479,11 @@ Measured on PostgreSQL 18.1, 1,000,000 rows (design note `docs/JSONB_DECLARED_CO
 - PostgreSQL offers no way around this. A trigger cannot fill or change a partition key, and a
   generated column refuses a date cast and cannot be a partition key.
 - In the service's tests, `Tmf630JsonbColumnCheck.mismatches(CommunicationMessageRow.class)` (a
-  bean) lists the ids of the rows where a column and the payload differ. It reads the whole table,
-  so it belongs in a test or a maintenance job, not in a request.
+  bean) lists the ids of the rows where a column and the payload differ.
+  - It casts the payload's text to the column's own SQL type, read from the database catalog, and
+    compares with `IS DISTINCT FROM`. So it is exact for the declared type, and NULL equals an
+    absent key.
+  - It reads the whole table, so it belongs in a test or a maintenance job, not in a request.
 
 #### Behaviour switches (since 3.6.0)
 
