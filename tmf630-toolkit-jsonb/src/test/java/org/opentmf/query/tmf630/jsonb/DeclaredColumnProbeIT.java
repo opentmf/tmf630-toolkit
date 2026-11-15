@@ -60,7 +60,7 @@ class DeclaredColumnProbeIT {
   private void fill(Statement s) throws SQLException {
     s.execute("DROP TABLE IF EXISTS cm_part, cm_flat CASCADE");
     s.execute(
-        "CREATE TABLE cm_part (id text NOT NULL, sent_at timestamptz NOT NULL, state text,"
+        "CREATE TABLE cm_part (id text NOT NULL, sent_at timestamptz NOT NULL, state text, owner text,"
             + " payload jsonb NOT NULL, PRIMARY KEY (id, sent_at)) PARTITION BY RANGE (sent_at)");
     for (int m = 1; m <= 12; m++) {
       s.execute(
@@ -72,22 +72,26 @@ class DeclaredColumnProbeIT {
     String rows =
         "SELECT 'r' || g AS id,"
             + " timestamptz '2025-01-01T00:00:00Z' + (g % 365) * interval '1 day' + (g % 86400) * interval '1 second' AS sent_at,"
-            + " (ARRAY['NEW','SENT','FAILED','CANCELLED'])[1 + g % 4] AS state"
+            + " (ARRAY['NEW','SENT','FAILED','CANCELLED'])[1 + g % 4] AS state,"
+            + " 'client:' || (g % 1000) AS owner"
             + " FROM generate_series(1, " + ROWS + ") AS g";
     String payload =
-        "jsonb_build_object('id', id, 'state', state, 'sendTime',"
+        "jsonb_build_object('id', id, 'state', state, 'owner', owner, 'sendTime',"
             + " to_char(sent_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'),"
             + " 'receiver', jsonb_build_object('email', 'u' || id || '@example.test'))";
-    s.execute("INSERT INTO cm_part SELECT id, sent_at, state, " + payload + " FROM (" + rows + ") x");
+    s.execute("INSERT INTO cm_part SELECT id, sent_at, state, owner, " + payload + " FROM (" + rows + ") x");
     s.execute("CREATE INDEX cm_part_sent_at ON cm_part (sent_at)");
     s.execute("CREATE INDEX cm_part_state ON cm_part (state)");
+    s.execute("CREATE INDEX cm_part_owner ON cm_part (owner)");
     s.execute(
-        "CREATE TABLE cm_flat (id text PRIMARY KEY, sent_at timestamptz, state text, payload jsonb NOT NULL)");
-    s.execute("INSERT INTO cm_flat SELECT id, sent_at, state, payload FROM cm_part");
+        "CREATE TABLE cm_flat (id text PRIMARY KEY, sent_at timestamptz, state text, owner text,"
+            + " payload jsonb NOT NULL)");
+    s.execute("INSERT INTO cm_flat SELECT id, sent_at, state, owner, payload FROM cm_part");
+    s.execute("CREATE INDEX cm_flat_owner ON cm_flat (owner)");
     s.execute("CREATE INDEX cm_flat_sent_at ON cm_flat (sent_at)");
     s.execute("CREATE INDEX cm_flat_state ON cm_flat (state)");
-    s.execute("ANALYZE cm_part");
-    s.execute("ANALYZE cm_flat");
+    s.execute("VACUUM ANALYZE cm_part");
+    s.execute("VACUUM ANALYZE cm_flat");
   }
 
   private void sizes(Statement s) throws SQLException {
@@ -111,10 +115,14 @@ class DeclaredColumnProbeIT {
         + " ORDER BY (payload->>'sendTime')::timestamptz DESC LIMIT 20", args);
     plan(s, "PART column sort page", "SELECT payload FROM cm_part WHERE $1::int = $1"
         + " ORDER BY sent_at DESC LIMIT 20", "(1)");
-    plan(s, "PART without the field, state column", "SELECT payload FROM cm_part WHERE state = $1"
-        + " LIMIT 20", "('FAILED')");
-    plan(s, "PART without the field, state count", "SELECT count(*) FROM cm_part WHERE state = $1",
-        "('FAILED')");
+    plan(s, "PART without the field, json owner count", "SELECT count(*) FROM cm_part WHERE"
+        + " payload->>'owner' = $1", "('client:7')");
+    plan(s, "FLAT without the field, json owner count", "SELECT count(*) FROM cm_flat WHERE"
+        + " payload->>'owner' = $1", "('client:7')");
+    plan(s, "PART owner column count", "SELECT count(*) FROM cm_part WHERE owner = $1", "('client:7')");
+    plan(s, "PART owner column + one month", "SELECT count(*) FROM cm_part WHERE owner = $1 AND"
+        + " sent_at >= $2::timestamptz AND sent_at < $3::timestamptz",
+        "('client:7', " + MONTH_A + ", " + MONTH_B + ")");
   }
 
   // ---- unpartitioned ------------------------------------------------------------------------
@@ -136,44 +144,71 @@ class DeclaredColumnProbeIT {
         + " ORDER BY sent_at DESC LIMIT 20", "(1)");
     plan(s, "FLAT json sort page (today)", "SELECT payload FROM cm_flat WHERE $1::int = $1"
         + " ORDER BY (payload->>'sendTime')::timestamptz DESC LIMIT 20", "(1)");
-    plan(s, "FLAT column eq state", "SELECT count(*) FROM cm_flat WHERE state = $1", "('FAILED')");
-    plan(s, "FLAT json eq state (today)", "SELECT count(*) FROM cm_flat WHERE payload->>'state' = $1",
-        "('FAILED')");
+    plan(s, "FLAT column eq owner", "SELECT count(*) FROM cm_flat WHERE owner = $1", "('client:7')");
+    plan(s, "FLAT json eq owner (today, no index)", "SELECT count(*) FROM cm_flat WHERE"
+        + " payload->>'owner' = $1", "('client:7')");
+    plan(s, "FLAT drift check (rows where column and payload differ)", "SELECT count(*) FROM cm_flat"
+        + " WHERE $1::int = $1 AND (sent_at IS DISTINCT FROM (payload->>'sendTime')::timestamptz"
+        + " OR owner IS DISTINCT FROM payload->>'owner')", "(1)");
   }
 
   // ---- how the column could be filled on the database side --------------------------------
 
-  private void writeSide(Statement s) {
-    attempt(s, "generated text column",
+  private void writeSide(Statement ignored) {
+    String fill =
+        "CREATE OR REPLACE FUNCTION cm_fill() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN"
+            + " NEW.sent_at := (NEW.payload->>'sendTime')::timestamptz; RETURN NEW; END $$";
+    attempt("one UPDATE sets the payload and the column together (flat)",
+        "UPDATE cm_flat SET payload = jsonb_set(payload, '{sendTime}', to_jsonb('2025-04-04T00:00:00Z'::text)),"
+            + " sent_at = '2025-04-04T00:00:00Z' WHERE id = 'r10'");
+    read("flat r10 after the one UPDATE",
+        "SELECT sent_at || ' / ' || (payload->>'sendTime') FROM cm_flat WHERE id = 'r10'");
+    attempt("one UPDATE moving the row to another partition (partitioned)",
+        "UPDATE cm_part SET payload = jsonb_set(payload, '{sendTime}', to_jsonb('2025-11-11T00:00:00Z'::text)),"
+            + " sent_at = '2025-11-11T00:00:00Z' WHERE id = 'r10'");
+    read("partition of r10 after the one UPDATE",
+        "SELECT tableoid::regclass || ' ' || sent_at FROM cm_part WHERE id = 'r10'");
+    attempt("generated text column",
         "ALTER TABLE cm_flat ADD COLUMN g_state text GENERATED ALWAYS AS (payload->>'state') STORED");
-    attempt(s, "generated timestamptz column",
+    attempt("generated timestamptz column",
         "ALTER TABLE cm_flat ADD COLUMN g_sent timestamptz GENERATED ALWAYS AS"
             + " ((payload->>'sendTime')::timestamptz) STORED");
-    attempt(s, "partition key on a generated column",
+    attempt("partition key on a generated column",
         "CREATE TABLE cm_gen (id text, payload jsonb, s text GENERATED ALWAYS AS (payload->>'state')"
             + " STORED) PARTITION BY LIST (s)");
-    attempt(s, "trigger function",
-        "CREATE OR REPLACE FUNCTION cm_fill() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN"
-            + " NEW.sent_at := (NEW.payload->>'sendTime')::timestamptz; RETURN NEW; END $$");
-    attempt(s, "BEFORE trigger on the partitioned table",
-        "CREATE TRIGGER cm_part_fill BEFORE INSERT OR UPDATE ON cm_part FOR EACH ROW EXECUTE FUNCTION cm_fill()");
-    attempt(s, "insert with the key left NULL, trigger to fill it",
-        "INSERT INTO cm_part (id, sent_at, state, payload) VALUES ('t1', NULL, 'NEW',"
-            + " '{\"sendTime\":\"2025-03-03T00:00:00Z\"}')");
-    attempt(s, "insert with a wrong key, trigger to correct it across partitions",
-        "INSERT INTO cm_part (id, sent_at, state, payload) VALUES ('t2', '2025-01-05T00:00:00Z', 'NEW',"
-            + " '{\"sendTime\":\"2025-03-03T00:00:00Z\"}')");
-    attempt(s, "BEFORE trigger on the flat table",
+    attempt("trigger function", fill);
+    attempt("BEFORE trigger on the flat table",
         "CREATE TRIGGER cm_flat_fill BEFORE INSERT OR UPDATE ON cm_flat FOR EACH ROW EXECUTE FUNCTION cm_fill()");
-    attempt(s, "flat insert filled by the trigger",
+    attempt("flat insert filled by the trigger",
         "INSERT INTO cm_flat (id, payload) VALUES ('t3', '{\"sendTime\":\"2025-03-03T00:00:00Z\"}')");
-    attempt(s, "flat jsonb_set update refills by the trigger",
+    attempt("flat jsonb_set update refilled by the trigger",
         "UPDATE cm_flat SET payload = jsonb_set(payload, '{sendTime}', '\"2025-04-04T00:00:00Z\"')"
             + " WHERE id = 't3'");
-    try {
-      out("WRITE flat t3 sent_at after update = " + scalar(s, "SELECT sent_at FROM cm_flat WHERE id = 't3'"));
+    read("flat t3 after the update", "SELECT sent_at::text FROM cm_flat WHERE id = 't3'");
+    attempt("BEFORE trigger on the partitioned table",
+        "CREATE TRIGGER cm_part_fill BEFORE INSERT OR UPDATE ON cm_part FOR EACH ROW EXECUTE FUNCTION cm_fill()");
+    attempt("insert with the key left NULL, trigger to fill it",
+        "INSERT INTO cm_part (id, sent_at, state, payload) VALUES ('t1', NULL, 'NEW',"
+            + " '{\"sendTime\":\"2025-03-03T00:00:00Z\"}')");
+    attempt("insert with a wrong key, trigger to correct it across partitions",
+        "INSERT INTO cm_part (id, sent_at, state, payload) VALUES ('t2', '2025-01-05T00:00:00Z', 'NEW',"
+            + " '{\"sendTime\":\"2025-03-03T00:00:00Z\"}')");
+  }
+
+  private void attempt(String label, String sql) {
+    try (Connection c = dataSource.getConnection(); Statement s = c.createStatement()) {
+      s.execute(sql);
+      out("WRITE " + label + ": OK");
     } catch (SQLException e) {
-      out("WRITE flat t3 read: " + e.getMessage().lines().findFirst().orElse(""));
+      out("WRITE " + label + ": " + e.getMessage().lines().findFirst().orElse(""));
+    }
+  }
+
+  private void read(String label, String sql) {
+    try (Connection c = dataSource.getConnection(); Statement s = c.createStatement()) {
+      out("WRITE " + label + " = " + scalar(s, sql));
+    } catch (SQLException e) {
+      out("WRITE " + label + ": " + e.getMessage().lines().findFirst().orElse(""));
     }
   }
 
@@ -219,15 +254,6 @@ class DeclaredColumnProbeIT {
   private static Stream<JsonNode> nodes(JsonNode plan) {
     return Stream.concat(
         Stream.of(plan), plan.path("Plans").valueStream().flatMap(DeclaredColumnProbeIT::nodes));
-  }
-
-  private void attempt(Statement s, String label, String sql) {
-    try {
-      s.execute(sql);
-      out("WRITE " + label + ": OK");
-    } catch (SQLException e) {
-      out("WRITE " + label + ": " + e.getMessage().lines().findFirst().orElse(""));
-    }
   }
 
   private static String scalar(Statement s, String sql) throws SQLException {
