@@ -360,7 +360,8 @@ class CompatRecorderIT {
     for (String[] sample : CompatLedgerSamples.REQUESTS) {
       Map<String, String[]> params = Map.of(sample[0], new String[] {sample[1]});
       String entry = "filter".equals(sample[0]) ? "FILTER" : "URL";
-      put("MONGO", "ledger", "-", "-", entry, sample[0], params, mongo(CompatLedgerDoc.class, params));
+      put("MONGO", "ledger", "-", "-", entry, sample[0], params, mongo(CompatLedgerDoc.class, params),
+          CompatLedgerSamples.mongoOracle(sample));
       put("JPA", "ledger", "-", "-", entry, sample[0], params, jpa(CompatLedgerRow.class, params));
       put("CORE", "json-typed", "-", "-", entry, sample[0], params, acceptance(params));
     }
@@ -409,7 +410,11 @@ class CompatRecorderIT {
     String shape = split ? "split" : "not split";
     for (TmfOperator op : TmfOperator.values()) {
       Map<String, String[]> url = ComboRequests.urlParams(position, kind, op);
-      String urlOracle = rowsOf(ComboOracle.urlExpected(docs, position, kind, op));
+      String urlOracle =
+          rowsOf(
+              mongoNegation(backend, kind, op)
+                  ? ComboOracle.mongoNegationExpected(docs, position, kind, op, false)
+                  : ComboOracle.urlExpected(docs, position, kind, op));
       put(backend, shape, position.name(), kind.name(), "URL", op.name(), url, ask.answer(url),
           urlOracle);
       askByName(backend, shape, position, kind, "URL", op, url, ask);
@@ -418,7 +423,9 @@ class CompatRecorderIT {
         Map<String, String[]> filter =
             Map.of("filter", new String[] {ComboRequests.filterExpression(position, kind, leaf.get())});
         String filterOracle =
-            ComboOracle.filterExpected(docs, position, kind, op).map(this::rowsOf).orElse("-");
+            mongoNegation(backend, kind, op)
+                ? rowsOf(ComboOracle.mongoNegationExpected(docs, position, kind, op, true))
+                : ComboOracle.filterExpected(docs, position, kind, op).map(this::rowsOf).orElse("-");
         put(backend, shape, position.name(), kind.name(), "FILTER", op.name(), filter,
             ask.answer(filter), filterOracle);
         askByName(backend, shape, position, kind, "FILTER", op, filter, ask);
@@ -434,6 +441,16 @@ class CompatRecorderIT {
       put(backend, shape, position.name(), kind.name(), "FILTER", "JAYWAY_" + word[0], filter,
           ask.answer(filter));
     }
+  }
+
+  /**
+   * Whether the cell is a negation on a JSON-typed field on Mongo, whose oracle is Mongo's released
+   * reading of not-equal (ledger #4247) rather than the suite's.
+   */
+  private static boolean mongoNegation(String backend, ComboKind kind, TmfOperator op) {
+    return "MONGO".equals(backend)
+        && kind.shape() == ComboKind.Shape.JSON
+        && (op == TmfOperator.NE || op == TmfOperator.NEI || op == TmfOperator.NIN);
   }
 
   /** The request by the constant's name, when it names a wire value: the evidence for it. */

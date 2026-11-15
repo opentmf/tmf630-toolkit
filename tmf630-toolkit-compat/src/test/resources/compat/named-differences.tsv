@@ -27,7 +27,7 @@ FIX-LIKE-LITERAL	Fixed (JSONB `contains`, `startswith` and `endswith` match thei
 FIX-PG-SYNTAX	Fixed (JSONB `filter=` forms PostgreSQL cannot parse are a 400, not a 500)	JSONB	sample	-	-	SAMPLE	BARE_EXISTS|BARE_EXISTS_IN_ARRAY|RECURSIVE_DESCENT|FUNCTION_COUNT|FUNCTION_MIN|FUNCTION_MAX|LENGTH_GT	.*	500>400	-
 FIX-JSON-TYPED-URL	Added: URL filters on a field of an open JSON type (`Map`, `JsonNode`), on JSONB and Mongo	JSONB	not split|split	.*	MAP|JSON_NODE	URL	.*	.*	400>200	oracle
 FIX-JSON-TYPED-URL-MONGO	Added: URL filters on a field of an open JSON type (`Map`, `JsonNode`), on JSONB and Mongo	MONGO	.*	.*	MAP|JSON_NODE	URL	EQ|IN|GT|GTE|LT|LTE|BETWEEN|EQI|LIKE|LIKEI|CONTAINS|CONTAINSI|STARTS_WITH|STARTS_WITHI|ENDS_WITH|ENDS_WITHI|REGEX|REGEXI	.*	400>200	oracle
-FIX-JSON-TYPED-URL-MONGO-NE	Added: URL filters on a field of an open JSON type (`Map`, `JsonNode`), on JSONB and Mongo	MONGO	.*	.*	MAP|JSON_NODE	URL	NE|NEI|NIN	.*	400>200	-
-FIX-JSON-TYPED-FILTER-MONGO	Added: URL filters on a field of an open JSON type (`Map`, `JsonNode`), on JSONB and Mongo	MONGO	.*	.*	MAP|JSON_NODE	FILTER	.*	.*	400>200	-
-FIX-JSON-TYPED-LEDGER	Added: URL filters on a field of an open JSON type (`Map`, `JsonNode`), on JSONB and Mongo	MONGO	ledger	-	-	URL|FILTER	m|filter	m=x|filter=\$\[\?\(@\.m == 'x'\)\]	400>200	-
+FIX-JSON-TYPED-URL-MONGO-NE	Added: URL filters on a field of an open JSON type (`Map`, `JsonNode`), on JSONB and Mongo	MONGO	.*	.*	MAP|JSON_NODE	URL	NE|NEI|NIN	.*	400>200	oracle
+FIX-JSON-TYPED-FILTER-MONGO	Added: URL filters on a field of an open JSON type (`Map`, `JsonNode`), on JSONB and Mongo	MONGO	.*	.*	MAP|JSON_NODE	FILTER	.*	.*	400>200	oracle
+FIX-JSON-TYPED-LEDGER	Added: URL filters on a field of an open JSON type (`Map`, `JsonNode`), on JSONB and Mongo	MONGO	ledger	-	-	URL|FILTER	m|filter	m=x|filter=\$\[\?\(@\.m == 'x'\)\]	400>200	oracle
 FIX-JSON-TYPED-CORE	Added: URL filters on a field of an open JSON type (`Map`, `JsonNode`), on JSONB and Mongo	CORE	json-typed	-	-	URL|FILTER	m|filter	m=x|filter=\$\[\?\(@\.m == 'x'\)\]|filter=\$\[\?\(@\.characteristic\[\?\(@\.name == 'x' && @\.value == 'y'\)\]\)\]	400>200	-

@@ -7,6 +7,8 @@ import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.function.Consumer;
 import org.bson.Document;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -65,10 +67,37 @@ final class CompatLedgerSamples {
 
   private CompatLedgerSamples() {}
 
+  /**
+   * The oracle's rows for a ledger sample on the Mongo root, where the documents tell them: the
+   * samples on the JSON-typed field {@code m} (ledger #4246, (a′)), whose value {@code x} reads
+   * as the string {@code "x"} and matches a document whose {@code m} is that string. {@code -}
+   * for every other sample.
+   */
+  static String mongoOracle(String[] sample) {
+    boolean onM =
+        ("m".equals(sample[0]) && "x".equals(sample[1]))
+            || ("filter".equals(sample[0]) && "$[?(@.m == 'x')]".equals(sample[1]));
+    if (!onM) {
+      return "-";
+    }
+    Set<String> ids = new TreeSet<>();
+    mongoDocs().forEach((id, doc) -> {
+      if ("x".equals(doc.get("m"))) {
+        ids.add(id);
+      }
+    });
+    return String.join(",", ids);
+  }
+
   /** Writes the Mongo documents, values of another JSON type than declared included. */
   static void seedMongo(MongoTemplate mongo) {
     var collection = mongo.getDb().getCollection(CompatLedgerDoc.COLLECTION);
     collection.drop();
+    mongoDocs().forEach((id, d) -> collection.insertOne(d.append("_id", id)));
+  }
+
+  /** The Mongo documents, by id. */
+  private static Map<String, Document> mongoDocs() {
     Map<String, Document> docs = new LinkedHashMap<>();
     docs.put("S42", new Document("s", 42));
     docs.put("Salpha", new Document("s", "alpha"));
@@ -98,7 +127,7 @@ final class CompatLedgerSamples {
     docs.put("Tval", new Document("t", "v"));
     docs.put("Tw", new Document("t", "w"));
     docs.put("O5", new Document("o", 7).append("m", new Document("k", "x")));
-    docs.forEach((id, d) -> collection.insertOne(d.append("_id", id)));
+    return docs;
   }
 
   /** Writes the JPA rows; called inside a transaction. */
