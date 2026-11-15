@@ -360,6 +360,21 @@ JSONB backend will emit for containment tests:
 expression index on `(payload->>'state')`. This is the single most-important
 performance caveat of the JSONB backend and the reason for §2.2.
 
+**What the code does (corrected 2026-11-15, measured on PostgreSQL 18.1).** The toolkit
+never emits `@@`, and `jsonb_path_ops` does not support the key-existence operator `?`
+that the URL null tests use, so those scan. It emits:
+- `payload @? ?::jsonpath` for a `filter=` with an equality in every `||` branch (since
+  3.6.0; before, every `filter=` was the function `jsonb_path_exists(...)`, which no index
+  serves);
+- `jsonb_path_exists(payload, ?::jsonpath)` for every other `filter=`, because under a
+  generic plan the operator would read the whole index for a path it has no key for;
+- `payload @> ?::jsonb` for a URL `EQ` / `IN` only under the opt-in
+  `opentmf.tmf630.jsonb.equality=containment`.
+
+The README's "Indexes for a JSONB-backed entity" states which forms each index serves;
+`Tmf630JsonbIndexPlanIT`, `Tmf630JsonbKeylessFilterGenericPlanIT` and
+`Tmf630JsonbExpressionIndexGuideIT` pin it.
+
 ### 2.2 Expression indexes for hot query paths
 
 Every field that appears in a common filter or sort URL needs its own expression index
@@ -369,12 +384,21 @@ if the query volume warrants:
 CREATE INDEX product_order_state_idx
   ON product_order ((payload->>'state'));
 
-CREATE INDEX product_order_created_at_idx
-  ON product_order (((payload->>'creationDate')::timestamptz));
+CREATE INDEX product_order_priority_idx
+  ON product_order (((payload->>'priority')::bigint));
 
-CREATE INDEX product_order_customer_id_idx
-  ON product_order ((payload->'relatedParty'->0->>'id'));
+CREATE INDEX product_order_city_idx
+  ON product_order ((payload#>>'{receiver,postalAddress,city}'));
 ```
+
+**Corrected 2026-11-15 (measured on PostgreSQL 18.1).** The two examples this section showed
+before cannot serve the toolkit's queries. `((payload->>'creationDate')::timestamptz)` is
+refused by PostgreSQL ("functions in index expression must be marked IMMUTABLE"): the text
+casts to `date`, `time`, `timestamp` and `timestamptz` depend on settings, so a range or a
+sort on a date or time field cannot have an expression index and scans the table. And
+`payload->'relatedParty'->0->>'id'` is not a form the toolkit emits: a path of more than one
+segment is `payload#>>'{a,b,c}'`. The casts to `bigint`, `numeric` and `boolean` are
+immutable and indexable.
 
 **Design implications:**
 
@@ -734,7 +758,10 @@ becomes unmanageable.
 
 ## 5. Operator translation table — the concrete SQL contract
 
-Each of the 24 `TmfOperator` values maps to a specific SQL template. `payload` is the
+Each of the 24 `TmfOperator` values maps to a specific SQL template. A path of one segment is
+`payload->>'f'`, a longer one `payload#>>'{a,b,c}'`; the templates below write the first.
+Which index serves each template is in the README's "Indexes for a JSONB-backed entity"
+(measured 2026-11-15). `payload` is the
 column name (assumed via the entity annotation); `<field>` is the toolkit-resolved
 JSONB path (single-hop or dotted); `?` is a JDBC parameter binding.
 
@@ -749,8 +776,8 @@ JSONB path (single-hop or dotted); `?` is a JDBC parameter binding.
 | `LT` | `(payload->>'<field>')::<cast> < ?` | — | |
 | `LTE` | `(payload->>'<field>')::<cast> <= ?` | — | |
 | `BETWEEN` | `(payload->>'<field>')::<cast> BETWEEN ? AND ?` | — | |
-| `IN` | `payload->>'<field>' = ANY(?)` | — | Postgres array binding; nicer than IN(?, ?, ?) |
-| `NIN` | `payload->>'<field>' != ALL(?)` | — | |
+| `IN` | `payload->>'<field>' IN (?, ?, …)` | `payload @> ?::jsonb` OR'd per value, under `equality=containment` | Emitted as one parameter per value (corrected 2026-11-15; this row proposed `= ANY(?)`, which the code never emitted); an expression index on the field serves it |
+| `NIN` | `payload->>'<field>' NOT IN (?, ?, …)` | — | Corrected 2026-11-15 (this row proposed `!= ALL(?)`); no index serves it |
 | `IS_NULL` | `NOT (payload ? '<field>')` (missing) OR `payload->'<field>' IS NULL` (explicit null) | — | Widening decision: NULLISH semantics widen to `NOT (payload ? '<field>') OR payload->'<field>' = 'null'::jsonb` (see §5.1) |
 | `IS_NOT_NULL` | `payload ? '<field>' AND payload->'<field>' IS NOT NULL` | — | |
 | `LIKE` | `payload->>'<field>' LIKE ?` | — | The value is the pattern: `%` and `_` are wildcards |

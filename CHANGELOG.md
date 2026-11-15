@@ -343,6 +343,17 @@ All notable changes to `tmf630-toolkit` are documented in this file.
   value; the backends differ, and the table says how.
 - README: JSONB's `filter=` accepts PostgreSQL's own jsonpath (above).
 - Design: §5 (equality), §6 (the cast mode) and §10 (PostgreSQL 15, 16 for lenient).
+- README: "Indexes for a JSONB-backed entity". It says which query forms a
+  `GIN (payload jsonb_path_ops)` index serves and which an expression index on the exact
+  expression serves, what each costs, and how to check a deployment. Measured on PostgreSQL 18.1
+  and pinned by `Tmf630JsonbExpressionIndexGuideIT`.
+  - **A date or time field cannot have an expression index.** PostgreSQL refuses an index on
+    the toolkit's text casts to `date`, `time`, `timestamp` and `timestamptz`, because they are
+    not immutable. A range or a sort on such a field scans the table, as in every 3.x release.
+  - The design's §2.2 had recommended exactly such an index
+    (`((payload->>'creationDate')::timestamptz)`), which PostgreSQL refuses. §2.1, §2.2 and §5
+    are corrected to what the code emits.
+- README: the JSONB combination suite, with its size and run time.
 
 ## [3.5.2] - 2026-11-04
 
