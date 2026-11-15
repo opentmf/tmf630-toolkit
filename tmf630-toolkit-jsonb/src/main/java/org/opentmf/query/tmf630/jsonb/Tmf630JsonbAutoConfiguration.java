@@ -220,7 +220,6 @@ public class Tmf630JsonbAutoConfiguration {
    */
   @Bean
   @ConditionalOnMissingBean
-  @ConditionalOnBean(JdbcClient.class)
   public Tmf630JsonbColumnCheck tmf630JsonbColumnCheck(
       JdbcClient jdbcClient, JsonbEntityRegistry registry) {
     return new Tmf630JsonbColumnCheck(jdbcClient, registry);
