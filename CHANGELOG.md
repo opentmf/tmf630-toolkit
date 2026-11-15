@@ -59,16 +59,22 @@ All notable changes to `tmf630-toolkit` are documented in this file.
     equality is enough. That covers `@.a == 'x'`, `@.a == 'x' || @.a == 'y'`,
     `@.a == 'x' && @.n > 5`, and an array correlation on an equality. The plan shows a Bitmap
     Index Scan.
-  - The index has no key for a filter with no equality (ranges only, `=~`, `!(...)`), nor for
-    one where a `||` branch has none (`@.a == 'x' || @.n > 5`). With a plan made for the
-    actual path, PostgreSQL scans the table, as before.
-  - With a generic plan, PostgreSQL cannot see the path, so it always picks the index. It
-    switches a server-prepared statement to a generic plan after its first five executions,
-    and every `filter=`-only query on a table shares one SQL text. Such a filter then reads the
-    whole index and rechecks every row. Measured on 20,000 rows: 903 buffers, against 690 for
-    the scan.
+  - The index has no key for a filter with no equality (ranges only, `!=`, `=~`, `!(...)`), nor
+    for one where a `||` branch has none (`@.a == 'x' || @.n > 5`). Such a filter keeps the
+    function form `jsonb_path_exists(payload, ?::jsonpath)`, and PostgreSQL scans the table, as
+    before 3.6.0.
+  - This matters under a generic plan. PostgreSQL switches a server-prepared statement to a
+    generic plan after its first five executions, and such a plan cannot see the path. In the
+    operator form it would always pick the index, read all of it and recheck every row. Measured
+    under a generic plan on 20,000 rows (PostgreSQL 18.1, `Tmf630JsonbKeylessFilterGenericPlanIT`):
+    - a keyless filter read 1,370 buffers in the operator form, and reads 1,112 in the function
+      form, which is exactly the plain scan's 1,112;
+    - a filter with an equality keeps its index scan, at 9 to 49 buffers.
+  - The translator decides by reading the path it emits, by the rules PostgreSQL extracts index
+    keys with, and errs one way only: a filter it is not sure about (a positional `[N]`, an item
+    method such as `.type()`, a negation) keeps the function form.
   - Both forms return the same rows. No adopter action is needed: an existing GIN index starts
-    being used, and nothing else changes.
+    being used for a filter with an equality, and nothing else changes.
 - **What the operator answers differently.** The operator suppresses errors that the function
   raises. The path the toolkit emits is always the lax `$ ? (<filter>)`, and inside that filter
   both forms already treat an error as no match. Measured, with the same answer in both forms:
