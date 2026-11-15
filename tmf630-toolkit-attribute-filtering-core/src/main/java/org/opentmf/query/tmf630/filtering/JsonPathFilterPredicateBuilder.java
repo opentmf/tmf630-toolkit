@@ -679,7 +679,7 @@ public class JsonPathFilterPredicateBuilder {
   private Predicate buildTypedPredicate(
       ComparisonNode comparison, PathBuilder<?> rootPath, ResolvedField resolvedField) {
     Object typedValue =
-        valueConverter.convert(
+        valueConverter.convertFilterValue(
             comparison.literal().valueAsString(),
             resolvedField.javaType(),
             resolvedField.fieldPath());

@@ -3,12 +3,14 @@ package org.opentmf.query.tmf630.filtering.predicate;
 import com.querydsl.core.BooleanBuilder;
 import com.querydsl.core.types.Ops;
 import com.querydsl.core.types.Predicate;
+import com.querydsl.core.types.dsl.ComparablePath;
 import com.querydsl.core.types.dsl.Expressions;
 import com.querydsl.core.types.dsl.PathBuilder;
 import com.querydsl.core.types.dsl.SimplePath;
 import com.querydsl.core.types.dsl.StringPath;
 import java.io.Serializable;
 import java.lang.annotation.Annotation;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -53,7 +55,18 @@ public class PredicateFactory {
       PathBuilder<?> root, ResolvedField field, TmfOperator operator, Object typedValue) {
     String fieldPath = field.fieldPath();
     Class<?> type = box(field.javaType());
+    if (JsonTypedFields.isJsonTyped(type)) {
+      return jsonTyped(root, fieldPath, type, operator, JsonTypedValue.read(textOf(typedValue)));
+    }
+    return scalar(root, fieldPath, type, operator, typedValue);
+  }
 
+  private Predicate scalar(
+      PathBuilder<?> root,
+      String fieldPath,
+      Class<?> type,
+      TmfOperator operator,
+      Object typedValue) {
     return switch (operator) {
       case EQ -> root.getSimple(fieldPath, (Class) type).eq(typedValue);
       case NE -> root.getSimple(fieldPath, (Class) type).ne(typedValue);
@@ -216,6 +229,9 @@ public class PredicateFactory {
       PathBuilder<?> root, ResolvedField field, TmfOperator operator, List<Object> typedValues) {
     String fieldPath = field.fieldPath();
     Class<?> type = box(field.javaType());
+    if (JsonTypedFields.isJsonTyped(type)) {
+      return jsonTypedMulti(root, fieldPath, type, operator, typedValues);
+    }
     return switch (operator) {
       case IN -> root.getSimple(fieldPath, (Class) type).in(typedValues);
       case NIN -> root.getSimple(fieldPath, (Class) type).notIn(typedValues);
@@ -224,6 +240,86 @@ public class PredicateFactory {
           throw new TmfFilteringException(
               "Unsupported multi-value operator: " + operator.suffix());
     };
+  }
+
+  /**
+   * A field of an open JSON type ({@link JsonTypedFields}, since 3.6.0): equality matches any
+   * {@link JsonTypedValue#readings() reading} of the value, an ordering compares its number, and a
+   * string operator its text as on an {@code Object} field. A JPA root keeps the converter's 400:
+   * a value bound against a JSON column cannot be compared.
+   */
+  private Predicate jsonTyped(
+      PathBuilder<?> root,
+      String fieldPath,
+      Class<?> type,
+      TmfOperator operator,
+      JsonTypedValue value) {
+    refuseOnJpa(root, fieldPath, type);
+    SimplePath<Object> path = root.getSimple(fieldPath, Object.class);
+    return switch (operator) {
+      case EQ -> path.in(value.readings());
+      case NE -> path.notIn(value.readings());
+      case GT -> number(root, fieldPath).gt(numberOf(fieldPath, value));
+      case GTE -> number(root, fieldPath).goe(numberOf(fieldPath, value));
+      case LT -> number(root, fieldPath).lt(numberOf(fieldPath, value));
+      case LTE -> number(root, fieldPath).loe(numberOf(fieldPath, value));
+      default -> scalar(root, fieldPath, Object.class, operator, value.text());
+    };
+  }
+
+  private Predicate jsonTypedMulti(
+      PathBuilder<?> root,
+      String fieldPath,
+      Class<?> type,
+      TmfOperator operator,
+      List<Object> typedValues) {
+    refuseOnJpa(root, fieldPath, type);
+    List<JsonTypedValue> values =
+        typedValues.stream().map(v -> JsonTypedValue.read(textOf(v))).toList();
+    SimplePath<Object> path = root.getSimple(fieldPath, Object.class);
+    return switch (operator) {
+      case IN -> path.in(allReadings(values));
+      case NIN -> path.notIn(allReadings(values));
+      case BETWEEN -> {
+        if (values.size() != 2) {
+          throw new TmfFilteringException(
+              "between operator expects exactly 2 values for field: " + fieldPath);
+        }
+        yield number(root, fieldPath)
+            .between(numberOf(fieldPath, values.get(0)), numberOf(fieldPath, values.get(1)));
+      }
+      default ->
+          throw new TmfFilteringException(
+              "Unsupported multi-value operator: " + operator.suffix());
+    };
+  }
+
+  private static void refuseOnJpa(PathBuilder<?> root, String fieldPath, Class<?> type) {
+    if (isJpaRoot(root)) {
+      throw new TmfFilteringException(ValueConverter.cannotConvertMessage(fieldPath, type));
+    }
+  }
+
+  private static ComparablePath<Comparable> number(PathBuilder<?> root, String fieldPath) {
+    return root.getComparable(fieldPath, Comparable.class);
+  }
+
+  private static Comparable numberOf(String fieldPath, JsonTypedValue value) {
+    if (!value.isNumber()) {
+      throw new TmfFilteringException(
+          "Operator requires a number for the JSON-typed field: " + fieldPath);
+    }
+    return (Comparable) value.storeNumber();
+  }
+
+  private static List<Object> allReadings(List<JsonTypedValue> values) {
+    List<Object> readings = new ArrayList<>();
+    values.forEach(v -> readings.addAll(v.readings()));
+    return readings;
+  }
+
+  private static String textOf(Object value) {
+    return value instanceof JsonTypedValue json ? json.text() : String.valueOf(value);
   }
 
   private void requireComparable(String fieldPath, Class<?> type) {
