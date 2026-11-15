@@ -354,6 +354,12 @@ All notable changes to `tmf630-toolkit` are documented in this file.
     (`((payload->>'creationDate')::timestamptz)`), which PostgreSQL refuses. §2.1, §2.2 and §5
     are corrected to what the code emits.
 - README: the JSONB combination suite, with its size and run time.
+- README: "A value of another JSON type: lenient on JSONB, by intention" (ledger #4246). JSONB
+  reads a value stored in another JSON type than the field declares, by its text or cast, as in
+  3.5.2, and this is now documented as intended rather than left unexplained. The section gives
+  measured examples, says that type-exact equality is the opt-in `equality=containment`, and
+  says that Mongo compares type-exactly, as released. It also notes that `cast-mode=lenient`
+  avoids the 500 that the default `strict` answers on an `Integer` field holding `5.0`.
 
 ## [3.5.2] - 2026-11-04
 

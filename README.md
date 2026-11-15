@@ -2371,7 +2371,39 @@ returns the same result set as a QueryDSL-terminal endpoint. Where JSONB answers
 - `ne` / `nin` / `!=` (see "What `ne`, `nin` and `!=` mean on each backend");
 - an unknown field inside `filter=` matches nothing on JSONB, where the QueryDSL terminal drops
   it under `IGNORE`;
-- `regex.max-length` applies on JSONB only under the opt-in below.
+- `regex.max-length` applies on JSONB only under the opt-in below;
+- a value stored in another JSON type than the field declares is read by its text or the field's
+  cast (lenient), where Mongo compares type-exactly (see the next section).
+
+#### A value of another JSON type: lenient on JSONB, by intention
+
+The JSONB backend reads a stored value of another JSON type than the field declares, by its text
+or the field's cast. This is intended. A general-purpose library does not drop a row because a
+producer wrote `"2.5"` where the model says a number.
+
+Measured on PostgreSQL 18.1 with the default settings, the same as in 3.5.2:
+- `d.eq=2.5` on a `BigDecimal` field finds the number `2.50` and the string `"2.5"`;
+- `l.in=1,5` on a `Long` field finds `1`, `5` and the string `"5"`;
+- `d.gt=2` finds `2.50`, `9.25` and the string `"2.5"`;
+- on an `Object` field the value is compared as text, so an ordering follows text order: `o.gt=10`
+  finds `7`.
+
+The exceptions:
+- **Type-exact equality is the opt-in `equality=containment`.** It covers `EQ` and `IN` only, and
+  the GIN index serves it: `d.eq=2.5` then finds only `2.50`. Ranges stay lenient.
+- **`filter=` compares as SQL/JSON path does.** `$[?(@.l == 5)]` does not find `"5"`, as in 3.5.2.
+- **One unreadable value fails the field under the default `cast-mode=strict`.** An `Integer`
+  field that holds `5.0` makes every typed filter and sort on that field, outside arrays, answer a
+  500 (`invalid input syntax for type bigint: "5.0"`), as in 3.5.2. `cast-mode=lenient` avoids the
+  500: `5.0` is then no match, because `bigint` does not read it, and `"5"` still matches `5`.
+
+**Mongo is type-exact, as released.** The same requests on Mongo:
+- `d.eq=2.5` finds only `2.50`;
+- `l.in=1,5` finds only `1` and `5`;
+- `d.gt=2` finds only `2.50` and `9.25`.
+
+Numbers compare by value (`i.eq=5` finds `5` and `5.0`), never with strings. A lenient Mongo would
+be an opt-in, built when a project asks for it.
 
 #### Behaviour switches (since 3.6.0)
 
