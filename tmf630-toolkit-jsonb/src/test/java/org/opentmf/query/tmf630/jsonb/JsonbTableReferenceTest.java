@@ -2,8 +2,10 @@ package org.opentmf.query.tmf630.jsonb;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.stream.Stream;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class JsonbTableReferenceTest {
@@ -35,19 +37,20 @@ class JsonbTableReferenceTest {
     assertThat(JsonbTableReference.problem(name)).isNull();
   }
 
+  static Stream<Arguments> notTableReferences() {
+    return Stream.of(
+        Arguments.of("message m", "whitespace outside double quotes"),
+        Arguments.of("message\tm", "whitespace outside double quotes"),
+        Arguments.of("message;drop", "';' outside double quotes"),
+        Arguments.of("message--x", "a comment marker outside double quotes"),
+        Arguments.of("message/*x*/", "a comment marker outside double quotes"),
+        Arguments.of("message(x)", "a parenthesis outside double quotes"),
+        Arguments.of("\"dnms\".message m", "whitespace outside double quotes"),
+        Arguments.of("\"open;x", "';' outside double quotes"));
+  }
+
   @ParameterizedTest
-  @CsvSource(
-      delimiter = '|',
-      value = {
-        "message m|whitespace outside double quotes",
-        "message\tm|whitespace outside double quotes",
-        "message;drop|';' outside double quotes",
-        "message--x|a comment marker outside double quotes",
-        "message/*x*/|a comment marker outside double quotes",
-        "message(x)|a parenthesis outside double quotes",
-        "\"dnms\".message m|whitespace outside double quotes",
-        "\"open;x|';' outside double quotes"
-      })
+  @MethodSource("notTableReferences")
   void whatCannotBeATableReferenceIsNamed(String name, String problem) {
     assertThat(JsonbTableReference.problem(name)).isEqualTo(problem);
   }
