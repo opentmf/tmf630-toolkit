@@ -25,6 +25,11 @@ import org.opentmf.query.tmf630.filtering.config.IsnullSemantics;
  * function raises; for the lax {@code $ ? (...)} path this class emits, that differs only for a
  * body that continues outside the filter, which is refused (see {@link #translate}).
  *
+ * <p>A path the index has no key for ({@link JsonbJsonPathIndexKey}: no equality, or an
+ * {@code ||} branch without one) keeps the function, {@code jsonb_path_exists(payload,
+ * ?::jsonpath)}: under a generic plan, which cannot see the path, the operator would read the whole
+ * index and recheck every row, where the function scans the table as before 3.6.0.
+ *
  * <p>Translation rules:
  *
  * <ul>
@@ -226,6 +231,11 @@ public class JsonbJsonPathTranslator {
 
   private JsonbClause translateAsPathMatch(String body) {
     String jsonPath = "$ ? (" + translatePredicate(body) + ")";
+    if (!JsonbJsonPathIndexKey.hasIndexKey(jsonPath)) {
+      // No index key: under a generic plan the operator would read the whole GIN index and
+      // recheck every row; the function scans the table, as every filter= did before 3.6.0.
+      return JsonbClause.of("jsonb_path_exists(" + payloadColumn + ", ?::jsonpath)", jsonPath);
+    }
     // JDBC parameter for the jsonpath text — Postgres will cast the text to jsonpath. "@??" is
     // the driver's escape for the "@?" operator, so the index can serve the test.
     return JsonbClause.of(payloadColumn + " @?? ?::jsonpath", jsonPath);
