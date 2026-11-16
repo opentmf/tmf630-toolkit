@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
+import tools.jackson.databind.JsonNode;
 
 /**
  * The Mongo twin of {@link ComboDomain}: the same fields and nested types on a {@code @Document}
@@ -29,6 +30,7 @@ public record CompatMongoCombo(
     ComboStage w,
     Object o,
     Map<String, Object> m,
+    JsonNode j,
     List<String> ls,
     List<ComboTag> lo,
     ComboLeaf n,

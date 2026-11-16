@@ -2410,6 +2410,38 @@ The exceptions:
 Numbers compare by value (`i.eq=5` finds `5` and `5.0`), never with strings. A lenient Mongo would
 be an opt-in, built when a project asks for it.
 
+#### A field of an open JSON type: `Map`, `JsonNode` (since 3.6.0)
+
+A TMF characteristic's `value` can hold any JSON value, so a service declares it as a `Map` or a
+Jackson `JsonNode`. A URL filter on such a field reads its value as JSON, the same way on JSONB and
+on Mongo. Before 3.6.0 every such request answered 400.
+
+| Request | Finds |
+| --- | --- |
+| `characteristic.value=42` | the number 42 (also stored as `42.0`) and the string `"42"` |
+| `characteristic.value=true` | the boolean and the string `"true"` |
+| `characteristic.value=alpha` | the string `"alpha"` |
+| `characteristic.value.gt=10` | stored numbers above 10 only; `gt=alpha` answers 400 (`Operator requires a number for the JSON-typed field: characteristic.value`) |
+| `characteristic.value.contains=lph` (and the other string operators) | stored strings only |
+
+- `ne`, `nei` and `nin` keep each backend's own reading (see "What `ne`, `nin` and `!=` mean on
+  each backend").
+- JPA answers 400: a value cannot be compared with a JSON column.
+- An `Object` field keeps its own released behaviour.
+- A path below the field (`characteristic.value.amount`) is an unknown field.
+
+**`filter=` compares as JSONPath does, the URL form as JSON.** On a JSONB-backed entity:
+- `characteristic.value=42` finds a stored `"42"`;
+- `filter=$[?(@.characteristic[?(@.value == 42)])]` does not find it: SQL/JSON path compares within
+  one JSON type, so `== 42` finds numbers and `== '42'` finds strings.
+
+Use the URL form when a producer may have written either.
+
+On PostgreSQL:
+- equality and `in` are sent as `payload @? ?::jsonpath`, which `GIN (payload jsonb_path_ops)`
+  serves;
+- the other operators are sent as `jsonb_path_exists(payload, ?::jsonpath)`.
+
 #### Behaviour switches (since 3.6.0)
 
 Every default is the 3.5.2 behaviour; each switch is an opt-in.

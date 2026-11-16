@@ -148,7 +148,7 @@ public class Tmf630PredicateArgumentResolver implements HandlerMethodArgumentRes
     for (List<String> group : clause.valueGroups()) {
       for (String element : group) {
         typedValues.add(
-            valueConverter.convert(element, resolvedField.javaType(), resolvedField.fieldPath()));
+            valueConverter.convertFilterValue(element, resolvedField.javaType(), resolvedField.fieldPath()));
       }
     }
     return predicateFactory.buildMulti(rootPath, resolvedField, clause.operator(), typedValues);
@@ -166,7 +166,7 @@ public class Tmf630PredicateArgumentResolver implements HandlerMethodArgumentRes
       BooleanBuilder perValue = new BooleanBuilder();
       for (String element : group) {
         Object typedValue =
-            valueConverter.convert(element, resolvedField.javaType(), resolvedField.fieldPath());
+            valueConverter.convertFilterValue(element, resolvedField.javaType(), resolvedField.fieldPath());
         perValue.or(
             predicateFactory.build(rootPath, resolvedField, clause.operator(), typedValue));
       }

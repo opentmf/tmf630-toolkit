@@ -13,6 +13,8 @@ import org.opentmf.query.tmf630.filtering.config.CombineMode;
 import org.opentmf.query.tmf630.filtering.config.Tmf630FilterSettings;
 import org.opentmf.query.tmf630.filtering.config.UnknownParamBehavior;
 import org.opentmf.query.tmf630.filtering.predicate.FieldPathResolver;
+import org.opentmf.query.tmf630.filtering.predicate.JsonTypedFields;
+import org.opentmf.query.tmf630.filtering.predicate.JsonTypedValue;
 import org.opentmf.query.tmf630.filtering.predicate.ResolvedField;
 import org.opentmf.query.tmf630.filtering.predicate.ValueConverter;
 import org.opentmf.query.tmf630.jsonb.JsonbPathPredicates.SplitChild;
@@ -55,6 +57,7 @@ public class Tmf630JsonbClauseBuilder {
   private final JsonbPredicateFactory predicateFactory;
   private final JsonbSplitAwareFilterTranslator filterTranslator;
   private final JsonbPathPredicates pathPredicates;
+  private final JsonbJsonTypedPredicates jsonTyped;
   private final boolean applyRegexMaxLength;
 
   /** A clause builder that applies no regex length cap, as before 3.6.0. */
@@ -96,6 +99,7 @@ public class Tmf630JsonbClauseBuilder {
     this.predicateFactory = predicateFactory;
     this.filterTranslator = filterTranslator;
     this.pathPredicates = new JsonbPathPredicates(predicateFactory);
+    this.jsonTyped = new JsonbJsonTypedPredicates(predicateFactory.extractor().column());
   }
 
   /**
@@ -229,6 +233,11 @@ public class Tmf630JsonbClauseBuilder {
     }
     TmfOperator operator = clause.operator();
     Class<?> type = resolvedField.javaType();
+    if (JsonTypedFields.isJsonTyped(type)) {
+      List<JsonTypedValue> values =
+          typedValues.stream().map(JsonTypedValue.class::cast).toList();
+      return jsonTyped.multi(operator, resolvedField.fieldPath(), type, target.split(), values);
+    }
     if (target.anyElementForValues()) {
       return pathPredicates.multi(operator, target.path(), type, typedValues, target.split());
     }
@@ -267,6 +276,10 @@ public class Tmf630JsonbClauseBuilder {
     Object value = convert(element, field);
     TmfOperator operator = clause.operator();
     requireRegexWithinCap(operator, field, value);
+    if (JsonTypedFields.isJsonTyped(field.javaType())) {
+      return jsonTyped.single(
+          operator, field.fieldPath(), field.javaType(), target.split(), (JsonTypedValue) value);
+    }
     if (target.anyElementForValues()) {
       return pathPredicates.single(operator, target.path(), field.javaType(), value, target.split());
     }
@@ -289,13 +302,18 @@ public class Tmf630JsonbClauseBuilder {
       throw new TmfFilteringException("Regex operator is disabled.");
     }
     if (applyRegexMaxLength
-        && String.valueOf(value).length() > settings.limits().maxRegexLength()) {
+        && textOf(value).length() > settings.limits().maxRegexLength()) {
       throw new TmfFilteringException("Regex pattern too long for field: " + field.fieldPath());
     }
   }
 
+  private static String textOf(Object value) {
+    return value instanceof JsonTypedValue json ? json.text() : String.valueOf(value);
+  }
+
   private Object convert(String element, ResolvedField resolvedField) {
-    return valueConverter.convert(element, resolvedField.javaType(), resolvedField.fieldPath());
+    return valueConverter.convertFilterValue(
+        element, resolvedField.javaType(), resolvedField.fieldPath());
   }
 
   private ResolvedField resolveField(Class<?> domainType, String fieldPath) {

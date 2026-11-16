@@ -31,6 +31,11 @@ public final class JsonbPathExtractor {
     this.payloadColumn = payloadColumn;
   }
 
+  /** The payload column this extractor reads. */
+  String column() {
+    return payloadColumn;
+  }
+
   /**
    * Extracts a scalar text value at the dotted path. Single-level: {@code payload->>'x'}.
    * Multi-level: {@code payload#>>'{a,b,c}'}.

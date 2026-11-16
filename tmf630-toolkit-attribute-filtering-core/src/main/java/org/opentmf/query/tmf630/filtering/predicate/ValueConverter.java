@@ -69,6 +69,19 @@ public class ValueConverter {
     this.enumTextReader = enumTextReader == null ? EnumTextReader.NONE : enumTextReader;
   }
 
+  /**
+   * A filter value (a URL operator's or a {@code filter=} literal's) for a field of
+   * {@code targetType}: for a field of an open JSON type ({@link JsonTypedFields}) its
+   * {@link JsonTypedValue} reading (since 3.6.0), which each backend compares as JSON; for every
+   * other type exactly {@link #convert(String, Class, String)}.
+   */
+  public Object convertFilterValue(String rawValue, Class<?> targetType, String fieldName) {
+    if (JsonTypedFields.isJsonTyped(targetType)) {
+      return JsonTypedValue.read(rawValue);
+    }
+    return convert(rawValue, targetType, fieldName);
+  }
+
   public Object convert(String rawValue, Class<?> targetType) {
     return convert(rawValue, targetType, null);
   }
@@ -93,6 +106,11 @@ public class ValueConverter {
       throw new TmfFilteringException(
           buildConversionFailedMessage(rawValue, fieldName, boxedType), ex);
     }
+  }
+
+  /** The 400's message for a field whose type no String converts to, as {@link #convert} says it. */
+  public static String cannotConvertMessage(String fieldName, Class<?> type) {
+    return buildCannotConvertMessage(fieldName, type);
   }
 
   private static String buildCannotConvertMessage(String fieldName, Class<?> type) {

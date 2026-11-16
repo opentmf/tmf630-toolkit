@@ -1,6 +1,7 @@
 package org.opentmf.query.tmf630.jsonb.combo;
 
 import com.jayway.jsonpath.JsonPath;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -48,6 +49,53 @@ final class ComboOracle {
       Map<String, JsonNode> docs, ComboPosition position, ComboKind kind, TmfOperator op) {
     List<String> query = ComboRequests.urlQuery(kind, op);
     return ids(docs, doc -> matches(op, kind, find(doc, position, kind), query));
+  }
+
+  /**
+   * The rows of {@code docs} that a negation ({@code ne}, {@code nei}, {@code nin} in the URL,
+   * {@code !=} in {@code filter=}) selects by MONGO's released reading (ledger #4247): the
+   * complement of the positive operator over the documents (a document without the field, or with
+   * a JSON null, matches); inside a {@code filter=} array match, an element whose value is not
+   * one of the positive's (an element without the field matches). Used as the evidence for the
+   * Mongo cells of a JSON-typed field ({@code MAP}, {@code JSON_NODE}), whose negations keep that
+   * reading.
+   */
+  static Set<String> mongoNegationExpected(
+      Map<String, JsonNode> docs,
+      ComboPosition position,
+      ComboKind kind,
+      TmfOperator op,
+      boolean filter) {
+    TmfOperator positive =
+        switch (op) {
+          case NE -> TmfOperator.EQ;
+          case NEI -> TmfOperator.EQI;
+          case NIN -> TmfOperator.IN;
+          default -> throw new IllegalArgumentException(op.name());
+        };
+    List<String> query = ComboRequests.urlQuery(kind, op);
+    boolean elementMatch =
+        filter && (position == ComboPosition.ARRAY || position == ComboPosition.ARRAY_IN_ARRAY
+            || position == ComboPosition.SPLIT);
+    if (elementMatch) {
+      return ids(
+          docs,
+          doc ->
+              position.containers(doc).stream()
+                  .anyMatch(
+                      element -> {
+                        JsonNode value = element.get(kind.key());
+                        return value == null
+                            || value.isNull()
+                            || !positive(positive, kind, value, query);
+                      }));
+    }
+    return ids(
+        docs,
+        doc ->
+            find(doc, position, kind).values().stream()
+                .filter(v -> !v.isNull())
+                .noneMatch(v -> positive(positive, kind, v, query)));
   }
 
   /**
@@ -181,6 +229,12 @@ final class ComboOracle {
       TmfOperator operator, ComboKind kind, JsonNode value, List<String> query) {
     String text = value.isString() ? value.asString() : null;
     String q = query.get(0);
+    if (kind.shape() == ComboKind.Shape.JSON) {
+      Optional<Boolean> json = jsonPositive(operator, value, query);
+      if (json.isPresent()) {
+        return json.get();
+      }
+    }
     return switch (operator) {
       case EQ -> is(compare(kind, value, q), c -> c == 0);
       case GT -> is(compare(kind, value, q), c -> c > 0);
@@ -208,6 +262,47 @@ final class ComboOracle {
     };
   }
 
+  /**
+   * A field of an open JSON type (ledger #4246, (a′)): equality and {@code IN} match a stored
+   * string equal to the query text, a stored number equal to it read as a number, or a stored
+   * boolean equal to it read as a boolean; an ordering compares stored numbers with the query read
+   * as a number. Empty for the string operators, which match stored strings as on a text field.
+   */
+  private static Optional<Boolean> jsonPositive(
+      TmfOperator operator, JsonNode value, List<String> query) {
+    String q = query.get(0);
+    return switch (operator) {
+      case EQ -> Optional.of(jsonEquals(value, q));
+      case IN -> Optional.of(query.stream().anyMatch(each -> jsonEquals(value, each)));
+      case GT -> Optional.of(is(jsonCompare(value, q), c -> c > 0));
+      case GTE -> Optional.of(is(jsonCompare(value, q), c -> c >= 0));
+      case LT -> Optional.of(is(jsonCompare(value, q), c -> c < 0));
+      case LTE -> Optional.of(is(jsonCompare(value, q), c -> c <= 0));
+      case BETWEEN ->
+          Optional.of(
+              is(jsonCompare(value, q), c -> c >= 0)
+                  && is(jsonCompare(value, query.get(1)), c -> c <= 0));
+      default -> Optional.empty();
+    };
+  }
+
+  private static boolean jsonEquals(JsonNode value, String q) {
+    if (value.isString()) {
+      return value.asString().equals(q);
+    }
+    if (value.isBoolean()) {
+      return ("true".equals(q) || "false".equals(q)) && value.booleanValue() == Boolean.parseBoolean(q);
+    }
+    return is(jsonCompare(value, q), c -> c == 0);
+  }
+
+  private static OptionalInt jsonCompare(JsonNode value, String q) {
+    if (!value.isNumber() || !ComboKind.isJsonLiteral(q) || "true".equals(q) || "false".equals(q)) {
+      return OptionalInt.empty();
+    }
+    return OptionalInt.of(Integer.signum(value.decimalValue().compareTo(new BigDecimal(q))));
+  }
+
   private static boolean is(OptionalInt comparison, IntPredicate test) {
     return comparison.isPresent() && test.test(comparison.getAsInt());
   }
@@ -229,7 +324,7 @@ final class ComboOracle {
   /** The stored value as a comparable of the declared type, or empty when it is not one. */
   static Optional<Comparable<?>> typed(ComboKind kind, JsonNode value) {
     return switch (kind.shape()) {
-      case TEXT -> value.isString() ? Optional.of(value.asString()) : Optional.empty();
+      case TEXT, JSON -> value.isString() ? Optional.of(value.asString()) : Optional.empty();
       case NUMBER -> value.isNumber() ? Optional.of(value.decimalValue()) : Optional.empty();
       case BOOLEAN -> value.isBoolean() ? Optional.of(value.booleanValue()) : Optional.empty();
       case DATE -> value.isString() ? ComboKind.date(value.asString()).map(d -> d) : Optional.empty();

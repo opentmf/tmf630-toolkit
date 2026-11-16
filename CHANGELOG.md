@@ -4,6 +4,51 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 
 ## [3.6.0] - 2026-11-12
 
+### Added: URL filters on a field of an open JSON type (`Map`, `JsonNode`), on JSONB and Mongo
+
+- **Additive.** Every request this changes answered the core's 400 before:
+  `Field "j" has type JsonNode which cannot be converted from a String.` Ledger #4246, design note
+  `docs/URL_FILTER_ON_FREE_JSON_VALUE.md`.
+- **Which fields.** A field declared as a `Map`, or as a Jackson `JsonNode` (Jackson 3 or 2), at
+  any position, an array element included. A TMF characteristic's `value` is the usual one. An
+  `Object` field keeps its released behaviour.
+- **What a value means.** The value is read as JSON, the same way on JSONB and on Mongo:
+  - `characteristic.value=42` finds a stored number equal to 42 (`42`, `42.0`) and the string
+    `"42"`;
+  - `=true` finds the boolean and the string `"true"`;
+  - any other value finds the string.
+  - `in` and `nin` take every reading of every value.
+  - An ordering (`gt`, `gte`, `lt`, `lte`, `between`) compares numbers only. A value that is not a
+    JSON number answers 400 `Operator requires a number for the JSON-typed field: <field>`.
+  - The string operators (`eqi`, `like`, `contains`, `startswith`, `endswith`, `regex` and their
+    case-insensitive forms) match strings only.
+- **`ne`, `nei` and `nin`** keep each backend's released reading (ledger #4247):
+  - on JSONB, a value is present, is not null, and is none of the readings;
+  - on Mongo, no value is one of the readings, and a document without the field matches too.
+- **Mongo's `filter=`** on such a field reads its literal the same way. It too answered the
+  converter's 400 before. JSONB's `filter=` is unchanged.
+- **JSONB sends one SQL/JSON path per clause.**
+  - Equality and `in` are sent as `payload @? ?::jsonpath`
+    (`$."characteristic"."value" ? (@ == "42" || @ == 42)`), which a
+    `GIN (payload jsonb_path_ops)` index serves.
+  - Every other operator is sent as `jsonb_path_exists(payload, ?::jsonpath)`.
+  - A split collection is answered in its child table.
+- **JPA keeps the 400, with the same message.** A value bound against a JSON column cannot be
+  compared: it was measured as a 500, so it is refused.
+- **Left out on purpose.** Each would change a released 200, so each could only be an opt-in:
+  - paths below a JSON field (`characteristic.value.amount`) stay unknown fields;
+  - nothing changes for `Object`.
+- **New API:**
+  - `JsonTypedFields.isJsonTyped(Class)`;
+  - `JsonTypedValue`;
+  - `ValueConverter.convertFilterValue(String, Class, String)` and
+    `ValueConverter.cannotConvertMessage(String, Class)`.
+  - `ValueConverter.convert` is unchanged: it still refuses a `Map` or `JsonNode`.
+- **Tests:**
+  - `Tmf630JsonbJsonTypedFieldIT` (PostgreSQL) and `Tmf630MongoJsonTypedFieldIT` (Mongo) ask the
+    same requests against the same stored values and assert the same rows.
+  - Unit tests: `JsonTypedValueTest`, `JsonTypedPredicateTest`, `JsonbJsonTypedPredicatesTest`.
+
 ### Added (JSONB, opt-in, default unchanged): equality by containment, served by the GIN index
 
 - **Opt-in; the default is unchanged.** `opentmf.tmf630.jsonb.equality=containment`; the default

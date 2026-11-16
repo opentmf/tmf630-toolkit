@@ -60,9 +60,13 @@ enum ComboKind {
   OBJECT("o", "Object", Shape.TEXT,
       List.of("\"alpha\"", "5", "true", "{\"k\":\"v\"}"), List.of(), List.of(),
       new Probe("alpha", "bravo", "alpha", "bravo", "alpha", "5", "al", "lph", "ha")),
-  MAP("m", "Map<String,Object>", Shape.TEXT,
+  MAP("m", "Map<String,Object>", Shape.JSON,
       List.of("{\"k\":\"v\"}"), List.of("\"alpha\""), List.of(),
       new Probe("alpha", "bravo", "alpha", "bravo", "alpha", "bravo", "al", "lph", "ha")),
+  JSON_NODE("j", "JsonNode", Shape.JSON,
+      List.of("\"alpha\"", "42", "42.0", "7", "true", "\"42\"", "\"true\"", "{\"k\":\"v\"}"),
+      List.of(), List.of(),
+      new Probe("42", "10", "5", "42", "42", "alpha", "4", "lph", "ha")),
   STRING_LIST("ls", "List<String>", Shape.TEXT,
       List.of("[\"alpha\",\"bravo\"]", "[]"), List.of("\"alpha\""), List.of(),
       new Probe("alpha", "bravo", "alpha", "bravo", "alpha", "zulu", "al", "lph", "vo")),
@@ -74,6 +78,8 @@ enum ComboKind {
   /** How a stored value of the declared JSON type is compared. */
   enum Shape {
     TEXT,
+    /** An open JSON type ({@code Map}, {@code JsonNode}): the query value is read as JSON. */
+    JSON,
     NUMBER,
     BOOLEAN,
     DATE,
@@ -160,7 +166,7 @@ enum ComboKind {
 
   /** Whether the kind's values are text the text operators apply to. */
   boolean isText() {
-    return shape == Shape.TEXT;
+    return shape == Shape.TEXT || shape == Shape.JSON;
   }
 
   /** A value to compare: a {@link String}, {@link BigDecimal}, {@link Boolean}, date or instant. */
@@ -168,7 +174,7 @@ enum ComboKind {
     try {
       return Optional.of(
           switch (shape) {
-            case TEXT -> this == WIRE_ENUM ? wireOf(text) : text;
+            case TEXT, JSON -> this == WIRE_ENUM ? wireOf(text) : text;
             case NUMBER -> new BigDecimal(text);
             case BOOLEAN -> Boolean.valueOf(text);
             case DATE -> LocalDate.parse(text);
@@ -182,7 +188,17 @@ enum ComboKind {
   /** The literal of a {@code filter=} expression for a query value: quoted unless a number or boolean. */
   String filterLiteral(String text) {
     String value = this == WIRE_ENUM ? wireOf(text) : text;
+    if (shape == Shape.JSON) {
+      return isJsonLiteral(value) ? value : "'" + value + "'";
+    }
     return shape == Shape.NUMBER || shape == Shape.BOOLEAN ? value : "'" + value + "'";
+  }
+
+  /** Whether {@code text} is a JSON number or boolean literal. */
+  static boolean isJsonLiteral(String text) {
+    return "true".equals(text)
+        || "false".equals(text)
+        || text.matches("-?(0|[1-9]\\d*)(\\.\\d+)?([eE][+-]?\\d+)?");
   }
 
   private static String wireOf(String text) {
