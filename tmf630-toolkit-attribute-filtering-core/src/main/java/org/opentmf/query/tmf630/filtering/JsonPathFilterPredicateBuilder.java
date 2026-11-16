@@ -356,7 +356,7 @@ public class JsonPathFilterPredicateBuilder {
             settings,
             nestedAllowlistPrefix,
             allowNestedPaths);
-    return nested.map(p -> buildElemMatchPredicate(resolvedArrayPath.collectionPath(), p));
+    return nested.map(p -> elementMatch(resolvedArrayPath.collectionPath(), p));
   }
 
   /**
@@ -837,8 +837,21 @@ public class JsonPathFilterPredicateBuilder {
     return null;
   }
 
-  private Predicate buildElemMatchPredicate(Expression<?> collectionPath, Predicate nestedPredicate) {
-    return Expressions.predicate(resolveElemMatchOperator(), collectionPath, nestedPredicate);
+  /**
+   * The predicate for an accepted array match ({@code @.items[?(…)]}) on a root that is not a JPA
+   * entity: by default Mongo's {@code ELEM_MATCH} over {@code collection}, which needs
+   * querydsl-mongodb on the classpath and is otherwise the 400 "Array correlation requires
+   * querydsl-mongodb on the classpath.".
+   *
+   * <p>{@code inner} is the predicate for one element, already built, and so already checked, by
+   * this builder: a refused comparison inside the array match is refused before this method is
+   * called. A terminal that validates {@code filter=} with this builder and emits its own query (the
+   * JSONB terminal, which discards the predicate) overrides this method to return a stand-in.
+   * Overriding it changes how an accepted array match is represented, never which filters are
+   * accepted.
+   */
+  protected Predicate elementMatch(Expression<?> collection, Predicate inner) {
+    return Expressions.predicate(resolveElemMatchOperator(), collection, inner);
   }
 
   private Operator resolveElemMatchOperator() {

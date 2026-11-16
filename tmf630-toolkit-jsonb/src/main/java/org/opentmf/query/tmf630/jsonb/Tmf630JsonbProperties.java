@@ -24,6 +24,15 @@ public class Tmf630JsonbProperties {
    */
   private boolean applyRegexMaxLength;
 
+  /**
+   * Whether JSONB refuses, with the core's 400 and message, every request the QueryDSL terminal
+   * refuses (a string operator or regex on a non-string field, a literal the declared type cannot
+   * read, the regex cap, PostgreSQL-only jsonpath): {@code false} (default, as in 3.5.2) or
+   * {@code true}. A field of an open JSON type ({@code Object}, {@code Map}, {@code JsonNode})
+   * counts as any type and is never refused for its type.
+   */
+  private boolean querydslAcceptance;
+
   public JsonbEqualityMode getEquality() {
     return equality;
   }
@@ -46,5 +55,13 @@ public class Tmf630JsonbProperties {
 
   public void setApplyRegexMaxLength(boolean applyRegexMaxLength) {
     this.applyRegexMaxLength = applyRegexMaxLength;
+  }
+
+  public boolean isQuerydslAcceptance() {
+    return querydslAcceptance;
+  }
+
+  public void setQuerydslAcceptance(boolean querydslAcceptance) {
+    this.querydslAcceptance = querydslAcceptance;
   }
 }
