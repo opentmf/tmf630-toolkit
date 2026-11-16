@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.annotation.JsonValue;
 import jakarta.persistence.Column;
+import jakarta.persistence.Table;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -92,6 +93,27 @@ class JsonbDeclaredColumnTest {
     assertThatThrownBy(() -> JsonbEntityMetadata.of(TwiceRow.class))
         .isInstanceOf(Tmf630JsonbConfigurationException.class)
         .hasMessageContaining("is declared by two fields");
+  }
+
+  @Test
+  void aColumnNameThatIsNoPlainIdentifierIsRefused() {
+    assertThatThrownBy(() -> JsonbEntityMetadata.of(QuotedColumnRow.class))
+        .isInstanceOf(Tmf630JsonbConfigurationException.class)
+        .hasMessageContaining("names the column 'state = state OR true --'")
+        .hasMessageContaining("is not a plain SQL identifier");
+  }
+
+  @Test
+  void aTableNameThatIsNoPlainIdentifierIsRefusedWhenAColumnIsDeclared() {
+    assertThatThrownBy(() -> JsonbEntityMetadata.of(SpacedTableRow.class))
+        .isInstanceOf(Tmf630JsonbConfigurationException.class)
+        .hasMessageContaining("its table name must be a plain SQL identifier")
+        .hasMessageContaining("'message row' is not");
+  }
+
+  @Test
+  void aSchemaQualifiedTableIsAccepted() {
+    assertThat(JsonbEntityMetadata.of(SchemaTableRow.class).tableName()).isEqualTo("dnms.message_row");
   }
 
   @Test
@@ -338,6 +360,33 @@ class JsonbDeclaredColumnTest {
     public void setRecipient(String recipient) {
       this.recipient = recipient;
     }
+  }
+
+  @Tmf630JsonbBacked(domainType = Message.class)
+  static class QuotedColumnRow {
+    String payload;
+
+    @Tmf630JsonbColumn(path = "state")
+    @Column(name = "state = state OR true --")
+    String state;
+  }
+
+  @Table(name = "message row")
+  @Tmf630JsonbBacked(domainType = Message.class)
+  static class SpacedTableRow {
+    String payload;
+
+    @Tmf630JsonbColumn(path = "state")
+    String state;
+  }
+
+  @Table(name = "dnms.message_row")
+  @Tmf630JsonbBacked(domainType = Message.class)
+  static class SchemaTableRow {
+    String payload;
+
+    @Tmf630JsonbColumn(path = "state")
+    String state;
   }
 
   @Tmf630JsonbBacked(domainType = Message.class)

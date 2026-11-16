@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import org.springframework.util.Assert;
 
 /**
@@ -57,6 +58,15 @@ public record JsonbEntityMetadata(
           OffsetDateTime.class,
           Instant.class,
           UUID.class);
+
+  /**
+   * The form a declared column's name must have: a plain, unquoted SQL identifier. It is written
+   * into the SQL of every request on the declared path and of {@link Tmf630JsonbColumnCheck}.
+   */
+  private static final Pattern SQL_IDENTIFIER = Pattern.compile("[A-Za-z_]\\w*+");
+
+  /** The form the table name of an entity with a declared column must have: [schema.]identifier. */
+  private static final Pattern SQL_TABLE = Pattern.compile("[A-Za-z_]\\w*+(?:\\.[A-Za-z_]\\w*+)?+");
 
   /** The metadata without declared columns, as before 3.6.0. */
   public JsonbEntityMetadata(
@@ -124,14 +134,24 @@ public record JsonbEntityMetadata(
               + payloadField
               + "' declared by @Tmf630JsonbBacked.payloadField().");
     }
+    String tableName = resolveTableName(rowType);
+    List<JsonbDeclaredColumn> declaredColumns = discoverDeclaredColumns(rowType, domainType);
+    if (!declaredColumns.isEmpty() && !SQL_TABLE.matcher(tableName).matches()) {
+      throw new Tmf630JsonbConfigurationException(
+          rowType.getName()
+              + " declares a @Tmf630JsonbColumn, so its table name must be a plain SQL identifier"
+              + " ([schema.]name, letters, digits and '_'): '"
+              + tableName
+              + "' is not.");
+    }
     return new JsonbEntityMetadata(
         rowType,
         domainType,
         payloadField,
-        resolveTableName(rowType),
+        tableName,
         JsonbAuditColumns.discover(rowType),
         discoverSplitCollections(domainType),
-        discoverDeclaredColumns(rowType, domainType));
+        declaredColumns);
   }
 
   /**
@@ -157,7 +177,15 @@ public record JsonbEntityMetadata(
         if (!paths.add(path)) {
           throw declaredColumnError(rowType, path, "is declared by two fields");
         }
-        out.add(new JsonbDeclaredColumn(path, columnName(field), field.getName(), box(field.getType())));
+        String column = columnName(field);
+        if (!SQL_IDENTIFIER.matcher(column).matches()) {
+          throw declaredColumnError(
+              rowType,
+              path,
+              "names the column '" + column + "', which is not a plain SQL identifier"
+                  + " (letters, digits and '_', not starting with a digit)");
+        }
+        out.add(new JsonbDeclaredColumn(path, column, field.getName(), box(field.getType())));
       }
     }
     return out;
