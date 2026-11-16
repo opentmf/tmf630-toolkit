@@ -88,6 +88,20 @@ public class JsonbSortBuilder {
    */
   public JsonbClause buildOrderByClause(
       TmfSort sort, Function<String, Class<?>> fieldTypeResolver) {
+    return buildOrderByClause(sort, fieldTypeResolver, path -> Optional.empty());
+  }
+
+  /**
+   * As {@link #buildOrderByClause(TmfSort, Function)}, ordering a plain term whose path has a
+   * {@link Tmf630JsonbColumn declared column} by that column ({@code ORDER BY sent_at DESC}), so an
+   * index on it serves the sort (since 3.6.0).
+   *
+   * @param declaredColumnOf the column declared for a domain path, if any
+   */
+  public JsonbClause buildOrderByClause(
+      TmfSort sort,
+      Function<String, Class<?>> fieldTypeResolver,
+      Function<String, Optional<String>> declaredColumnOf) {
     if (sort == null || sort.isEmpty()) {
       return JsonbClause.of("");
     }
@@ -95,7 +109,12 @@ public class JsonbSortBuilder {
     List<Object> params = new ArrayList<>();
     for (TmfSortTerm term : sort.terms()) {
       switch (term.kind()) {
-        case PLAIN -> pieces.add(plainTermFragment(term, fieldTypeResolver));
+        case PLAIN ->
+            pieces.add(
+                declaredColumnOf
+                    .apply(term.expression())
+                    .map(column -> column + " " + directionKeyword(term) + nullsTail())
+                    .orElseGet(() -> plainTermFragment(term, fieldTypeResolver)));
         case SIMPLE_RICH, JSONPATH ->
             pieces.add(correlatedTermFragment(term, fieldTypeResolver, params));
         default ->

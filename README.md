@@ -2442,6 +2442,93 @@ On PostgreSQL:
   serves;
 - the other operators are sent as `jsonb_path_exists(payload, ?::jsonpath)`.
 
+#### A payload field in a real column: `@Tmf630JsonbColumn` (since 3.6.0)
+
+A JSONB filter or sort on a date reads the whole table:
+- PostgreSQL refuses an index on the toolkit's date and time casts (see "Indexes for a
+  JSONB-backed entity");
+- a table partitioned on a date is never pruned by a JSON expression.
+
+Declare the field as a real column of the row entity instead, as a copy of the payload's value. The
+payload stays the complete document, and the response is still read from it.
+
+```java
+@Entity
+@Tmf630JsonbBacked(domainType = CommunicationMessage.class)
+public class CommunicationMessageRow {
+  @Id private String id;
+  @JdbcTypeCode(SqlTypes.JSON) @Column(columnDefinition = "jsonb") private String payload;
+
+  @Tmf630JsonbColumn(path = "sendTime")            // the domain field it copies
+  @Column(name = "sent_at") private OffsetDateTime sentAt;
+
+  @Tmf630JsonbColumn(path = "owner") private String owner;
+}
+```
+
+- **What uses the column:** every URL value operator on the path (`sent_at >= ?`, `owner IN (?, ?)`)
+  with a typed bind, the sort (`ORDER BY sent_at`), and the count. An ordinary index serves them,
+  and a table partitioned on the column is pruned.
+- **What still reads the payload:**
+  - a `filter=` JSONPath;
+  - the response;
+  - the null tests under the default `isnull-semantics: MISSING_ONLY`: a NULL column cannot tell an
+    absent key from a JSON null, so an `isnull` on the partition field does not prune;
+  - on a column that is not text, the string operators (`contains`, `like`, `eqi`, `regex`, …).
+- **The answers stay the released ones.** A field absent from the payload is a NULL column, and `ne`,
+  `in` and the orderings answer on it as on the payload. One difference, by construction: a value no
+  cast reads cannot be stored in the column at all. Where the payload's strict cast failed with a
+  500, the column answers.
+- **What may be declared:** a scalar at a fixed path, with the domain field's Java type (an enum may
+  be copied into a `String`). Startup refuses:
+  - a path through a list;
+  - a primitive field (`int`), which cannot hold the NULL that an absent field must be (use
+    `Integer`);
+  - a column name, or the entity's table name, that is not a plain SQL identifier (letters, digits
+    and `_`; the table may be `schema.name`): both are written into the SQL, so a quoted or spaced
+    name is refused by name.
+- **Nothing changes for an entity that declares nothing.**
+
+Measured on PostgreSQL 18.1, 1,000,000 rows (design note `docs/JSONB_DECLARED_COLUMN.md`):
+
+| Request | Today (JSON expression) | Declared column |
+| --- | --- | --- |
+| a page of one month's messages, newest first | 27,847 buffers, 759 ms | 24 buffers, 0.2 ms |
+| the newest 20, sorted by the date | 2,862 ms | 0.3 ms |
+| equality on `owner` (1 in 1,000) | 27,771 buffers | 5 buffers |
+| one month's page, table partitioned monthly on the column | all 12 partitions | 1 partition, 22 buffers |
+
+**Keeping the column and the payload equal is the service's duty on every write.**
+- A JPA save fills the declared fields from the domain object first:
+
+  ```java
+  row.setPayload(mapper.writeValueAsString(message));
+  Tmf630JsonbColumns.copy(message, row, mapper);
+  repository.save(row);
+  ```
+
+  `copy` reads the domain object through its public accessors (a record's components, or JavaBeans
+  getters) and sets each declared field through the row's public setter; a declared field without
+  one is refused when `copy` is called.
+
+- A hand-written update sets the payload and the column in ONE statement. This is the only way that
+  also moves a row to its new partition:
+
+  ```sql
+  UPDATE communication_message
+     SET payload = jsonb_set(payload, '{sendTime}', to_jsonb(?::text)), sent_at = ?::timestamptz
+   WHERE id = ?
+  ```
+
+- PostgreSQL offers no way around this. A trigger cannot fill or change a partition key, and a
+  generated column refuses a date cast and cannot be a partition key.
+- In the service's tests, `Tmf630JsonbColumnCheck.mismatches(CommunicationMessageRow.class)` (a
+  bean) lists the ids of the rows where a column and the payload differ.
+  - It casts the payload's text to the column's own SQL type, read from the database catalog, and
+    compares with `IS DISTINCT FROM`. So it is exact for the declared type, and NULL equals an
+    absent key.
+  - It reads the whole table, so it belongs in a test or a maintenance job, not in a request.
+
 #### Behaviour switches (since 3.6.0)
 
 Every default is the 3.5.2 behaviour; each switch is an opt-in.

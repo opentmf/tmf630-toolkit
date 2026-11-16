@@ -214,6 +214,17 @@ public class Tmf630JsonbAutoConfiguration {
         jdbcClient, requireObjectMapper(objectMapper), registry, sortBuilder);
   }
 
+  /**
+   * Finds the rows whose {@link Tmf630JsonbColumn declared columns} differ from their payload; a
+   * service calls it in its tests (since 3.6.0).
+   */
+  @Bean
+  @ConditionalOnMissingBean
+  public Tmf630JsonbColumnCheck tmf630JsonbColumnCheck(
+      JdbcClient jdbcClient, JsonbEntityRegistry registry) {
+    return new Tmf630JsonbColumnCheck(jdbcClient, registry);
+  }
+
   @Bean
   @ConditionalOnMissingBean
   public Tmf630JsonbWriteExecutor tmf630JsonbWriteExecutor(

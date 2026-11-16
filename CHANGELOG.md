@@ -4,6 +4,45 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 
 ## [3.6.0] - 2026-11-12
 
+### Added (JSONB, opt-in per field): a payload field copied into a real column, `@Tmf630JsonbColumn`
+
+- **Opt-in per field; nothing changes for an entity that declares nothing.** Ledgers #4250 and
+  #4256; design note `docs/JSONB_DECLARED_COLUMN.md`.
+- **The declaration.** A field of the `@Tmf630JsonbBacked` row entity annotated
+  `@Tmf630JsonbColumn(path = "sendTime")` is a real column holding a copy of the payload's value at
+  that domain path. The payload stays the complete document, and the response is read from it.
+- **What uses the column:**
+  - every URL value operator on that path is a typed column comparison (`sent_at >= ?`);
+  - the sort orders by the column, and the count uses it.
+  - An ordinary index serves them, and a table partitioned on the column is pruned. Measured at
+    1,000,000 rows: a month's page drops from 759 ms to 0.2 ms, and the date-sorted page from
+    2,862 ms to 0.3 ms.
+- **What still reads the payload:**
+  - `filter=`;
+  - the null tests under the default `isnull-semantics: MISSING_ONLY` (a NULL column cannot tell
+    an absent key from a JSON null); under `NULLISH` they use the column;
+  - the string operators, on a column that is not text.
+- **The answers are the released ones.** `DeclaredColumnParityIT` asks every operator and both
+  sorts of every scalar kind, at the top level and nested, of a declared twin. It requires the
+  same answers, except where the payload's strict cast failed with a 500 and the column answers.
+- **Startup refuses** a path through a list, a non-scalar, an unknown path, a field of another
+  type than the domain field's (an enum may be copied into a `String`), a primitive field, a
+  path declared twice, and a column or table name that is not a plain SQL identifier.
+- **New API:**
+  - `@Tmf630JsonbColumn`;
+  - `JsonbDeclaredColumn`;
+  - `JsonbEntityMetadata.declaredColumns()` and `declaredColumn(path)`; the previous
+    six-argument constructor is kept;
+  - `JsonbSortBuilder.buildOrderByClause(sort, types, declaredColumnOf)`;
+  - `Tmf630JsonbColumns.copy(domainObject, row[, mapper])`, which fills the declared fields before
+    a JPA save, through the domain object's public accessors and the row's public setters;
+  - the bean `Tmf630JsonbColumnCheck.mismatches(rowType)`, which lists the rows where a column and
+    the payload differ.
+- **Writing.** A hand-written update sets the payload and the column in one statement. A trigger
+  cannot fill a partition key, and a generated column cannot be one (both measured).
+- **Tests:** `Tmf630JsonbDeclaredColumnIT` (column use, one partition scanned, the null-test rule,
+  the check), `DeclaredColumnParityIT`, and `JsonbDeclaredColumnTest`.
+
 ### Added: URL filters on a field of an open JSON type (`Map`, `JsonNode`), on JSONB and Mongo
 
 - **Additive.** Every request this changes answered the core's 400 before:

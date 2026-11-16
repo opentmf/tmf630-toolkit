@@ -289,13 +289,18 @@ public class JsonbPredicateFactory {
    * a stored {@code 0.1} for {@code ?f.contains=1}), and that text holds no {@code %}, {@code _} or
    * {@code !}.
    */
-  private static JsonbClause literalLike(String text, String operatorAndPattern, Object value) {
+  static JsonbClause literalLike(String text, String operatorAndPattern, Object value) {
     Object bound =
         value instanceof CharSequence || value instanceof Character
             ? JsonbStringEscape.escapeLikeValue(String.valueOf(value))
             : value;
     return JsonbClause.of(
         text + operatorAndPattern + " ESCAPE '" + JsonbStringEscape.LIKE_ESCAPE + "'", bound);
+  }
+
+  /** {@code value} as the JDBC driver binds it and the payload holds it (see {@link #bindable}). */
+  Object bindValue(Object value) {
+    return bindable(value);
   }
 
   /**
