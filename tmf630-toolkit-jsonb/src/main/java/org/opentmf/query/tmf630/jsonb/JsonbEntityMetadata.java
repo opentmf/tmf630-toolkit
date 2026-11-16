@@ -138,8 +138,8 @@ public record JsonbEntityMetadata(
       throw new Tmf630JsonbConfigurationException(
           rowType.getName()
               + "'s table name '"
-              + tableName
-              + "' is not a table reference: it has "
+              + tableName.replaceAll("\\R", "\\\\n")
+              + "' is not one table reference: it has "
               + tableProblem
               + ". Quote a name that needs it, as in @Table(name = \"\\\"My Table\\\"\").");
     }

@@ -101,7 +101,7 @@ class JsonbEntityMetadataTest {
   void aNameThatOnlyWorksByAccidentIsRefusedAtStartup() {
     assertThatThrownBy(() -> JsonbEntityMetadata.of(AliasedRow.class))
         .isInstanceOf(Tmf630JsonbConfigurationException.class)
-        .hasMessageContaining("table name 'message m' is not a table reference")
+        .hasMessageContaining("table name 'message m' is not one table reference")
         .hasMessageContaining("whitespace outside double quotes");
   }
 
@@ -143,6 +143,20 @@ class JsonbEntityMetadataTest {
   @Table(name = "\"dnms\".\"Message\"")
   @Tmf630JsonbBacked(domainType = MinimalDomain.class)
   static class QuotedPartsRow {
+    @Id private String id;
+    JsonNode payload;
+  }
+
+  @Test
+  void aLineBreakInTheNameIsShownEscapedInTheMessage() {
+    assertThatThrownBy(() -> JsonbEntityMetadata.of(LineBreakRow.class))
+        .isInstanceOf(Tmf630JsonbConfigurationException.class)
+        .hasMessageContaining("table name 'message\\nm' is not one table reference");
+  }
+
+  @Table(name = "message\nm")
+  @Tmf630JsonbBacked(domainType = MinimalDomain.class)
+  static class LineBreakRow {
     @Id private String id;
     JsonNode payload;
   }

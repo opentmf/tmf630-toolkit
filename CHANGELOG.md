@@ -48,12 +48,24 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 - The module writes an entity's table name into its SQL as it is, as since 3.0 (`@Table(name)`,
   else the class name in snake case). Startup now checks that it is a table reference
   (`JsonbTableReferenceTest`, `JsonbEntityMetadataTest`).
-- **Every form PostgreSQL accepts keeps working:** a quoted mixed-case name
-  (`"\"CommunicationMessage\""`), `$` or non-ASCII letters, and two or three dot-separated
-  parts, each quoted or not.
-- **Refused, by name, at startup:** whitespace, `;`, a comment marker (`--`, `/*`) or a
-  parenthesis outside double quotes. Such a name worked only by accident: `message m` was read by
-  a `SELECT` as a table with an alias, and refused by an `INSERT`.
+- **Every form PostgreSQL accepts keeps working**, proven by a write and a filtered read on
+  PostgreSQL (`Tmf630JsonbTableNameIT`):
+  - a quoted mixed-case name (`"\"CommunicationMessage\""`), also with a space or a dot inside the
+    quotes;
+  - `$` or non-ASCII letters;
+  - two or three dot-separated parts, each quoted or not;
+  - whitespace at the two ends of the name, written into the SQL unchanged.
+- **Refused, by name, at startup.** Each of these boots in 3.5.2 and is refused now on purpose,
+  because the name is not ONE table reference:
+  - whitespace inside the name, `;`, a comment marker (`--`, `/*`) or a parenthesis, outside double
+    quotes (`message m` was read by a `SELECT` as a table with an alias, and refused by an
+    `INSERT`);
+  - text directly after a closing double quote other than `.` (`"message"m`, an alias);
+  - a comma outside double quotes (`message,other`, a join);
+  - a double quote that is never closed (`"open`);
+  - `?` outside double quotes, which the JDBC driver reads as a parameter.
+- Still passing the check and failing at the first query, as in 3.5.2: backticks and names of four
+  or more dot-separated parts.
 - Not changed: `@Table(schema = …)` is still ignored; the connection's `search_path` decides the
   schema, or the name carries it.
 

@@ -1,17 +1,19 @@
 package org.opentmf.query.tmf630.jsonb;
 
 /**
- * Whether a row entity's table name can be written into the module's SQL as a table reference
+ * Whether a row entity's table name can be written into the module's SQL as ONE table reference
  * (since 3.6.0). The name comes from {@code @Table(name)} or the class name, never from a request,
  * so this is a startup check against a name that only works by accident, such as {@code message m},
- * which a {@code SELECT} reads as a table with an alias and an {@code INSERT} refuses.
+ * which a {@code SELECT} reads as a table with an alias and an {@code INSERT} refuses. The name is
+ * written into the SQL as it is; the check only reads it.
  *
  * <p>Compatible on purpose: every form PostgreSQL accepts as a table reference passes, among them a
  * quoted mixed-case name ({@code "CommunicationMessage"}), a {@code $} or a non-ASCII letter in an
- * unquoted name, and two or three dot-separated parts, each quoted or not. Only what cannot be part
- * of a table reference is refused, and only outside double quotes: whitespace, {@code ;}, a comment
- * marker ({@code --}, {@code /*}) and a parenthesis. A double quote with no closing quote opens
- * nothing, so what follows it counts as outside quotes.
+ * unquoted name, and dot-separated parts, each quoted or not. Whitespace at the two ends of the
+ * name passes, as the SQL around it reads it in 3.5.2. Refused, outside double quotes: whitespace
+ * inside the name, {@code ;}, {@code ,}, {@code ?} (the JDBC driver reads it as a parameter), a
+ * comment marker ({@code --}, {@code /*}) and a parenthesis; text directly after a closing double
+ * quote other than {@code .}; and a double quote that is never closed.
  */
 final class JsonbTableReference {
 
@@ -22,21 +24,25 @@ final class JsonbTableReference {
    * {@code null} when it is one.
    */
   static String problem(String name) {
+    String inner = name.strip();
     int i = 0;
-    while (i < name.length()) {
-      char c = name.charAt(i);
-      if (c == '"') {
-        int close = closingQuote(name, i);
-        if (close > i) {
-          i = close + 1;
-          continue;
+    while (i < inner.length()) {
+      if (inner.charAt(i) == '"') {
+        int close = closingQuote(inner, i);
+        if (close < 0) {
+          return "a double quote that is never closed";
         }
+        i = close + 1;
+        if (i < inner.length() && inner.charAt(i) != '.') {
+          return "text directly after a closing double quote";
+        }
+      } else {
+        String found = forbiddenAt(inner, i);
+        if (found != null) {
+          return found + " outside double quotes";
+        }
+        i++;
       }
-      String found = forbiddenAt(name, i);
-      if (found != null) {
-        return found + " outside double quotes";
-      }
-      i++;
     }
     return null;
   }
@@ -45,14 +51,13 @@ final class JsonbTableReference {
   private static int closingQuote(String name, int open) {
     int i = open + 1;
     while (i < name.length()) {
-      if (name.charAt(i) == '"') {
-        if (i + 1 < name.length() && name.charAt(i + 1) == '"') {
-          i += 2;
-          continue;
-        }
+      if (name.charAt(i) != '"') {
+        i++;
+      } else if (i + 1 < name.length() && name.charAt(i + 1) == '"') {
+        i += 2;
+      } else {
         return i;
       }
-      i++;
     }
     return -1;
   }
@@ -62,12 +67,16 @@ final class JsonbTableReference {
     if (Character.isWhitespace(c)) {
       return "whitespace";
     }
-    if (c == ';') {
-      return "';'";
-    }
-    if (c == '(' || c == ')') {
-      return "a parenthesis";
-    }
+    return switch (c) {
+      case ';' -> "';'";
+      case ',' -> "','";
+      case '?' -> "'?'";
+      case '(', ')' -> "a parenthesis";
+      default -> commentMarkerAt(name, i);
+    };
+  }
+
+  private static String commentMarkerAt(String name, int i) {
     if (i + 1 < name.length()) {
       String two = name.substring(i, i + 2);
       if (two.equals("--") || two.equals("/*")) {

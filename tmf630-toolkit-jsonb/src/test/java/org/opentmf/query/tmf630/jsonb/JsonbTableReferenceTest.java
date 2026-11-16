@@ -28,6 +28,12 @@ class JsonbTableReferenceTest {
         "\"dnms\".\"message\"",
         "dnms.\"Message\"",
         "catalog.dnms.message",
+        "a.b.c.d",
+        "MessageRow",
+        " message ",
+        "\tmessage\n",
+        " \"Message Row\" ",
+        "\"dot.row\"",
         "\"Cat\".\"Dnms\".\"Message\"",
         "`message`",
         "a/b",
@@ -46,7 +52,13 @@ class JsonbTableReferenceTest {
         Arguments.of("message/*x*/", "a comment marker outside double quotes"),
         Arguments.of("message(x)", "a parenthesis outside double quotes"),
         Arguments.of("\"dnms\".message m", "whitespace outside double quotes"),
-        Arguments.of("\"open;x", "';' outside double quotes"));
+        Arguments.of("\"open;x", "a double quote that is never closed"),
+        Arguments.of("\"open", "a double quote that is never closed"),
+        Arguments.of("\"message\"m", "text directly after a closing double quote"),
+        Arguments.of("\"dnms\".\"message\"m", "text directly after a closing double quote"),
+        Arguments.of("message,other", "',' outside double quotes"),
+        Arguments.of("message?", "'?' outside double quotes"),
+        Arguments.of(" message m ", "whitespace outside double quotes"));
   }
 
   @ParameterizedTest

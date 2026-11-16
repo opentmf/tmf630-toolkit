@@ -107,7 +107,7 @@ class JsonbDeclaredColumnTest {
   void aTableNameThatIsNoTableReferenceIsRefused() {
     assertThatThrownBy(() -> JsonbEntityMetadata.of(SpacedTableRow.class))
         .isInstanceOf(Tmf630JsonbConfigurationException.class)
-        .hasMessageContaining("table name 'message row' is not a table reference")
+        .hasMessageContaining("table name 'message row' is not one table reference")
         .hasMessageContaining("whitespace outside double quotes");
   }
 

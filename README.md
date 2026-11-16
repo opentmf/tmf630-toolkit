@@ -2306,15 +2306,27 @@ against it via Postgres SQL/JSON path — no ORM object graph, no lazy-load surf
 **The table name is written into the module's SQL as it is** (`@Table(name)`, else the class
 name in snake case). The module reads `name` only; `@Table(schema = …)` is ignored, so the
 connection's `search_path` decides the schema, or the name carries it (`dnms.product_order_row`).
-Since 3.6.0 startup checks that the name is a table reference. Every form PostgreSQL accepts
+Since 3.6.0 startup checks that the name is ONE table reference. Every form PostgreSQL accepts
 passes:
-- a quoted mixed-case name, `@Table(name = "\"ProductOrderRow\"")`;
+- a quoted mixed-case name, `@Table(name = "\"ProductOrderRow\"")`, also with a space or a dot
+  inside the quotes;
 - `$` or non-ASCII letters in an unquoted name;
-- two or three dot-separated parts, each quoted or not.
+- two or three dot-separated parts, each quoted or not;
+- whitespace at the two ends of the name, which is written into the SQL unchanged.
 
-Startup refuses only whitespace, `;`, a comment marker (`--`, `/*`) or a parenthesis outside
-double quotes. Such a name only worked by accident: `message m` is read by a `SELECT` as a table
-with an alias, and refused by an `INSERT`.
+The check does not ask the database. A name it passes can still fail at the first query, as in
+3.5.2: backticks (`` `message` ``, Hibernate's quoting, which PostgreSQL does not read) and four or
+more dot-separated parts.
+
+Startup refuses, outside double quotes:
+- whitespace inside the name;
+- `;`, `,` (a join), `?` (the JDBC driver reads it as a parameter);
+- a comment marker (`--`, `/*`);
+- a parenthesis.
+
+It also refuses text directly after a closing double quote other than `.` (`"message"m`, an alias),
+and a double quote that is never closed. Such a name only worked by accident: `message m` is read
+by a `SELECT` as a table with an alias, and refused by an `INSERT`.
 
 > **Jackson 3 required (since 3.1.0).** The module's executors (de)serialize payloads
 > through a **`tools.jackson.databind.ObjectMapper`** bean — Jackson 3, not the legacy
