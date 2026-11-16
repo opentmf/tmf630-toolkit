@@ -16,12 +16,12 @@ Silence is not compatibility: nothing below has a cell in this report.
 
 | run | toolkit | Spring properties | requests | seed ms | ask ms | wall s |
 | --- | --- | --- | --- | --- | --- | --- |
-| R0 | 3.5.2 | - | 7832 | 1069 | 10841 | 35 |
-| R1 | 3.6.0-SNAPSHOT | - | 7832 | 1727 | 18341 | 46 |
-| R2 | 3.6.0-SNAPSHOT | opentmf.tmf630.jsonb.equality=containment | 7832 | 1457 | 19457 | 48 |
-| R3 | 3.6.0-SNAPSHOT | opentmf.tmf630.jsonb.cast-mode=lenient | 7832 | 1133 | 13111 | 40 |
-| R4 | 3.6.0-SNAPSHOT | opentmf.tmf630.jsonb.equality=containment,opentmf.tmf630.jsonb.cast-mode=lenient | 7832 | 1139 | 10352 | 31 |
-| R5 | 3.6.0-SNAPSHOT | opentmf.tmf630.jsonb.apply-regex-max-length=true | 7832 | 1013 | 11442 | 32 |
+| R0 | 3.5.2 | - | 7832 | 1263 | 11719 | 41 |
+| R1 | 3.6.0-SNAPSHOT | - | 7832 | 1331 | 17710 | 49 |
+| R2 | 3.6.0-SNAPSHOT | opentmf.tmf630.jsonb.equality=containment | 7832 | 1982 | 17458 | 47 |
+| R3 | 3.6.0-SNAPSHOT | opentmf.tmf630.jsonb.cast-mode=lenient | 7832 | 1107 | 16157 | 47 |
+| R4 | 3.6.0-SNAPSHOT | opentmf.tmf630.jsonb.equality=containment,opentmf.tmf630.jsonb.cast-mode=lenient | 7832 | 1866 | 17693 | 52 |
+| R5 | 3.6.0-SNAPSHOT | opentmf.tmf630.jsonb.apply-regex-max-length=true | 7832 | 1685 | 17826 | 45 |
 
 ## The gate: R0 (release) against R1 (candidate, defaults)
 
