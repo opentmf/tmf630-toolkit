@@ -44,6 +44,11 @@ import org.opentmf.query.tmf630.jsonb.JsonbPathPredicates.SplitChild;
  * containment served by a GIN index on the payload under {@code opentmf.tmf630.jsonb.equality=
  * containment} (an opt-in since 3.6.0).
  *
+ * <p>Under {@code opentmf.tmf630.jsonb.querydsl-acceptance=true} (an opt-in since 3.6.0), every
+ * request is first put to the QueryDSL terminal's own checks ({@link JsonbQuerydslAcceptance}): what
+ * that terminal refuses is refused here with its message, before any SQL. By default nothing is
+ * checked, as in 3.5.2.
+ *
  * <p>Field paths resolve against the <em>domain type</em> (the payload POJO, not the row
  * entity) with the same {@link FieldPathResolver} the QueryDSL terminal uses — identical
  * unknown-field detection and {@code List}-element type resolution — and values coerce
@@ -78,6 +83,7 @@ public class Tmf630JsonbClauseBuilder {
   private final JsonbPathPredicates pathPredicates;
   private final JsonbJsonTypedPredicates jsonTyped;
   private final boolean applyRegexMaxLength;
+  private final JsonbQuerydslAcceptance acceptance;
 
   /** A clause builder that applies no regex length cap, as before 3.6.0. */
   public Tmf630JsonbClauseBuilder(
@@ -100,7 +106,8 @@ public class Tmf630JsonbClauseBuilder {
   /**
    * As the six-argument constructor; {@code applyRegexMaxLength} applies the core's
    * {@code regex.max-length} to {@code .regex} / {@code .regexi}
-   * ({@code opentmf.tmf630.jsonb.apply-regex-max-length}, an opt-in since 3.6.0).
+   * ({@code opentmf.tmf630.jsonb.apply-regex-max-length}, an opt-in since 3.6.0). No acceptance
+   * check runs, as before 3.6.0.
    */
   public Tmf630JsonbClauseBuilder(
       Tmf630FilterParser filterParser,
@@ -110,7 +117,33 @@ public class Tmf630JsonbClauseBuilder {
       JsonbPredicateFactory predicateFactory,
       JsonbSplitAwareFilterTranslator filterTranslator,
       boolean applyRegexMaxLength) {
+    this(
+        filterParser,
+        settings,
+        fieldPathResolver,
+        valueConverter,
+        predicateFactory,
+        filterTranslator,
+        applyRegexMaxLength,
+        JsonbQuerydslAcceptance.none());
+  }
+
+  /**
+   * As the seven-argument constructor; {@code acceptance} refuses what the QueryDSL terminal
+   * refuses before any SQL is emitted ({@code opentmf.tmf630.jsonb.querydsl-acceptance}, an opt-in
+   * since 3.6.0). {@link JsonbQuerydslAcceptance#none()} checks nothing, as before 3.6.0.
+   */
+  public Tmf630JsonbClauseBuilder(
+      Tmf630FilterParser filterParser,
+      Tmf630FilterSettings settings,
+      FieldPathResolver fieldPathResolver,
+      ValueConverter valueConverter,
+      JsonbPredicateFactory predicateFactory,
+      JsonbSplitAwareFilterTranslator filterTranslator,
+      boolean applyRegexMaxLength,
+      JsonbQuerydslAcceptance acceptance) {
     this.applyRegexMaxLength = applyRegexMaxLength;
+    this.acceptance = acceptance;
     this.filterParser = filterParser;
     this.settings = settings;
     this.fieldPathResolver = fieldPathResolver;
@@ -218,12 +251,14 @@ public class Tmf630JsonbClauseBuilder {
       return JsonbColumnPredicates.noValue(operator, column.column());
     }
     if (operator.isMultiValueOperator()) {
-      List<Object> values = new ArrayList<>();
+      List<Object> typedValues = new ArrayList<>();
       for (List<String> group : clause.valueGroups()) {
         for (String element : group) {
-          values.add(predicateFactory.bindValue(convert(element, field)));
+          typedValues.add(convert(element, field));
         }
       }
+      acceptance.checkValues(field, operator, typedValues);
+      List<Object> values = typedValues.stream().map(predicateFactory::bindValue).toList();
       return JsonbColumnPredicates.multi(operator, column.column(), field.fieldPath(), values);
     }
     JsonbClause perKey = null;
@@ -232,6 +267,7 @@ public class Tmf630JsonbClauseBuilder {
       for (String element : group) {
         Object value = convert(element, field);
         requireRegexWithinCap(operator, field, value);
+        acceptance.checkValue(field, operator, value);
         JsonbClause one =
             JsonbColumnPredicates.single(
                 operator, column.column(), predicateFactory.bindValue(value));
@@ -323,6 +359,7 @@ public class Tmf630JsonbClauseBuilder {
       }
     }
     TmfOperator operator = clause.operator();
+    acceptance.checkValues(resolvedField, operator, typedValues);
     Class<?> type = resolvedField.javaType();
     if (JsonTypedFields.isJsonTyped(type)) {
       List<JsonTypedValue> values =
@@ -367,6 +404,7 @@ public class Tmf630JsonbClauseBuilder {
     Object value = convert(element, field);
     TmfOperator operator = clause.operator();
     requireRegexWithinCap(operator, field, value);
+    acceptance.checkValue(field, operator, value);
     if (JsonTypedFields.isJsonTyped(field.javaType())) {
       return jsonTyped.single(
           operator, field.fieldPath(), field.javaType(), target.split(), (JsonTypedValue) value);
@@ -433,6 +471,7 @@ public class Tmf630JsonbClauseBuilder {
     if (expression.length() > settings.jsonPathMaxLength()) {
       throw new TmfFilteringException("jsonPath filter expression is too long.");
     }
+    acceptance.checkFilter(domainType, expression);
     return filterTranslator.translate(domainType, expression);
   }
 }

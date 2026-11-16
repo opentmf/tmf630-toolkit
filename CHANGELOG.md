@@ -404,6 +404,36 @@ All notable changes to `tmf630-toolkit` are documented in this file.
   `.datetime()`, `.keyvalue()`, …), `like_regex`, `starts with`, arithmetic, `$` references, and
   a negated group `!(…)` (`Tmf630JsonbFilterDefaultRefusalsIT`).
 
+### Added (JSONB, opt-in, default unchanged): refuse what the QueryDSL terminal refuses
+
+- **Opt-in; the default is unchanged.** `opentmf.tmf630.jsonb.querydsl-acceptance=true`. The
+  default, `false`, is the 3.5.2 behaviour: JSONB answers requests that JPA and Mongo refuse,
+  because it never asks the field's declared type (`Tmf630JsonbTypeGateDefaultOffIT`). A service
+  that does nothing sees no change.
+- Under the opt-in, JSONB puts every request to the core's own builders before it emits any SQL
+  and discards what they build. A request they refuse is the core's 400 with the core's message,
+  and not one statement reaches the database (`Tmf630JsonbTypeGateIT`,
+  `Tmf630JsonbGateBeforeDatabaseIT`). Refused under it:
+  - a string operator (`eqi`, `nei`, `contains`, `startswith`, `endswith`, `like` and their
+    case-insensitive forms) or `.regex` / `.regexi` on a number, date, boolean or enum field,
+    also inside an array;
+  - in `filter=`: `=~` on a non-string; a literal the declared type cannot read
+    (`@.quantity == 'abc'`); an ordered comparison with `null` (`@.quantity > null`);
+  - the regex cap, `opentmf.tmf630.attribute-filtering.regex.max-length`, on the URL and in
+    `filter=`;
+  - PostgreSQL-only jsonpath in `filter=`: `exists(…)`, the item methods, `like_regex`,
+    `starts with`, arithmetic and `$` references.
+- **A field of an open JSON type counts as any type.** `Object`, `Map` and `JsonNode` fields are
+  never refused for their type, at or below the field, so a search on a TMF characteristic's
+  `value` does not turn into a 400. The QueryDSL terminal refuses an ordering on an `Object`
+  field; JSONB under the opt-in does not.
+- Unchanged under the opt-in too: a negated group `!(…)` in `filter=` passes, with the comparisons
+  inside it checked; an unknown field inside `filter=` narrows to no rows and is never dropped.
+- **Core, additive:** `JsonPathFilterPredicateBuilder.elementMatch(collection, inner)`, a protected
+  hook for how an accepted array match is represented on a root that is not a JPA entity. The
+  default is Mongo's `ELEM_MATCH`, exactly as before, including the 400 when querydsl-mongodb is
+  absent (`JsonPathFilterPredicateBuilderElementMatchTest`).
+
 ### Added (JSONB, opt-in, default unchanged): the regex length cap
 
 - **Opt-in; the default is unchanged.** `opentmf.tmf630.jsonb.apply-regex-max-length=true`. The

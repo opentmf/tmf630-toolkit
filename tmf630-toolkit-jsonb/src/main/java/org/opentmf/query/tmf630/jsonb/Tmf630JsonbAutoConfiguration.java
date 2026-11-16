@@ -14,6 +14,7 @@ import org.opentmf.query.tmf630.filtering.Tmf630FilterRootLocator;
 import org.opentmf.query.tmf630.filtering.config.Tmf630FilterSettings;
 import org.opentmf.query.tmf630.filtering.predicate.FieldPathResolver;
 import org.opentmf.query.tmf630.filtering.predicate.JacksonEnumTextReader;
+import org.opentmf.query.tmf630.filtering.predicate.PredicateFactory;
 import org.opentmf.query.tmf630.filtering.predicate.ValueConverter;
 import org.opentmf.query.tmf630.paging.config.Tmf630PagingSettings;
 import org.slf4j.Logger;
@@ -261,6 +262,35 @@ public class Tmf630JsonbAutoConfiguration {
   @ConditionalOnBean(Tmf630FilterSettings.class)
   static class Tmf630JsonbUrlBindingConfiguration {
 
+    /**
+     * The QueryDSL terminal's acceptance decision for the JSONB terminal, an opt-in since 3.6.0
+     * ({@code opentmf.tmf630.jsonb.querydsl-acceptance=true}; without it no such bean exists and
+     * JSONB accepts what it accepted in 3.5.2): over the core's own {@code PredicateFactory} bean
+     * (its regex switch and cap), the same field resolution, value conversion and allowlist as the
+     * URL grammar.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(
+        prefix = "opentmf.tmf630.jsonb",
+        name = "querydsl-acceptance",
+        havingValue = "true")
+    JsonbQuerydslAcceptance tmf630JsonbQuerydslAcceptance(
+        Tmf630FilterSettings settings,
+        ObjectProvider<FieldAllowlistProvider> allowlistProvider,
+        ObjectProvider<FieldPathResolver> fieldPathResolver,
+        ObjectProvider<ValueConverter> valueConverter,
+        ObjectProvider<ObjectMapper> objectMapper,
+        ObjectProvider<PredicateFactory> corePredicateFactory) {
+      return new JsonbQuerydslAcceptance(
+          settings,
+          fieldPathResolver.getIfAvailable(FieldPathResolver::new),
+          valueConverterOrDefault(valueConverter, objectMapper),
+          corePredicateFactory.getIfAvailable(
+              () -> JsonbQuerydslAcceptance.predicateFactoryFor(settings)),
+          allowlistProvider.getIfAvailable(() -> rootEntity -> Set.of()));
+    }
+
     @Bean
     @ConditionalOnMissingBean
     Tmf630JsonbClauseBuilder tmf630JsonbClauseBuilder(
@@ -272,7 +302,8 @@ public class Tmf630JsonbAutoConfiguration {
         ObjectProvider<ObjectMapper> objectMapper,
         JsonbPredicateFactory predicateFactory,
         JsonbSplitAwareFilterTranslator filterTranslator,
-        Tmf630JsonbProperties properties) {
+        Tmf630JsonbProperties properties,
+        ObjectProvider<JsonbQuerydslAcceptance> acceptance) {
       Tmf630FilterParser parser =
           new Tmf630FilterParser(
               keyParser.getIfAvailable(
@@ -283,14 +314,20 @@ public class Tmf630JsonbAutoConfiguration {
           parser,
           settings,
           fieldPathResolver.getIfAvailable(FieldPathResolver::new),
-          valueConverter.getIfAvailable(
-              () ->
-                  new ValueConverter(
-                      new DefaultFormattingConversionService(),
-                      new JacksonEnumTextReader(objectMapper.getIfAvailable()))),
+          valueConverterOrDefault(valueConverter, objectMapper),
           predicateFactory,
           filterTranslator,
-          properties.isApplyRegexMaxLength());
+          properties.isApplyRegexMaxLength(),
+          acceptance.getIfAvailable(JsonbQuerydslAcceptance::none));
+    }
+
+    private static ValueConverter valueConverterOrDefault(
+        ObjectProvider<ValueConverter> valueConverter, ObjectProvider<ObjectMapper> objectMapper) {
+      return valueConverter.getIfAvailable(
+          () ->
+              new ValueConverter(
+                  new DefaultFormattingConversionService(),
+                  new JacksonEnumTextReader(objectMapper.getIfAvailable())));
     }
 
     @Bean
