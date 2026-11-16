@@ -27,6 +27,38 @@ class JsonbJsonPathTranslatorTest {
     assertThat(c.params()).containsExactly("$ ? (@.status == \"Pending\")");
   }
 
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "$[?(@.priority > 290)]",
+        "$[?(@.status != 'X')]",
+        "$[?(!(@.status == 'X'))]",
+        "$[?(@.status == 'X' || @.priority > 5)]",
+        "$[?(!@.status)]",
+        "$[?(@.items[?(@.priority > 5)])]"
+      })
+  @DisplayName(
+      "a filter the GIN index has no key for keeps the function form: a generic plan scans the"
+          + " table instead of reading the whole index")
+  void keylessFilterKeepsTheFunctionForm(String filter) {
+    JsonbClause c = translator.translate(filter);
+    assertThat(c.sql()).isEqualTo("jsonb_path_exists(payload, ?::jsonpath)");
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "$[?(@.status == 'X' || @.status == 'Y')]",
+        "$[?(@.status == 'X' && @.priority > 5)]",
+        "$[?(@.items[?(@.state == 'OPEN' && @.priority > 5)])]",
+        "$[?(@.items[?(@.state == 'OPEN')].priority == 3)]"
+      })
+  @DisplayName("a filter the GIN index has a key for is tested with the @? operator")
+  void keyedFilterUsesTheOperatorForm(String filter) {
+    JsonbClause c = translator.translate(filter);
+    assertThat(c.sql()).isEqualTo("payload @?? ?::jsonpath");
+  }
+
   @Test
   @DisplayName("bare wrapper form [?(...)] is accepted")
   void bareWrapper() {
