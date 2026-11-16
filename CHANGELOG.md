@@ -27,7 +27,7 @@ All notable changes to `tmf630-toolkit` are documented in this file.
   same answers, except where the payload's strict cast failed with a 500 and the column answers.
 - **Startup refuses** a path through a list, a non-scalar, an unknown path, a field of another
   type than the domain field's (an enum may be copied into a `String`), a primitive field, a
-  path declared twice, and a column or table name that is not a plain SQL identifier.
+  path declared twice, and a column name that is not a plain SQL identifier.
 - **New API:**
   - `@Tmf630JsonbColumn`;
   - `JsonbDeclaredColumn`;
@@ -42,6 +42,32 @@ All notable changes to `tmf630-toolkit` are documented in this file.
   cannot fill a partition key, and a generated column cannot be one (both measured).
 - **Tests:** `Tmf630JsonbDeclaredColumnIT` (column use, one partition scanned, the null-test rule,
   the check), `DeclaredColumnParityIT`, and `JsonbDeclaredColumnTest`.
+
+### Changed (JSONB): startup refuses a table name that is no table reference
+
+- The module writes an entity's table name into its SQL as it is, as since 3.0 (`@Table(name)`,
+  else the class name in snake case). Startup now checks that it is a table reference
+  (`JsonbTableReferenceTest`, `JsonbEntityMetadataTest`).
+- **Every form PostgreSQL accepts keeps working**, proven by a write and a filtered read on
+  PostgreSQL (`Tmf630JsonbTableNameIT`):
+  - a quoted mixed-case name (`"\"CommunicationMessage\""`), also with a space or a dot inside the
+    quotes;
+  - `$` or non-ASCII letters;
+  - two or three dot-separated parts, each quoted or not;
+  - whitespace at the two ends of the name, written into the SQL unchanged.
+- **Refused, by name, at startup.** Each of these boots in 3.5.2 and is refused now on purpose,
+  because the name is not ONE table reference:
+  - whitespace inside the name, `;`, a comment marker (`--`, `/*`) or a parenthesis, outside double
+    quotes (`message m` was read by a `SELECT` as a table with an alias, and refused by an
+    `INSERT`);
+  - text directly after a closing double quote other than `.` (`"message"m`, an alias);
+  - a comma outside double quotes (`message,other`, a join);
+  - a double quote that is never closed (`"open`);
+  - `?` outside double quotes, which the JDBC driver reads as a parameter.
+- Still passing the check and failing at the first query, as in 3.5.2: backticks and names of four
+  or more dot-separated parts.
+- Not changed: `@Table(schema = …)` is still ignored; the connection's `search_path` decides the
+  schema, or the name carries it.
 
 ### Added: URL filters on a field of an open JSON type (`Map`, `JsonNode`), on JSONB and Mongo
 
