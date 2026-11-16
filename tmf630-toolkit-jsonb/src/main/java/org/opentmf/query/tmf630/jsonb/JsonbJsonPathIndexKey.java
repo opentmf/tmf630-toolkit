@@ -124,14 +124,14 @@ final class JsonbJsonPathIndexKey {
     }
     if (c == '"') {
       stringLiteral();
-      return Literal.INSTANCE;
+      return new Literal();
     }
     if (c == '-' || Character.isDigit(c)) {
       number();
-      return Literal.INSTANCE;
+      return new Literal();
     }
     if (acceptWord("true") || acceptWord("false") || acceptWord("null")) {
-      return Literal.INSTANCE;
+      return new Literal();
     }
     throw new Unrecognised();
   }
@@ -284,8 +284,7 @@ final class JsonbJsonPathIndexKey {
   }
 
   /** A string, number, boolean or null literal. */
-  private enum Literal implements Operand {
-    INSTANCE;
+  private record Literal() implements Operand {
 
     @Override
     public boolean keyedAgainst(Operand other) {
