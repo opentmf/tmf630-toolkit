@@ -253,9 +253,9 @@ public final class JsonbQuerydslAcceptance {
   }
 
   /**
-   * Whether a field declared as {@code type} is of an open JSON type ({@link Object}, a {@code Map},
-   * a {@code JsonNode}): it may hold any JSON value, so it counts as any type and the check leaves it
-   * alone.
+   * Whether a field declared as {@code type} is of an open JSON type ({@link Object}, a
+   * {@code Map}, a {@code JsonNode}): it may hold any JSON value, so it counts as any type and the
+   * check leaves it alone.
    */
   static boolean isOpenJsonType(Class<?> type) {
     return type == Object.class || JsonTypedFields.isJsonTyped(type);

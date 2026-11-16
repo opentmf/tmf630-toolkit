@@ -311,14 +311,14 @@ public class Tmf630JsonbAutoConfiguration {
               settings,
               allowlistProvider.getIfAvailable(() -> rootEntity -> Set.of()));
       return new Tmf630JsonbClauseBuilder(
-          parser,
-          settings,
-          fieldPathResolver.getIfAvailable(FieldPathResolver::new),
-          valueConverterOrDefault(valueConverter, objectMapper),
-          predicateFactory,
-          filterTranslator,
-          properties.isApplyRegexMaxLength(),
-          acceptance.getIfAvailable(JsonbQuerydslAcceptance::none));
+              parser,
+              settings,
+              fieldPathResolver.getIfAvailable(FieldPathResolver::new),
+              valueConverterOrDefault(valueConverter, objectMapper),
+              predicateFactory,
+              filterTranslator,
+              properties.isApplyRegexMaxLength())
+          .withQuerydslAcceptance(acceptance.getIfAvailable(JsonbQuerydslAcceptance::none));
     }
 
     private static ValueConverter valueConverterOrDefault(

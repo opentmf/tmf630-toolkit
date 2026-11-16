@@ -45,9 +45,9 @@ import org.opentmf.query.tmf630.jsonb.JsonbPathPredicates.SplitChild;
  * containment} (an opt-in since 3.6.0).
  *
  * <p>Under {@code opentmf.tmf630.jsonb.querydsl-acceptance=true} (an opt-in since 3.6.0), every
- * request is first put to the QueryDSL terminal's own checks ({@link JsonbQuerydslAcceptance}): what
- * that terminal refuses is refused here with its message, before any SQL. By default nothing is
- * checked, as in 3.5.2.
+ * request is first put to the QueryDSL terminal's own checks ({@link JsonbQuerydslAcceptance}):
+ * what that terminal refuses is refused here with its message, before any SQL. By default nothing
+ * is checked, as in 3.5.2.
  *
  * <p>Field paths resolve against the <em>domain type</em> (the payload POJO, not the row
  * entity) with the same {@link FieldPathResolver} the QueryDSL terminal uses — identical
@@ -117,33 +117,8 @@ public class Tmf630JsonbClauseBuilder {
       JsonbPredicateFactory predicateFactory,
       JsonbSplitAwareFilterTranslator filterTranslator,
       boolean applyRegexMaxLength) {
-    this(
-        filterParser,
-        settings,
-        fieldPathResolver,
-        valueConverter,
-        predicateFactory,
-        filterTranslator,
-        applyRegexMaxLength,
-        JsonbQuerydslAcceptance.none());
-  }
-
-  /**
-   * As the seven-argument constructor; {@code acceptance} refuses what the QueryDSL terminal
-   * refuses before any SQL is emitted ({@code opentmf.tmf630.jsonb.querydsl-acceptance}, an opt-in
-   * since 3.6.0). {@link JsonbQuerydslAcceptance#none()} checks nothing, as before 3.6.0.
-   */
-  public Tmf630JsonbClauseBuilder(
-      Tmf630FilterParser filterParser,
-      Tmf630FilterSettings settings,
-      FieldPathResolver fieldPathResolver,
-      ValueConverter valueConverter,
-      JsonbPredicateFactory predicateFactory,
-      JsonbSplitAwareFilterTranslator filterTranslator,
-      boolean applyRegexMaxLength,
-      JsonbQuerydslAcceptance acceptance) {
     this.applyRegexMaxLength = applyRegexMaxLength;
-    this.acceptance = acceptance;
+    this.acceptance = JsonbQuerydslAcceptance.none();
     this.filterParser = filterParser;
     this.settings = settings;
     this.fieldPathResolver = fieldPathResolver;
@@ -152,6 +127,29 @@ public class Tmf630JsonbClauseBuilder {
     this.filterTranslator = filterTranslator;
     this.pathPredicates = new JsonbPathPredicates(predicateFactory);
     this.jsonTyped = new JsonbJsonTypedPredicates(predicateFactory.extractor().column());
+  }
+
+  private Tmf630JsonbClauseBuilder(
+      Tmf630JsonbClauseBuilder base, JsonbQuerydslAcceptance acceptance) {
+    this.filterParser = base.filterParser;
+    this.settings = base.settings;
+    this.fieldPathResolver = base.fieldPathResolver;
+    this.valueConverter = base.valueConverter;
+    this.predicateFactory = base.predicateFactory;
+    this.filterTranslator = base.filterTranslator;
+    this.pathPredicates = base.pathPredicates;
+    this.jsonTyped = base.jsonTyped;
+    this.applyRegexMaxLength = base.applyRegexMaxLength;
+    this.acceptance = acceptance;
+  }
+
+  /**
+   * This builder with {@code acceptance}, which refuses what the QueryDSL terminal refuses before
+   * any SQL is emitted ({@code opentmf.tmf630.jsonb.querydsl-acceptance}, an opt-in since 3.6.0).
+   * {@link JsonbQuerydslAcceptance#none()} checks nothing, as before 3.6.0.
+   */
+  public Tmf630JsonbClauseBuilder withQuerydslAcceptance(JsonbQuerydslAcceptance acceptance) {
+    return new Tmf630JsonbClauseBuilder(this, acceptance);
   }
 
   /**

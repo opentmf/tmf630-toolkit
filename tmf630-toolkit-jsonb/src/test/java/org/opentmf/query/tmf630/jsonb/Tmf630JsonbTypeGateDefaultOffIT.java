@@ -16,11 +16,12 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.test.context.ActiveProfiles;
 
 /**
- * A service that does nothing sees nothing of the type gate: without {@code
- * opentmf.tmf630.jsonb.querydsl-acceptance=true} no {@link JsonbQuerydslAcceptance} bean exists, and
- * the requests the opt-in refuses ({@link Tmf630JsonbTypeGateIT}) are still built into SQL, as in
- * 3.5.2. The cells are the ones the 3.6.0 compatibility ledger lists as answered by 3.5.2; the
- * answers themselves are the compatibility report's to compare, so they are not repeated here.
+ * A service that does nothing sees nothing of the type gate: without
+ * {@code opentmf.tmf630.jsonb.querydsl-acceptance=true} no {@link JsonbQuerydslAcceptance} bean
+ * exists, and the requests the opt-in refuses ({@link Tmf630JsonbTypeGateIT}) are still built
+ * into SQL, as in 3.5.2. The cells are the ones the 3.6.0 compatibility ledger lists as answered by
+ * 3.5.2; the answers themselves are the compatibility report's to compare, so they are not repeated
+ * here.
  *
  * <p>The settings are the opt-in IT's, without the opt-in: the regex cap is 8 there too, so a
  * pattern of 11 characters passing here shows that the cap is not applied by default either.
