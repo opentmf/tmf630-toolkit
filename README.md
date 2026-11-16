@@ -484,9 +484,14 @@ value is a plain character. `like` and `likei` take a pattern, in which `%` and 
 
 #### What `ne`, `nin` and `!=` mean on each backend
 
-The negative operators do not mean the same thing on every backend when the value is missing or
-null, or when the path crosses an array. Mongo reads "not equal" as "every row `eq` would not
-return"; SQL (JPA, and the JSONB URL operators) as "a value is present and differs".
+The negative operators (`ne`, `nei`, `nin`, and `!=` in `filter=`) do not mean the same thing on
+every backend when the value is missing or null, or when the path crosses an array:
+- Mongo reads "not equal" as "every row `eq` would not return";
+- SQL (JPA, and the JSONB URL operators) reads it as "a value is present and differs".
+
+Each backend keeps its released meaning. This is decided, not left open (ledger #4247): there is
+no unification and no setting. A row without the field is matched on Mongo and not on JSONB or
+JPA. Through a list, Mongo answers "no element equals" and the other two "some element differs".
 
 | Request | Mongo | JPA | JSONB |
 | --- | --- | --- | --- |
@@ -2371,7 +2376,39 @@ returns the same result set as a QueryDSL-terminal endpoint. Where JSONB answers
 - `ne` / `nin` / `!=` (see "What `ne`, `nin` and `!=` mean on each backend");
 - an unknown field inside `filter=` matches nothing on JSONB, where the QueryDSL terminal drops
   it under `IGNORE`;
-- `regex.max-length` applies on JSONB only under the opt-in below.
+- `regex.max-length` applies on JSONB only under the opt-in below;
+- a value stored in another JSON type than the field declares is read by its text or the field's
+  cast (lenient), where Mongo compares type-exactly (see the next section).
+
+#### A value of another JSON type: lenient on JSONB, by intention
+
+The JSONB backend reads a stored value of another JSON type than the field declares, by its text
+or the field's cast. This is intended. A general-purpose library does not drop a row because a
+producer wrote `"2.5"` where the model says a number.
+
+Measured on PostgreSQL 18.1 with the default settings, the same as in 3.5.2:
+- `d.eq=2.5` on a `BigDecimal` field finds the number `2.50` and the string `"2.5"`;
+- `l.in=1,5` on a `Long` field finds `1`, `5` and the string `"5"`;
+- `d.gt=2` finds `2.50`, `9.25` and the string `"2.5"`;
+- on an `Object` field the value is compared as text, so an ordering follows text order: `o.gt=10`
+  finds `7`.
+
+The exceptions:
+- **Type-exact equality is the opt-in `equality=containment`.** It covers `EQ` and `IN` only, and
+  the GIN index serves it: `d.eq=2.5` then finds only `2.50`. Ranges stay lenient.
+- **`filter=` compares as SQL/JSON path does.** `$[?(@.l == 5)]` does not find `"5"`, as in 3.5.2.
+- **One unreadable value fails the field under the default `cast-mode=strict`.** An `Integer`
+  field that holds `5.0` makes every typed filter and sort on that field, outside arrays, answer a
+  500 (`invalid input syntax for type bigint: "5.0"`), as in 3.5.2. `cast-mode=lenient` avoids the
+  500: `5.0` is then no match, because `bigint` does not read it, and `"5"` still matches `5`.
+
+**Mongo is type-exact, as released.** The same requests on Mongo:
+- `d.eq=2.5` finds only `2.50`;
+- `l.in=1,5` finds only `1` and `5`;
+- `d.gt=2` finds only `2.50` and `9.25`.
+
+Numbers compare by value (`i.eq=5` finds `5` and `5.0`), never with strings. A lenient Mongo would
+be an opt-in, built when a project asks for it.
 
 #### Behaviour switches (since 3.6.0)
 
@@ -2391,6 +2428,90 @@ a value only in its type's JSON or ISO-8601 form (`5`, `-1.5e3`, `true`, `2025-0
 `z`. This needs nothing beyond PostgreSQL 15.
 
 The module needs PostgreSQL 15 or later; 16 or later with `cast-mode=lenient`.
+
+#### Indexes for a JSONB-backed entity
+
+The toolkit creates no index; the service declares its indexes in its own migrations. Two kinds
+serve the toolkit's queries, each only through the exact form the toolkit sends.
+
+**A GIN index on the payload** serves `filter=`, and the URL equalities under
+`equality=containment`:
+
+```sql
+CREATE INDEX product_order_payload_gin ON product_order USING gin (payload jsonb_path_ops);
+```
+
+- **A `filter=` with an equality in every `||` branch** is sent as `payload @? ?::jsonpath`, and
+  the index serves it. Inside `&&`, one equality is enough. Examples:
+  - `@.state == 'x'`;
+  - `@.state == 'x' || @.state == 'y'`;
+  - `@.state == 'x' && @.priority > 5`;
+  - an array correlation on an equality, `@.characteristic[?(@.name == 'k3' && @.value == 'v')]`.
+- **Every other `filter=` is sent as the function `jsonb_path_exists(payload, ?::jsonpath)`.**
+  The index never serves the function, so such a filter scans the table, as every `filter=` did
+  before 3.6.0. This covers a filter with no equality (ranges, `!=`, `=~`, null tests) and a `||`
+  with a branch without one.
+  - **Why it matters.** PostgreSQL plans a server-prepared statement generically after its first
+    five executions, and that plan cannot see the path. In the operator form it would always pick
+    the index, read all of it and recheck every row.
+  - **"Surely keyed" is deliberately narrow.** The toolkit sends the operator only for an equality
+    between a path made of plain keys, `[*]` and filters, and a string, number, boolean or null
+    literal, combined by the `&&` / `||` rule above, or inside `exists(…)`.
+  - **Called keyless on purpose**, although PostgreSQL might find a key: a positional subscript
+    (`@.items[3].state == 'x'`), an item method (`@.state.type() == 'string'`), a negation
+    (`!(@.state == 'x')`), a path compared with a path, and any shape the reader does not know.
+    Each costs a scan, as in 3.5.2; none can read the whole index.
+- **Under `equality=containment`, URL `EQ` and `IN`** on an object path or through an array are
+  sent as `payload @> ?::jsonb`, and the index serves them.
+- **Never served by the GIN index:** URL equality under the default `equality=extraction`, every
+  other URL operator, and sorts. For those, use an expression index (below).
+
+**An expression index per hot field** serves the URL operators under the defaults, and sorts. It
+must be on exactly the expression the toolkit sends, cast included:
+
+```sql
+-- a String field: a one-segment path is payload->>'f', a longer one payload#>>'{a,b,c}'
+CREATE INDEX product_order_city ON product_order ((payload#>>'{receiver,postalAddress,city}'));
+-- an Integer or Long field: the bigint cast (BigDecimal and Double: ::numeric; Boolean: ::boolean)
+CREATE INDEX product_order_priority ON product_order (((payload->>'priority')::bigint));
+```
+
+What such an index serves (measured on PostgreSQL 18.1, 200,000 rows, under PostgreSQL's default
+plan cache):
+
+- **Served:** equality and `in`; a sort on the field, ascending or descending; a range (`gt`,
+  `lt`, …) on a typed field.
+  - A COUNT of a range uses the index in every plan.
+  - A paged range uses it when PostgreSQL plans for the value. After five executions of a
+    server-prepared statement, its generic plan may prefer to read the table until the page is
+    full.
+- **Served by a variant of the index:**
+  - `startswith`, `like` with a fixed prefix and a `regex` anchored on a fixed prefix
+    (`^City42`) need the index created with `text_pattern_ops`:
+    `((payload#>>'{receiver,postalAddress,city}') text_pattern_ops)`. That index also serves
+    equality.
+  - `eqi` needs an index on `LOWER(<the expression>)`.
+- **Never served:** `ne`, `nin`, `contains`, `endswith`, the null tests, and a regex without a
+  fixed prefix.
+- **A date or time field cannot have such an index.** PostgreSQL refuses an index on the toolkit's
+  `::date`, `::time`, `::timestamp` and `::timestamptz` casts of text ("functions in index
+  expression must be marked IMMUTABLE"), so a range or a sort on a date field scans the table.
+  Equality on a date field scans too: it keeps the extraction even under `equality=containment`.
+- Under `cast-mode=lenient` no expression index serves a typed range (the guarded cast is not
+  immutable either).
+
+**What the indexes cost.** Measured on PostgreSQL 18.1 with 200,000 small documents (a table of
+87 MB): the `GIN (payload jsonb_path_ops)` index is 17 MB, and one expression index on a short
+field is about 1.4 MB. Every index is maintained on every write of the payload.
+
+**Check a deployment.** Run `EXPLAIN (ANALYZE, BUFFERS)` on the SQL a real request sends, with its
+parameters. The database's statement log shows both (`log_statement = 'all'`), and the
+`auto_explain` module logs the plans production gets.
+- A `filter=` with an equality must show a `Bitmap Index Scan` on the GIN index.
+- A URL filter or a sort on an indexed field must show an `Index Scan` or a `Bitmap Index Scan` on
+  that field's index.
+- To see what a server-prepared statement gets after its fifth execution, run it six times in one
+  session with `PREPARE` / `EXECUTE` before the `EXPLAIN EXECUTE`.
 
 #### Level 2 — list endpoint via the read executor (programmatic control)
 
@@ -2447,8 +2568,10 @@ The JSONB backend supports the full JsonPath grammar for `filter=` and `sort=` �
 correlation (`@.characteristic[?(@.name == 'price')]`), positional index (`@.items[3].state`),
 `length()`, regex (`=~ /pattern/i` when `regex.enabled=true`), and correlated sort
 (`sort=$.characteristic[?(@.name == 'price')].value`) — all lowered to native SQL/JSON path:
-`filter=` as the `payload @? ?::jsonpath` operator, which a GIN index on the payload can serve
-(an array correlation as `exists(@.characteristic[*] ? (...))`), and sorts as
+`filter=` as the `payload @? ?::jsonpath` operator, which a GIN index on the payload can serve,
+when the filter has an equality in every `||` branch, and otherwise as the function
+`jsonb_path_exists(payload, ?::jsonpath)` (see "Indexes for a JSONB-backed entity"; an array
+correlation is `exists(@.characteristic[*] ? (...))`), and sorts as
 `jsonb_path_query` calls. No aggregation stage, no cross-table joins.
 
 For SQL fragments the toolkit doesn't cover (custom scoring, materialised-view lookups),
@@ -3849,6 +3972,47 @@ repository. `install` writes the built `-SNAPSHOT` artifacts to `~/.m2/repositor
 making them resolvable from downstream projects on the same machine. `verify` runs all
 tests and integration tests but stops before installation, so a downstream project
 building against the current `-SNAPSHOT` would not find the artifacts.
+
+### JSONB combination suite
+
+`Tmf630JsonbCombinationIT` (module `tmf630-toolkit-jsonb`) is a generated suite of the JSONB
+filter, sort and count paths on a real PostgreSQL. Its axes:
+- the declared type: String, the integer and decimal types, Boolean, LocalDate, OffsetDateTime,
+  a plain and a `@JsonValue` enum, Object, Map, and lists of strings and of objects;
+- the JSON value stored: the declared type, another type, unreadable text, JSON null, or the key
+  absent;
+- the operator;
+- the entry, a URL operator or `filter=`;
+- the position: top level, a nested object, inside an array, an array of arrays, a split
+  collection;
+- sorts in both directions on each field.
+
+Each cell is judged against an oracle computed in Java from the seeded JSON, and checked to answer
+rows or the toolkit's own 400, never a driver error. It runs twice:
+- under the defaults;
+- with every JSONB opt-in on (`Tmf630JsonbCombinationOptInsIT`).
+
+Measured 2026-11-15 on PostgreSQL 18.1, with the cells counted as the suite reports them:
+
+| run | cells | seconds for the cells | expected findings |
+| --- | --- | --- | --- |
+| defaults | 3,584 | 7.5 | 791 |
+| opt-ins | 3,584 | 5.8 | 749 |
+
+- The two classes take 23 s together, container start included, and the Maven call alone 27 s.
+- 968 more combinations per run are skipped by a named rule, such as an operator that has no
+  `filter=` form, or a sort order that is undefined.
+- The expected findings, each with its reason, are listed in
+  `src/test/resources/combination/expected-<mode>.tsv`: behaviour held for a ruling, kept by one,
+  or the default of a switch.
+- An unexpected finding fails the run. So does a listed finding that no longer fails as listed.
+- Each run writes `target/combination/<mode>/findings.md`.
+
+```bash
+JAVA_HOME=/usr/lib64/openjdk-17 mvn -pl tmf630-toolkit-jsonb verify -Dtest=none \
+  -Dsurefire.failIfNoSpecifiedTests=false \
+  -Dit.test='Tmf630JsonbCombinationIT,Tmf630JsonbCombinationOptInsIT'
+```
 
 ### Compatibility report against the released version
 

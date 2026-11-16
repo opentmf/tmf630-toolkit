@@ -59,16 +59,22 @@ All notable changes to `tmf630-toolkit` are documented in this file.
     equality is enough. That covers `@.a == 'x'`, `@.a == 'x' || @.a == 'y'`,
     `@.a == 'x' && @.n > 5`, and an array correlation on an equality. The plan shows a Bitmap
     Index Scan.
-  - The index has no key for a filter with no equality (ranges only, `=~`, `!(...)`), nor for
-    one where a `||` branch has none (`@.a == 'x' || @.n > 5`). With a plan made for the
-    actual path, PostgreSQL scans the table, as before.
-  - With a generic plan, PostgreSQL cannot see the path, so it always picks the index. It
-    switches a server-prepared statement to a generic plan after its first five executions,
-    and every `filter=`-only query on a table shares one SQL text. Such a filter then reads the
-    whole index and rechecks every row. Measured on 20,000 rows: 903 buffers, against 690 for
-    the scan.
+  - The index has no key for a filter with no equality (ranges only, `!=`, `=~`, `!(...)`), nor
+    for one where a `||` branch has none (`@.a == 'x' || @.n > 5`). Such a filter keeps the
+    function form `jsonb_path_exists(payload, ?::jsonpath)`, and PostgreSQL scans the table, as
+    before 3.6.0.
+  - This matters under a generic plan. PostgreSQL switches a server-prepared statement to a
+    generic plan after its first five executions, and such a plan cannot see the path. In the
+    operator form it would always pick the index, read all of it and recheck every row. Measured
+    under a generic plan on 20,000 rows (PostgreSQL 18.1, `Tmf630JsonbKeylessFilterGenericPlanIT`):
+    - a keyless filter read 1,370 buffers in the operator form, and reads 1,112 in the function
+      form, which is exactly the plain scan's 1,112;
+    - a filter with an equality keeps its index scan, at 9 to 49 buffers.
+  - The translator decides by reading the path it emits, by the rules PostgreSQL extracts index
+    keys with, and errs one way only: a filter it is not sure about (a positional `[N]`, an item
+    method such as `.type()`, a negation) keeps the function form.
   - Both forms return the same rows. No adopter action is needed: an existing GIN index starts
-    being used, and nothing else changes.
+    being used for a filter with an equality, and nothing else changes.
 - **What the operator answers differently.** The operator suppresses errors that the function
   raises. The path the toolkit emits is always the lax `$ ? (<filter>)`, and inside that filter
   both forms already treat an error as no match. Measured, with the same answer in both forms:
@@ -337,6 +343,25 @@ All notable changes to `tmf630-toolkit` are documented in this file.
   value; the backends differ, and the table says how.
 - README: JSONB's `filter=` accepts PostgreSQL's own jsonpath (above).
 - Design: §5 (equality), §6 (the cast mode) and §10 (PostgreSQL 15, 16 for lenient).
+- README: "Indexes for a JSONB-backed entity". It says which query forms a
+  `GIN (payload jsonb_path_ops)` index serves and which an expression index on the exact
+  expression serves, what each costs, and how to check a deployment. Measured on PostgreSQL 18.1
+  and pinned by `Tmf630JsonbExpressionIndexGuideIT`.
+  - **A date or time field cannot have an expression index.** PostgreSQL refuses an index on
+    the toolkit's text casts to `date`, `time`, `timestamp` and `timestamptz`, because they are
+    not immutable. A range or a sort on such a field scans the table, as in every 3.x release.
+  - The design's §2.2 had recommended exactly such an index
+    (`((payload->>'creationDate')::timestamptz)`), which PostgreSQL refuses. §2.1, §2.2 and §5
+    are corrected to what the code emits.
+- README: the JSONB combination suite, with its size and run time.
+- README: "What `ne`, `nin` and `!=` mean on each backend" now states that each backend keeps its
+  released meaning, by decision (ledger #4247): there is no unification and no setting.
+- README: "A value of another JSON type: lenient on JSONB, by intention" (ledger #4246). JSONB
+  reads a value stored in another JSON type than the field declares, by its text or cast, as in
+  3.5.2, and this is now documented as intended rather than left unexplained. The section gives
+  measured examples, says that type-exact equality is the opt-in `equality=containment`, and
+  says that Mongo compares type-exactly, as released. It also notes that `cast-mode=lenient`
+  avoids the 500 that the default `strict` answers on an `Integer` field holding `5.0`.
 
 ## [3.5.2] - 2026-11-04
 
