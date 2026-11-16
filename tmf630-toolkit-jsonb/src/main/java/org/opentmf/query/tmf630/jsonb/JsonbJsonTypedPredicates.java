@@ -37,7 +37,7 @@ import org.opentmf.query.tmf630.jsonb.JsonbPathPredicates.SplitChild;
  */
 final class JsonbJsonTypedPredicates {
 
-  private static final Pattern SEGMENT = Pattern.compile("([A-Za-z_]\\w*)((?:\\[\\d+])*)");
+  private static final Pattern SEGMENT = Pattern.compile("([A-Za-z_]\\w*+)((?:\\[\\d++])*+)");
   private static final String REGEX_SPECIALS = "\\^$.|?*+()[]{}";
 
   private final String payloadColumn;
@@ -200,10 +200,14 @@ final class JsonbJsonTypedPredicates {
    */
   static String likeToRegex(String pattern) {
     StringBuilder out = new StringBuilder("^");
+    boolean escaped = false;
     for (int i = 0; i < pattern.length(); i++) {
       char c = pattern.charAt(i);
-      if (c == '\\' && i + 1 < pattern.length()) {
-        out.append(quote(String.valueOf(pattern.charAt(++i))));
+      if (escaped) {
+        out.append(quote(String.valueOf(c)));
+        escaped = false;
+      } else if (c == '\\' && i + 1 < pattern.length()) {
+        escaped = true;
       } else if (c == '%') {
         out.append(".*");
       } else if (c == '_') {

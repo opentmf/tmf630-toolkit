@@ -162,10 +162,9 @@ class JsonbJsonTypedPredicatesTest {
 
   @Test
   void aSegmentThatIsNoIdentifierKeepsTheConvertersRefusal() {
-    assertThatThrownBy(
-            () ->
-                predicates.single(
-                    TmfOperator.EQ, "m.a-b", Map.class, null, JsonTypedValue.read("1")))
+    JsonTypedValue one = JsonTypedValue.read("1");
+
+    assertThatThrownBy(() -> predicates.single(TmfOperator.EQ, "m.a-b", Map.class, null, one))
         .isInstanceOf(TmfFilteringException.class)
         .hasMessage("Field \"m.a-b\" has type Map which cannot be converted from a String.");
   }
