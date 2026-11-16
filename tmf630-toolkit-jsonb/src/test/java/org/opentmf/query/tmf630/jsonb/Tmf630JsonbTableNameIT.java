@@ -17,6 +17,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.opentmf.query.tmf630.paging.TmfSort;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.jdbc.BadSqlGrammarException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import tools.jackson.databind.JsonNode;
@@ -122,7 +123,9 @@ class Tmf630JsonbTableNameIT {
                 jdbc.sql("INSERT INTO m\"x\" (id, payload) VALUES (?, ?::jsonb)")
                     .params("B", "{\"name\":\"bravo\"}")
                     .update())
-        .hasMessageContaining("syntax error");
+        .isInstanceOf(BadSqlGrammarException.class)
+        .rootCause()
+        .hasMessageContaining("syntax error at or near \"\"x\"\"");
     assertThatThrownBy(() -> JsonbEntityMetadata.of(TextBeforeQuoteRow.class))
         .isInstanceOf(Tmf630JsonbConfigurationException.class)
         .hasMessageContaining("text directly before an opening double quote");
