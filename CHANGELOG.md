@@ -26,8 +26,8 @@ All notable changes to `tmf630-toolkit` are documented in this file.
   sorts of every scalar kind, at the top level and nested, of a declared twin. It requires the
   same answers, except where the payload's strict cast failed with a 500 and the column answers.
 - **Startup refuses** a path through a list, a non-scalar, an unknown path, a field of another
-  type than the domain field's (an enum may be copied into a `String`), a primitive field, and a
-  path declared twice.
+  type than the domain field's (an enum may be copied into a `String`), a primitive field, a
+  path declared twice, and a column or table name that is not a plain SQL identifier.
 - **New API:**
   - `@Tmf630JsonbColumn`;
   - `JsonbDeclaredColumn`;

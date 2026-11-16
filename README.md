@@ -2446,7 +2446,10 @@ public class CommunicationMessageRow {
   be copied into a `String`). Startup refuses:
   - a path through a list;
   - a primitive field (`int`), which cannot hold the NULL that an absent field must be (use
-    `Integer`).
+    `Integer`);
+  - a column name, or the entity's table name, that is not a plain SQL identifier (letters, digits
+    and `_`; the table may be `schema.name`): both are written into the SQL, so a quoted or spaced
+    name is refused by name.
 - **Nothing changes for an entity that declares nothing.**
 
 Measured on PostgreSQL 18.1, 1,000,000 rows (design note `docs/JSONB_DECLARED_COLUMN.md`):
