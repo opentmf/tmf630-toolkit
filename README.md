@@ -2467,6 +2467,10 @@ Measured on PostgreSQL 18.1, 1,000,000 rows (design note `docs/JSONB_DECLARED_CO
   repository.save(row);
   ```
 
+  `copy` reads the domain object through its public accessors (a record's components, or JavaBeans
+  getters) and sets each declared field through the row's public setter; a declared field without
+  one is refused when `copy` is called.
+
 - A hand-written update sets the payload and the column in ONE statement. This is the only way that
   also moves a row to its new partition:
 

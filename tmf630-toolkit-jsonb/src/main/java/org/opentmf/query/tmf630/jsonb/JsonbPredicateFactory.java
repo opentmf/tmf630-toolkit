@@ -298,15 +298,15 @@ public class JsonbPredicateFactory {
         text + operatorAndPattern + " ESCAPE '" + JsonbStringEscape.LIKE_ESCAPE + "'", bound);
   }
 
-  /**
-   * The value as the JDBC driver can bind it and as the payload holds it: an {@link Enum} by the
-   * text the mapper writes for it ({@link Enum#name()} when the mapper writes no scalar).
-   */
   /** {@code value} as the JDBC driver binds it and the payload holds it (see {@link #bindable}). */
   Object bindValue(Object value) {
     return bindable(value);
   }
 
+  /**
+   * The value as the JDBC driver can bind it and as the payload holds it: an {@link Enum} by the
+   * text the mapper writes for it ({@link Enum#name()} when the mapper writes no scalar).
+   */
   private Object bindable(Object value) {
     if (!(value instanceof Enum<?> constant)) {
       return value;

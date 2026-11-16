@@ -143,7 +143,9 @@ public record JsonbEntityMetadata(
       Class<?> rowType, Class<?> domainType) {
     List<JsonbDeclaredColumn> out = new ArrayList<>();
     Set<String> paths = new HashSet<>();
-    for (Class<?> cursor = rowType; cursor != null && cursor != Object.class; ) {
+    for (Class<?> cursor = rowType;
+        cursor != null && cursor != Object.class;
+        cursor = cursor.getSuperclass()) {
       for (Field field : cursor.getDeclaredFields()) {
         Tmf630JsonbColumn annotation = field.getAnnotation(Tmf630JsonbColumn.class);
         if (annotation == null) {
@@ -157,7 +159,6 @@ public record JsonbEntityMetadata(
         }
         out.add(new JsonbDeclaredColumn(path, columnName(field), field.getName(), box(field.getType())));
       }
-      cursor = cursor.getSuperclass();
     }
     return out;
   }
@@ -167,12 +168,13 @@ public record JsonbEntityMetadata(
     if (path == null || path.isBlank()) {
       throw declaredColumnError(rowType, String.valueOf(path), "is blank");
     }
+    String domainName = domainType.getSimpleName();
     Class<?> current = domainType;
     String[] segments = path.split("\\.", -1);
     for (int i = 0; i < segments.length; i++) {
       Optional<Field> field = findField(current, segments[i]);
       if (field.isEmpty()) {
-        throw declaredColumnError(rowType, path, "names no field of " + domainType.getSimpleName());
+        throw declaredColumnError(rowType, path, "names no field of " + domainName);
       }
       Class<?> type = field.get().getType();
       if (Collection.class.isAssignableFrom(type) || type.isArray()) {

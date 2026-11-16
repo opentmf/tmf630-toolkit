@@ -35,7 +35,7 @@ All notable changes to `tmf630-toolkit` are documented in this file.
     six-argument constructor is kept;
   - `JsonbSortBuilder.buildOrderByClause(sort, types, declaredColumnOf)`;
   - `Tmf630JsonbColumns.copy(domainObject, row[, mapper])`, which fills the declared fields before
-    a JPA save;
+    a JPA save, through the domain object's public accessors and the row's public setters;
   - the bean `Tmf630JsonbColumnCheck.mismatches(rowType)`, which lists the rows where a column and
     the payload differ.
 - **Writing.** A hand-written update sets the payload and the column in one statement. A trigger

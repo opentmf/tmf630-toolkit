@@ -1,6 +1,11 @@
 package org.opentmf.query.tmf630.jsonb;
 
-import java.lang.reflect.Field;
+import java.beans.IntrospectionException;
+import java.beans.Introspector;
+import java.beans.PropertyDescriptor;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.lang.reflect.RecordComponent;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -22,6 +27,10 @@ import tools.jackson.databind.json.JsonMapper;
  * <p>A hand-written SQL update of the payload ({@code jsonb_set}) is not a JPA save: it sets the
  * column in the same statement ({@code UPDATE t SET payload = jsonb_set(…), sent_at = ? WHERE …}).
  * {@link Tmf630JsonbColumnCheck#mismatches} finds a row where the two differ.
+ *
+ * <p>It reads the domain object through its public accessors (a record's components, or JavaBeans
+ * getters) and sets the row through its public JavaBeans setters, as the toolkit's field selection
+ * reads a response.
  */
 public final class Tmf630JsonbColumns {
 
@@ -60,34 +69,60 @@ public final class Tmf630JsonbColumns {
       if (current == null) {
         return null;
       }
-      Optional<Field> field = JsonbEntityMetadata.findField(current.getClass(), segment);
-      if (field.isEmpty()) {
-        throw new Tmf630JsonbConfigurationException(
-            "No field '" + segment + "' of path '" + path + "' on " + current.getClass().getName());
-      }
-      current = get(field.get(), current);
+      current = call(accessor(current.getClass(), segment, path), current);
     }
     return current;
   }
 
-  private static Object get(Field field, Object target) {
-    try {
-      field.setAccessible(true);
-      return field.get(target);
-    } catch (IllegalAccessException e) {
-      throw new Tmf630JsonbConfigurationException("Cannot read " + field + ": " + e.getMessage());
+  /** The record component's accessor, or the JavaBeans getter, of {@code name} on {@code type}. */
+  private static Method accessor(Class<?> type, String name, String path) {
+    if (type.isRecord()) {
+      for (RecordComponent component : type.getRecordComponents()) {
+        if (component.getName().equals(name)) {
+          return component.getAccessor();
+        }
+      }
+    } else {
+      Optional<Method> getter = property(type, name).map(PropertyDescriptor::getReadMethod);
+      if (getter.isPresent()) {
+        return getter.get();
+      }
     }
+    throw new Tmf630JsonbConfigurationException(
+        "No public accessor for '" + name + "' of path '" + path + "' on " + type.getName());
   }
 
   private static void write(Object row, String fieldName, Object value) {
-    Field field =
-        JsonbEntityMetadata.findField(row.getClass(), fieldName)
-            .orElseThrow(() -> new Tmf630JsonbConfigurationException("No field " + fieldName));
+    Method setter =
+        property(row.getClass(), fieldName)
+            .map(PropertyDescriptor::getWriteMethod)
+            .orElseThrow(
+                () ->
+                    new Tmf630JsonbConfigurationException(
+                        "Tmf630JsonbColumns.copy needs a public setter for the declared field '"
+                            + fieldName + "' of " + row.getClass().getName()));
+    call(setter, row, value);
+  }
+
+  private static Optional<PropertyDescriptor> property(Class<?> type, String name) {
     try {
-      field.setAccessible(true);
-      field.set(row, value);
-    } catch (IllegalAccessException e) {
-      throw new Tmf630JsonbConfigurationException("Cannot write " + field + ": " + e.getMessage());
+      for (PropertyDescriptor property :
+          Introspector.getBeanInfo(type, Object.class).getPropertyDescriptors()) {
+        if (property.getName().equals(name)) {
+          return Optional.of(property);
+        }
+      }
+      return Optional.empty();
+    } catch (IntrospectionException e) {
+      throw new Tmf630JsonbConfigurationException("Cannot introspect " + type.getName(), e);
+    }
+  }
+
+  private static Object call(Method method, Object target, Object... arguments) {
+    try {
+      return method.invoke(target, arguments);
+    } catch (IllegalAccessException | InvocationTargetException e) {
+      throw new Tmf630JsonbConfigurationException("Cannot call " + method, e);
     }
   }
 

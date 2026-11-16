@@ -206,6 +206,33 @@ class JsonbDeclaredColumnTest {
     assertThat(row.stage).isEqualTo("inProgress");
   }
 
+  @Test
+  void copyReadsAPlainObjectThroughItsGetters() {
+    LetterRow row = Tmf630JsonbColumns.copy(new Letter("Ankara"), new LetterRow());
+
+    assertThat(row.recipient).isEqualTo("Ankara");
+  }
+
+  @Test
+  void copyNeedsAPublicSetterOnTheRow() {
+    Letter letter = new Letter("Ankara");
+    SetterlessRow row = new SetterlessRow();
+
+    assertThatThrownBy(() -> Tmf630JsonbColumns.copy(letter, row))
+        .isInstanceOf(Tmf630JsonbConfigurationException.class)
+        .hasMessageContaining("needs a public setter for the declared field 'recipient'");
+  }
+
+  @Test
+  void copyNeedsAPublicAccessorOnTheDomainObject() {
+    Sealed sealed = new Sealed("Ankara");
+    SealedRow row = new SealedRow();
+
+    assertThatThrownBy(() -> Tmf630JsonbColumns.copy(sealed, row))
+        .isInstanceOf(Tmf630JsonbConfigurationException.class)
+        .hasMessageContaining("No public accessor for 'recipient' of path 'recipient'");
+  }
+
   // ---- fixtures -------------------------------------------------------------------------------------
 
   record Receiver(String city) {}
@@ -235,6 +262,82 @@ class JsonbDeclaredColumnTest {
 
     @Tmf630JsonbColumn(path = "priority")
     Integer priority;
+
+    public void setSentAt(OffsetDateTime sentAt) {
+      this.sentAt = sentAt;
+    }
+
+    public void setState(String state) {
+      this.state = state;
+    }
+
+    public void setReceiverCity(String receiverCity) {
+      this.receiverCity = receiverCity;
+    }
+
+    public void setPriority(Integer priority) {
+      this.priority = priority;
+    }
+  }
+
+  /** A domain object read through JavaBeans getters rather than a record's accessors. */
+  public static class Letter {
+    private final String recipient;
+
+    public Letter(String recipient) {
+      this.recipient = recipient;
+    }
+
+    public String getRecipient() {
+      return recipient;
+    }
+  }
+
+  @Tmf630JsonbBacked(domainType = Letter.class)
+  public static class LetterRow {
+    String payload;
+
+    @Tmf630JsonbColumn(path = "recipient")
+    String recipient;
+
+    public void setRecipient(String recipient) {
+      this.recipient = recipient;
+    }
+  }
+
+  /** Declares a column but offers no setter for it. */
+  @Tmf630JsonbBacked(domainType = Letter.class)
+  static class SetterlessRow {
+    String payload;
+
+    @Tmf630JsonbColumn(path = "recipient")
+    String recipient;
+  }
+
+  /** A domain class with the field the row declares, but no public getter for it. */
+  public static class Sealed {
+    private final String recipient;
+
+    public Sealed(String recipient) {
+      this.recipient = recipient;
+    }
+
+    @Override
+    public String toString() {
+      return recipient;
+    }
+  }
+
+  @Tmf630JsonbBacked(domainType = Sealed.class)
+  public static class SealedRow {
+    String payload;
+
+    @Tmf630JsonbColumn(path = "recipient")
+    String recipient;
+
+    public void setRecipient(String recipient) {
+      this.recipient = recipient;
+    }
   }
 
   @Tmf630JsonbBacked(domainType = Message.class)
@@ -317,5 +420,9 @@ class JsonbDeclaredColumnTest {
 
     @Tmf630JsonbColumn(path = "stage")
     String stage;
+
+    public void setStage(String stage) {
+      this.stage = stage;
+    }
   }
 }
