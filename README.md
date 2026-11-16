@@ -2324,7 +2324,8 @@ Startup refuses, outside double quotes:
 - a comment marker (`--`, `/*`);
 - a parenthesis.
 
-It also refuses text directly after a closing double quote other than `.` (`"message"m`, an alias),
+It also refuses text directly before an opening or after a closing double quote other than `.`
+(`m"x"`, `"message"m`: a table with an alias, whose `INSERT` is a syntax error),
 and a double quote that is never closed. Such a name only worked by accident: `message m` is read
 by a `SELECT` as a table with an alias, and refused by an `INSERT`.
 

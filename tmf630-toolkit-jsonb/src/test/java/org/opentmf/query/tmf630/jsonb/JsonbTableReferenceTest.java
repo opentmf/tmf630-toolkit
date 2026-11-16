@@ -56,6 +56,8 @@ class JsonbTableReferenceTest {
         Arguments.of("\"open", "a double quote that is never closed"),
         Arguments.of("\"message\"m", "text directly after a closing double quote"),
         Arguments.of("\"dnms\".\"message\"m", "text directly after a closing double quote"),
+        Arguments.of("m\"x\"", "text directly before an opening double quote"),
+        Arguments.of("dnms.m\"x\"", "text directly before an opening double quote"),
         Arguments.of("message,other", "',' outside double quotes"),
         Arguments.of("message?", "'?' outside double quotes"),
         Arguments.of(" message m ", "whitespace outside double quotes"));

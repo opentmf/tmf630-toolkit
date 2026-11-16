@@ -60,7 +60,9 @@ All notable changes to `tmf630-toolkit` are documented in this file.
   - whitespace inside the name, `;`, a comment marker (`--`, `/*`) or a parenthesis, outside double
     quotes (`message m` was read by a `SELECT` as a table with an alias, and refused by an
     `INSERT`);
-  - text directly after a closing double quote other than `.` (`"message"m`, an alias);
+  - text directly before an opening or after a closing double quote other than `.` (`m"x"`,
+    `"message"m`: a table with an alias; PostgreSQL answers its `SELECT` and refuses its `INSERT`
+    with a syntax error, `Tmf630JsonbTableNameIT`);
   - a comma outside double quotes (`message,other`, a join);
   - a double quote that is never closed (`"open`);
   - `?` outside double quotes, which the JDBC driver reads as a parameter.

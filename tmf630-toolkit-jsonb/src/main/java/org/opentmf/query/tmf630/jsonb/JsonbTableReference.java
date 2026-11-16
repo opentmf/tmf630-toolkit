@@ -12,8 +12,9 @@ package org.opentmf.query.tmf630.jsonb;
  * unquoted name, and dot-separated parts, each quoted or not. Whitespace at the two ends of the
  * name passes, as the SQL around it reads it in 3.5.2. Refused, outside double quotes: whitespace
  * inside the name, {@code ;}, {@code ,}, {@code ?} (the JDBC driver reads it as a parameter), a
- * comment marker ({@code --}, {@code /*}) and a parenthesis; text directly after a closing double
- * quote other than {@code .}; and a double quote that is never closed.
+ * comment marker ({@code --}, {@code /*}) and a parenthesis; text directly before an opening or
+ * after a closing double quote other than {@code .} ({@code m"x"} and {@code "m"x} are a table
+ * with an alias); and a double quote that is never closed.
  */
 final class JsonbTableReference {
 
@@ -28,14 +29,11 @@ final class JsonbTableReference {
     int i = 0;
     while (i < inner.length()) {
       if (inner.charAt(i) == '"') {
-        int close = closingQuote(inner, i);
-        if (close < 0) {
-          return "a double quote that is never closed";
+        String quoted = quotedPartProblem(inner, i);
+        if (quoted != null) {
+          return quoted;
         }
-        i = close + 1;
-        if (i < inner.length() && inner.charAt(i) != '.') {
-          return "text directly after a closing double quote";
-        }
+        i = closingQuote(inner, i) + 1;
       } else {
         String found = forbiddenAt(inner, i);
         if (found != null) {
@@ -43,6 +41,21 @@ final class JsonbTableReference {
         }
         i++;
       }
+    }
+    return null;
+  }
+
+  /** What is wrong around the double-quoted part opening at {@code open}, or {@code null}. */
+  private static String quotedPartProblem(String name, int open) {
+    if (open > 0 && name.charAt(open - 1) != '.') {
+      return "text directly before an opening double quote";
+    }
+    int close = closingQuote(name, open);
+    if (close < 0) {
+      return "a double quote that is never closed";
+    }
+    if (close + 1 < name.length() && name.charAt(close + 1) != '.') {
+      return "text directly after a closing double quote";
     }
     return null;
   }
