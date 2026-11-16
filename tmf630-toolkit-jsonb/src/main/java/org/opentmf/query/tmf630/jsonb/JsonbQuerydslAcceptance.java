@@ -4,7 +4,6 @@ import com.querydsl.core.types.Expression;
 import com.querydsl.core.types.Predicate;
 import com.querydsl.core.types.dsl.PathBuilder;
 import java.util.List;
-import java.util.Set;
 import org.opentmf.query.tmf630.filtering.FieldAllowlistProvider;
 import org.opentmf.query.tmf630.filtering.JsonPathFilterPredicateBuilder;
 import org.opentmf.query.tmf630.filtering.TmfFilteringException;
@@ -84,19 +83,6 @@ public final class JsonbQuerydslAcceptance {
   /** The check that refuses nothing: the JSONB terminal's default, as in 3.5.2. */
   public static JsonbQuerydslAcceptance none() {
     return NONE;
-  }
-
-  /** The check with a core {@link PredicateFactory} built from {@code settings} and no allowlist. */
-  public static JsonbQuerydslAcceptance of(
-      Tmf630FilterSettings settings,
-      FieldPathResolver fieldPathResolver,
-      ValueConverter valueConverter) {
-    return new JsonbQuerydslAcceptance(
-        settings,
-        fieldPathResolver,
-        valueConverter,
-        predicateFactoryFor(settings),
-        rootEntity -> Set.of());
   }
 
   /** The core's {@link PredicateFactory} as the attribute-filtering settings configure it. */

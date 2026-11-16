@@ -112,7 +112,8 @@ class Tmf630JsonbTypeGateIT {
         refusedUrl("s.regex", "^abcdefghij", "Regex pattern too long for field: s"),
         // U6: between with three values, the core's message
         refusedUrl("i.between", "1,2,3", "between operator expects exactly 2 values for field: i"),
-        // F1: =~ on a non-string, also inside an array match (querydsl-mongodb absent)
+        // F1: =~ on a non-string, also inside an array match (refused inside the match, before the
+        // element-match hook is reached)
         refusedFilter("$[?(@.i =~ /^5/)]", REGEX_TYPE + "i"),
         refusedFilter("$[?(@.ld =~ /2025/i)]", REGEX_TYPE + "ld"),
         refusedFilter("$[?(@.items[?(@.i =~ /5/)])]", REGEX_TYPE + "i"),
@@ -166,7 +167,10 @@ class Tmf630JsonbTypeGateIT {
         acceptedFilter("$[?(@.o =~ /x/)]", "A"),
         acceptedFilter("$[?((@.s == 'alpha'))]", "A"),
         acceptedFilter("$[?(@.s != null)]", "A", "B"),
-        // array matches stay accepted without querydsl-mongodb on the classpath
+        // array matches stay accepted: the JSONB check overrides the element-match hook and never
+        // builds a Mongo elemMatch (querydsl-mongodb IS on this module's test classpath, for the
+        // combination suite; the hook without it is proven in the core,
+        // JsonPathFilterPredicateBuilderElementMatchTest)
         acceptedFilter("$[?(@.items[?(@.b == 'x')])]", "A"),
         acceptedFilter("$[?(@.items[?(@.i > 1 && @.b == 'x')])]", "A"),
         // HELD (TOOLKIT-NEGATION-MEANING-RULING-1): a negated group, through an array too
@@ -212,6 +216,13 @@ class Tmf630JsonbTypeGateIT {
         clauseBuilder.build(JsonbGateDomain.class, Map.of(param, new String[] {value}));
 
     assertThat(ids(where)).as(where.sql() + " " + where.params()).isNotNull();
+  }
+
+  @Test
+  void aNullAcceptanceIsRefusedByName() {
+    assertThatThrownBy(() -> clauseBuilder.withQuerydslAcceptance(null))
+        .isInstanceOf(NullPointerException.class)
+        .hasMessage("acceptance must not be null; JsonbQuerydslAcceptance.none() checks nothing");
   }
 
   @Test

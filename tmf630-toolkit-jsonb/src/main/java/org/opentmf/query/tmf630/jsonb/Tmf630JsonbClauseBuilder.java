@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import org.opentmf.query.tmf630.filtering.Tmf630AttributeClause;
@@ -144,11 +145,19 @@ public class Tmf630JsonbClauseBuilder {
   }
 
   /**
-   * This builder with {@code acceptance}, which refuses what the QueryDSL terminal refuses before
-   * any SQL is emitted ({@code opentmf.tmf630.jsonb.querydsl-acceptance}, an opt-in since 3.6.0).
-   * {@link JsonbQuerydslAcceptance#none()} checks nothing, as before 3.6.0.
+   * A copy of this builder with {@code acceptance}, which refuses what the QueryDSL terminal refuses
+   * before any SQL is emitted ({@code opentmf.tmf630.jsonb.querydsl-acceptance}, an opt-in since
+   * 3.6.0). {@link JsonbQuerydslAcceptance#none()} checks nothing, as before 3.6.0.
+   *
+   * <p>The copy is always a {@code Tmf630JsonbClauseBuilder}, never a subclass: a subclass that
+   * overrides methods of this class loses those overrides in the copy, so it should pass its
+   * acceptance through its own constructor instead.
+   *
+   * @throws NullPointerException if {@code acceptance} is {@code null}
    */
   public Tmf630JsonbClauseBuilder withQuerydslAcceptance(JsonbQuerydslAcceptance acceptance) {
+    Objects.requireNonNull(
+        acceptance, "acceptance must not be null; JsonbQuerydslAcceptance.none() checks nothing");
     return new Tmf630JsonbClauseBuilder(this, acceptance);
   }
 
