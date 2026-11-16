@@ -118,11 +118,10 @@ class Tmf630JsonbTableNameIT {
             .query(String.class)
             .single())
         .isEqualTo("alpha");
-    assertThatThrownBy(
-            () ->
-                jdbc.sql("INSERT INTO m\"x\" (id, payload) VALUES (?, ?::jsonb)")
-                    .params("B", "{\"name\":\"bravo\"}")
-                    .update())
+    JdbcClient.StatementSpec insert =
+        jdbc.sql("INSERT INTO m\"x\" (id, payload) VALUES (?, ?::jsonb)")
+            .params("B", "{\"name\":\"bravo\"}");
+    assertThatThrownBy(insert::update)
         .isInstanceOf(BadSqlGrammarException.class)
         .rootCause()
         .hasMessageContaining("syntax error at or near \"\"x\"\"");

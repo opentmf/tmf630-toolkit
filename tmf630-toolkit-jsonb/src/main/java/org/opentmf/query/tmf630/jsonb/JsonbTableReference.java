@@ -29,17 +29,11 @@ final class JsonbTableReference {
     int i = 0;
     while (i < inner.length()) {
       if (inner.charAt(i) == '"') {
-        if (i > 0 && inner.charAt(i - 1) != '.') {
-          return "text directly before an opening double quote";
+        String quoted = quotedPartProblem(inner, i);
+        if (quoted != null) {
+          return quoted;
         }
-        int close = closingQuote(inner, i);
-        if (close < 0) {
-          return "a double quote that is never closed";
-        }
-        i = close + 1;
-        if (i < inner.length() && inner.charAt(i) != '.') {
-          return "text directly after a closing double quote";
-        }
+        i = closingQuote(inner, i) + 1;
       } else {
         String found = forbiddenAt(inner, i);
         if (found != null) {
@@ -47,6 +41,21 @@ final class JsonbTableReference {
         }
         i++;
       }
+    }
+    return null;
+  }
+
+  /** What is wrong around the double-quoted part opening at {@code open}, or {@code null}. */
+  private static String quotedPartProblem(String name, int open) {
+    if (open > 0 && name.charAt(open - 1) != '.') {
+      return "text directly before an opening double quote";
+    }
+    int close = closingQuote(name, open);
+    if (close < 0) {
+      return "a double quote that is never closed";
+    }
+    if (close + 1 < name.length() && name.charAt(close + 1) != '.') {
+      return "text directly after a closing double quote";
     }
     return null;
   }
