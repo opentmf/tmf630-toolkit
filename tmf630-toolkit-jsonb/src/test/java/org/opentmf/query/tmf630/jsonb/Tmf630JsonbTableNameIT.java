@@ -1,6 +1,7 @@
 package org.opentmf.query.tmf630.jsonb;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
@@ -8,6 +9,7 @@ import java.util.List;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -54,7 +56,8 @@ class Tmf630JsonbTableNameIT {
             "CREATE TABLE \"dot.row\" (id text PRIMARY KEY, payload jsonb NOT NULL)",
             "CREATE TABLE tn.schema_row (id text PRIMARY KEY, payload jsonb NOT NULL)",
             "CREATE TABLE tn.\"Quoted Schema Row\" (id text PRIMARY KEY, payload jsonb NOT NULL)",
-            "CREATE TABLE tn.three_row (id text PRIMARY KEY, payload jsonb NOT NULL)")) {
+            "CREATE TABLE tn.three_row (id text PRIMARY KEY, payload jsonb NOT NULL)",
+            "CREATE TABLE m (id text PRIMARY KEY, payload jsonb NOT NULL)")) {
       jdbc.sql(ddl).update();
     }
   }
@@ -98,6 +101,38 @@ class Tmf630JsonbTableNameIT {
             field -> String.class);
 
     assertThat(page.getContent()).containsExactly(new NameDoc("B", "bravo"));
+  }
+
+  /**
+   * {@code m"x"} (text directly before an opening quote) is NOT a working table reference in 3.5.2:
+   * the module writes the name unchanged, and PostgreSQL reads {@code m"x"} as the table {@code m}
+   * with the alias {@code x}. Its SELECT answers by accident; its INSERT, the module's write, is a
+   * syntax error (an INSERT alias needs {@code AS}). So startup refuses it.
+   */
+  @Test
+  void textBeforeAQuoteIsATableWithAnAliasThatCannotBeWritten() {
+    jdbc.sql("INSERT INTO m (id, payload) VALUES ('A', '{\"name\":\"alpha\"}'::jsonb)").update();
+
+    assertThat(jdbc.sql("SELECT payload->>'name' FROM m\"x\" WHERE x.id = 'A'")
+            .query(String.class)
+            .single())
+        .isEqualTo("alpha");
+    assertThatThrownBy(
+            () ->
+                jdbc.sql("INSERT INTO m\"x\" (id, payload) VALUES (?, ?::jsonb)")
+                    .params("B", "{\"name\":\"bravo\"}")
+                    .update())
+        .hasMessageContaining("syntax error");
+    assertThatThrownBy(() -> JsonbEntityMetadata.of(TextBeforeQuoteRow.class))
+        .isInstanceOf(Tmf630JsonbConfigurationException.class)
+        .hasMessageContaining("text directly before an opening double quote");
+  }
+
+  @Table(name = "m\"x\"")
+  @Tmf630JsonbBacked(domainType = NameDoc.class)
+  static class TextBeforeQuoteRow {
+    @Id String id;
+    JsonNode payload;
   }
 
   @Table(name = " ws_row ")
