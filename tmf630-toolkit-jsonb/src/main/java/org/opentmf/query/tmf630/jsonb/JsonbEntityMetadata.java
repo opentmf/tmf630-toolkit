@@ -65,9 +65,6 @@ public record JsonbEntityMetadata(
    */
   private static final Pattern SQL_IDENTIFIER = Pattern.compile("[A-Za-z_]\\w*+");
 
-  /** The form the table name of an entity with a declared column must have: [schema.]identifier. */
-  private static final Pattern SQL_TABLE = Pattern.compile("[A-Za-z_]\\w*+(?:\\.[A-Za-z_]\\w*+)?+");
-
   /** The metadata without declared columns, as before 3.6.0. */
   public JsonbEntityMetadata(
       Class<?> rowType,
@@ -136,13 +133,15 @@ public record JsonbEntityMetadata(
     }
     String tableName = resolveTableName(rowType);
     List<JsonbDeclaredColumn> declaredColumns = discoverDeclaredColumns(rowType, domainType);
-    if (!declaredColumns.isEmpty() && !SQL_TABLE.matcher(tableName).matches()) {
+    String tableProblem = JsonbTableReference.problem(tableName);
+    if (tableProblem != null) {
       throw new Tmf630JsonbConfigurationException(
           rowType.getName()
-              + " declares a @Tmf630JsonbColumn, so its table name must be a plain SQL identifier"
-              + " ([schema.]name, letters, digits and '_'): '"
+              + "'s table name '"
               + tableName
-              + "' is not.");
+              + "' is not a table reference: it has "
+              + tableProblem
+              + ". Quote a name that needs it, as in @Table(name = \"\\\"My Table\\\"\").");
     }
     return new JsonbEntityMetadata(
         rowType,

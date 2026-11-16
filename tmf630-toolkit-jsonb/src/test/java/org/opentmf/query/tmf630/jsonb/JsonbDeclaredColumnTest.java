@@ -104,11 +104,17 @@ class JsonbDeclaredColumnTest {
   }
 
   @Test
-  void aTableNameThatIsNoPlainIdentifierIsRefusedWhenAColumnIsDeclared() {
+  void aTableNameThatIsNoTableReferenceIsRefused() {
     assertThatThrownBy(() -> JsonbEntityMetadata.of(SpacedTableRow.class))
         .isInstanceOf(Tmf630JsonbConfigurationException.class)
-        .hasMessageContaining("its table name must be a plain SQL identifier")
-        .hasMessageContaining("'message row' is not");
+        .hasMessageContaining("table name 'message row' is not a table reference")
+        .hasMessageContaining("whitespace outside double quotes");
+  }
+
+  @Test
+  void aQuotedMixedCaseTableIsAcceptedWhenAColumnIsDeclared() {
+    assertThat(JsonbEntityMetadata.of(QuotedTableRow.class).tableName())
+        .isEqualTo("\"MessageRow\"");
   }
 
   @Test
@@ -374,6 +380,15 @@ class JsonbDeclaredColumnTest {
   @Table(name = "message row")
   @Tmf630JsonbBacked(domainType = Message.class)
   static class SpacedTableRow {
+    String payload;
+
+    @Tmf630JsonbColumn(path = "state")
+    String state;
+  }
+
+  @Table(name = "\"MessageRow\"")
+  @Tmf630JsonbBacked(domainType = Message.class)
+  static class QuotedTableRow {
     String payload;
 
     @Tmf630JsonbColumn(path = "state")

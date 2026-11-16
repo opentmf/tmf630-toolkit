@@ -2303,6 +2303,19 @@ against it via Postgres SQL/JSON path — no ORM object graph, no lazy-load surf
 3. Bootstrap discovers `@Tmf630JsonbBacked` via the JPA metamodel. Reads and writes go
    through auto-configured beans; you don't wire anything else.
 
+**The table name is written into the module's SQL as it is** (`@Table(name)`, else the class
+name in snake case). The module reads `name` only; `@Table(schema = …)` is ignored, so the
+connection's `search_path` decides the schema, or the name carries it (`dnms.product_order_row`).
+Since 3.6.0 startup checks that the name is a table reference. Every form PostgreSQL accepts
+passes:
+- a quoted mixed-case name, `@Table(name = "\"ProductOrderRow\"")`;
+- `$` or non-ASCII letters in an unquoted name;
+- two or three dot-separated parts, each quoted or not.
+
+Startup refuses only whitespace, `;`, a comment marker (`--`, `/*`) or a parenthesis outside
+double quotes. Such a name only worked by accident: `message m` is read by a `SELECT` as a table
+with an alias, and refused by an `INSERT`.
+
 > **Jackson 3 required (since 3.1.0).** The module's executors (de)serialize payloads
 > through a **`tools.jackson.databind.ObjectMapper`** bean — Jackson 3, not the legacy
 > `com.fasterxml.jackson.databind` line. Spring Boot 4 auto-configures a `JsonMapper`
@@ -2484,9 +2497,9 @@ public class CommunicationMessageRow {
   - a path through a list;
   - a primitive field (`int`), which cannot hold the NULL that an absent field must be (use
     `Integer`);
-  - a column name, or the entity's table name, that is not a plain SQL identifier (letters, digits
-    and `_`; the table may be `schema.name`): both are written into the SQL, so a quoted or spaced
-    name is refused by name.
+  - a column name that is not a plain SQL identifier (letters, digits and `_`): it is written into
+    the SQL, so a quoted or spaced name is refused by name. The entity's table name follows the
+    rule every JSONB entity follows (see above): any table reference PostgreSQL accepts.
 - **Nothing changes for an entity that declares nothing.**
 
 Measured on PostgreSQL 18.1, 1,000,000 rows (design note `docs/JSONB_DECLARED_COLUMN.md`):

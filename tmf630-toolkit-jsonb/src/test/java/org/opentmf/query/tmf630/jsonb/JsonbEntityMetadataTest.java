@@ -4,10 +4,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import jakarta.persistence.Id;
+import jakarta.persistence.Table;
 import jakarta.persistence.Version;
 import java.time.OffsetDateTime;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.data.annotation.CreatedBy;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.LastModifiedBy;
@@ -72,6 +77,82 @@ class JsonbEntityMetadataTest {
   }
 
   // --- fixtures ---
+
+  // ---- the table name is a table reference (since 3.6.0) ------------------------------------------
+
+  @ParameterizedTest
+  @MethodSource("namesThatKeepWorking")
+  void everyFormPostgresqlAcceptsKeepsWorking(Class<?> rowType, String tableName) {
+    assertThat(JsonbEntityMetadata.of(rowType).tableName()).isEqualTo(tableName);
+  }
+
+  static Stream<Arguments> namesThatKeepWorking() {
+    return Stream.of(
+        Arguments.of(QuotedMixedCaseRow.class, "\"CommunicationMessage\""),
+        Arguments.of(DollarRow.class, "message$v2"),
+        Arguments.of(NonAsciiRow.class, "mesaj_ğ"),
+        Arguments.of(TwoPartRow.class, "dnms.message"),
+        Arguments.of(ThreePartRow.class, "catalog.dnms.message"),
+        Arguments.of(QuotedPartsRow.class, "\"dnms\".\"Message\""),
+        Arguments.of(MinimalRow.class, "minimal_row"));
+  }
+
+  @Test
+  void aNameThatOnlyWorksByAccidentIsRefusedAtStartup() {
+    assertThatThrownBy(() -> JsonbEntityMetadata.of(AliasedRow.class))
+        .isInstanceOf(Tmf630JsonbConfigurationException.class)
+        .hasMessageContaining("table name 'message m' is not a table reference")
+        .hasMessageContaining("whitespace outside double quotes");
+  }
+
+  @Table(name = "\"CommunicationMessage\"")
+  @Tmf630JsonbBacked(domainType = MinimalDomain.class)
+  static class QuotedMixedCaseRow {
+    @Id private String id;
+    JsonNode payload;
+  }
+
+  @Table(name = "message$v2")
+  @Tmf630JsonbBacked(domainType = MinimalDomain.class)
+  static class DollarRow {
+    @Id private String id;
+    JsonNode payload;
+  }
+
+  @Table(name = "mesaj_ğ")
+  @Tmf630JsonbBacked(domainType = MinimalDomain.class)
+  static class NonAsciiRow {
+    @Id private String id;
+    JsonNode payload;
+  }
+
+  @Table(name = "dnms.message")
+  @Tmf630JsonbBacked(domainType = MinimalDomain.class)
+  static class TwoPartRow {
+    @Id private String id;
+    JsonNode payload;
+  }
+
+  @Table(name = "catalog.dnms.message")
+  @Tmf630JsonbBacked(domainType = MinimalDomain.class)
+  static class ThreePartRow {
+    @Id private String id;
+    JsonNode payload;
+  }
+
+  @Table(name = "\"dnms\".\"Message\"")
+  @Tmf630JsonbBacked(domainType = MinimalDomain.class)
+  static class QuotedPartsRow {
+    @Id private String id;
+    JsonNode payload;
+  }
+
+  @Table(name = "message m")
+  @Tmf630JsonbBacked(domainType = MinimalDomain.class)
+  static class AliasedRow {
+    @Id private String id;
+    JsonNode payload;
+  }
 
   static class FullDomain {}
 
