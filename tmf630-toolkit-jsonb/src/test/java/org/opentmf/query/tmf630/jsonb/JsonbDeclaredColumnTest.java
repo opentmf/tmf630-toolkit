@@ -294,7 +294,8 @@ class JsonbDeclaredColumnTest {
   }
 
   enum Stage {
-    IN_PROGRESS("inProgress");
+    IN_PROGRESS("inProgress"),
+    DONE("done");
 
     private final String wire;
 
