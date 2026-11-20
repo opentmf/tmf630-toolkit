@@ -4,6 +4,25 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 
 ## [3.6.0] - 2026-11-12
 
+### Fixed (JPA): case-insensitive filters no longer depend on the JVM's default locale
+
+- **Fix.** Under a Turkish (or Azerbaijani) default locale, `eqi`, `nei`, `likei`, `containsi`,
+  `startswithi` and `endswithi` on a JPA entity found nothing when the value held a capital
+  `I`: `?status.eqi=ACTIVE ITEM` answered an empty list for a stored `ACTIVE ITEM`, and `nei`
+  kept the row it should exclude. Querydsl's JPQL templates lower-case the value in Java with the
+  default locale (`ITEM` became `ıtem`, a dotless `ı`) and compare it with the database's
+  `lower(column)` (`item`). The toolkit now lower-cases the value itself with `Locale.ROOT`
+  before handing it to Querydsl. The defect is in 3.5.2 and earlier releases.
+- **Unchanged:** under every other default locale the JPQL text and its bound values are
+  byte-identical to 3.5.2 (pinned for every locale the JVM ships, except Turkish, Azerbaijani and
+  Lithuanian). `regexi` on JPA lowers both sides in the database and was not affected. Mongo
+  (a case-insensitive regex) and JSONB (`LOWER(…) = LOWER(?)`, `ILIKE`) never lower-cased in
+  Java and send the same queries as before.
+- **Under Turkish only:** a value with a dotted capital `İ` is now lowered to `i̇` (`i` plus a
+  combining dot), as under every other locale, where it was lowered to `i` before.
+- The sort parser's message for a rich sort term outside its context names the kind as
+  `simple-rich` under every locale (it read `sımple-rıch` under Turkish).
+
 ### Added (JSONB, opt-in per field): a payload field copied into a real column, `@Tmf630JsonbColumn`
 
 - **Opt-in per field; nothing changes for an entity that declares nothing.** Ledgers #4250 and

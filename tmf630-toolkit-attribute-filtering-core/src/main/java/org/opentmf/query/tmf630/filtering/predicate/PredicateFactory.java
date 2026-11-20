@@ -13,6 +13,7 @@ import java.lang.annotation.Annotation;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.opentmf.query.tmf630.filtering.TmfFilteringException;
 import org.opentmf.query.tmf630.filtering.TmfOperator;
@@ -89,15 +90,17 @@ public class PredicateFactory {
         yield root.getComparable(fieldPath, (Class) type).loe((Comparable) typedValue);
       }
       case LIKE -> string(root, fieldPath, type).like(String.valueOf(typedValue));
-      case LIKEI -> string(root, fieldPath, type).likeIgnoreCase(String.valueOf(typedValue));
+      case LIKEI ->
+          string(root, fieldPath, type).likeIgnoreCase(ignoreCaseOperand(root, typedValue));
       case CONTAINS -> string(root, fieldPath, type).contains(String.valueOf(typedValue));
-      case CONTAINSI -> string(root, fieldPath, type).containsIgnoreCase(String.valueOf(typedValue));
+      case CONTAINSI ->
+          string(root, fieldPath, type).containsIgnoreCase(ignoreCaseOperand(root, typedValue));
       case STARTS_WITH -> string(root, fieldPath, type).startsWith(String.valueOf(typedValue));
       case STARTS_WITHI ->
-          string(root, fieldPath, type).startsWithIgnoreCase(String.valueOf(typedValue));
+          string(root, fieldPath, type).startsWithIgnoreCase(ignoreCaseOperand(root, typedValue));
       case ENDS_WITH -> string(root, fieldPath, type).endsWith(String.valueOf(typedValue));
       case ENDS_WITHI ->
-          string(root, fieldPath, type).endsWithIgnoreCase(String.valueOf(typedValue));
+          string(root, fieldPath, type).endsWithIgnoreCase(ignoreCaseOperand(root, typedValue));
       case REGEX -> regex(root, fieldPath, type, String.valueOf(typedValue));
       case REGEXI -> regexIgnoreCase(root, fieldPath, type, String.valueOf(typedValue));
       case BETWEEN, IN, NIN, IS_NULL, IS_NOT_NULL ->
@@ -467,7 +470,22 @@ public class PredicateFactory {
 
   private Predicate equalsIgnoreCase(
       PathBuilder<?> root, String fieldPath, Class<?> type, Object typedValue) {
-    return string(root, fieldPath, type).equalsIgnoreCase(String.valueOf(typedValue));
+    return string(root, fieldPath, type).equalsIgnoreCase(ignoreCaseOperand(root, typedValue));
+  }
+
+  /**
+   * The operand of a case-insensitive operator. On a JPA root it is lower-cased here with {@link
+   * Locale#ROOT}: Querydsl's JPQL templates ({@code {0l} = {1l}}, {@code {%%1%%}}, …) lower-case
+   * a constant in Java with {@link String#toLowerCase()}, the JVM's default locale, so under a
+   * Turkish default a capital {@code I} became a dotless {@code ı} that the database's {@code
+   * lower(column)} never produces. Querydsl's second lower-casing of an already lower-cased text
+   * changes nothing, and under every locale without language-specific lower-casing (all but
+   * Turkish, Azerbaijani and Lithuanian) the result equals the released one byte for byte. A Mongo
+   * root keeps the raw value: its serializer emits a case-insensitive regex and lowers nothing.
+   */
+  private static String ignoreCaseOperand(PathBuilder<?> root, Object typedValue) {
+    String operand = String.valueOf(typedValue);
+    return isJpaRoot(root) ? operand.toLowerCase(Locale.ROOT) : operand;
   }
 
   private Predicate between(

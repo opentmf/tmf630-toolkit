@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import org.opentmf.query.tmf630.exception.TmfPagingException;
 import org.springframework.data.domain.Sort;
@@ -78,7 +79,7 @@ public class TmfSortParser {
     if (kind != TmfSortTerm.Kind.PLAIN && !acceptCorrelated) {
       throw new TmfPagingException(
           "Correlated sort terms ("
-              + kind.name().toLowerCase().replace('_', '-')
+              + kind.name().toLowerCase(Locale.ROOT).replace('_', '-')
               + ") are not supported in this context: "
               + expression);
     }
