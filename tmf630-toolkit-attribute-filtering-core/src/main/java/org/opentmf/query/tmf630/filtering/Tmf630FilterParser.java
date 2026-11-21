@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -211,7 +212,7 @@ public class Tmf630FilterParser {
     if (values.length > 1) {
       throw new TmfFilteringException("Only one filter.combineWithAttributes value is supported.");
     }
-    String normalized = values[0].trim().toUpperCase();
+    String normalized = values[0].trim().toUpperCase(Locale.ROOT);
     if ("AND".equals(normalized)) {
       return CombineMode.AND;
     }

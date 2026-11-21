@@ -6,10 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
+import java.util.Locale;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.domain.Sort.Direction;
 
 class TmfSortParserTest {
 
@@ -219,5 +221,33 @@ class TmfSortParserTest {
     TmfSort rich = parser.parseRich(List.of("$.arr[?(@.id == 'X')].value"));
     assertEquals(1, rich.terms().size());
     assertEquals(TmfSortTerm.Kind.JSONPATH, rich.terms().get(0).kind());
+  }
+
+  @Test
+  void sortKeyWithACapitalIKeepsItsSpellingUnderATurkishDefaultLocale() {
+    Locale before = Locale.getDefault();
+    Locale.setDefault(Locale.forLanguageTag("tr-TR"));
+    try {
+      TmfSortParser parser = new TmfSortParser(List.of("aggregateId", "ID"), false);
+      Sort sort = parser.parse(List.of("-aggregateId,ID"));
+      assertEquals(Sort.by(Direction.DESC, "aggregateId").and(Sort.by("ID")), sort);
+    } finally {
+      Locale.setDefault(before);
+    }
+  }
+
+  @Test
+  void rejectionNamesTheTermKindInEnglishUnderATurkishDefaultLocale() {
+    Locale before = Locale.getDefault();
+    Locale.setDefault(Locale.forLanguageTag("tr-TR"));
+    try {
+      TmfSortParser parser = new TmfSortParser(List.of(), true);
+      List<String> terms = List.of("arr[id=X].value");
+      IllegalArgumentException ex =
+          assertThrows(IllegalArgumentException.class, () -> parser.parse(terms));
+      assertTrue(ex.getMessage().contains("(simple-rich)"), ex.getMessage());
+    } finally {
+      Locale.setDefault(before);
+    }
   }
 }
