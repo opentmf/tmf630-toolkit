@@ -524,6 +524,18 @@ All notable changes to `tmf630-toolkit` are documented in this file.
   says that Mongo compares type-exactly, as released. It also notes that `cast-mode=lenient`
   avoids the 500 that the default `strict` answers on an `Integer` field holding `5.0`.
 
+### Build (contributors)
+
+- **Snapshot normalization is off for every build of this repository.** `.mvn/maven.config`
+  carries `-Daether.artifactResolver.snapshotNormalization=false`, and the enforcer stops a
+  build at `validate` when the line is missing or overridden. A resolved timestamped snapshot no
+  longer overwrites the shared `-SNAPSHOT.jar` base file that another build on the machine may be
+  using. The published jars are unchanged.
+- **The compatibility report installs the candidate into a private local repository.**
+  `tmf630-toolkit-compat/run.sh` installs the working tree into `target/compat-m2` (or
+  `COMPAT_LOCAL_REPO`) and never into the shared `~/.m2/repository`, which serves as its
+  read-only tail.
+
 ## [3.5.2] - 2026-11-04
 
 ### Fixed
