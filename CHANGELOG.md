@@ -536,6 +536,13 @@ All notable changes to `tmf630-toolkit` are documented in this file.
   `COMPAT_LOCAL_REPO`) and never into the shared `~/.m2/repository`, which serves as its
   read-only tail.
 
+### Dependencies
+
+- Spring Boot 4.1.2 -> 4.2.0 (the imported BOM). With it, among others: Spring Framework 7.0.10 ->
+  7.1.0, Spring Data JPA 4.1.2 -> 4.2.0, Spring Data MongoDB 5.1.2 -> 5.2.0, the MongoDB driver
+  5.8.1 -> 5.13.0, Jackson 3.1.7 -> 3.1.8, Micrometer 1.17.2 -> 1.18.0.
+- Build only: sonar-maven-plugin 5.8.0.7211 -> 5.9.0.7382.
+
 ## [3.5.2] - 2026-11-04
 
 ### Fixed
