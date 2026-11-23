@@ -9,7 +9,14 @@
 #
 # COMPAT_RELEASE    the released version to compare against (default 3.5.2)
 # COMPAT_CANDIDATE  an exact candidate version, e.g. a Nexus timestamped snapshot; when unset, the
-#                   working tree is installed into the local repository (no tests) and used
+#                   working tree is installed into the private local repository (no tests) and used
+# COMPAT_LOCAL_REPO the private local repository every Maven call of this script uses (default
+#                   target/compat-m2); the shared ~/.m2/repository is only its read-only tail
+#
+# The candidate's install never goes to the shared ~/.m2/repository: another build on the machine
+# that resolves the same -SNAPSHOT coordinates from a remote repository would replace it there
+# between two runs, and the report would compare the wrong jar. A gate that runs this script names
+# its own COMPAT_LOCAL_REPO.
 #
 # Output: target/compat/report.md (the gate's verdicts, every FAIL, the switch pages) and
 # report.tsv, the answers of each run, its log and the wall time of each Maven invocation.
@@ -19,6 +26,11 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 OUT="$ROOT/target/compat"
 RELEASE="${COMPAT_RELEASE:-3.5.2}"
+LOCAL_REPO="${COMPAT_LOCAL_REPO:-$ROOT/target/compat-m2}"
+mkdir -p "$LOCAL_REPO"
+LOCAL_REPO="$(cd "$LOCAL_REPO" && pwd)"
+# A private head repository with the shared one as its read-only tail (Maven 3.9).
+REPO_ARGS=(-Dmaven.repo.local="$LOCAL_REPO" -Dmaven.repo.local.tail="$HOME/.m2/repository")
 
 root_version="$(mvn -B -q help:evaluate -Dexpression=project.version -DforceStdout)"
 compat_parent="$(sed -n '/<parent>/,/<\/parent>/s:.*<version>\(.*\)</version>.*:\1:p' tmf630-toolkit-compat/pom.xml)"
@@ -32,8 +44,8 @@ if [ -n "${COMPAT_CANDIDATE:-}" ]; then
   CANDIDATE="$COMPAT_CANDIDATE"
 else
   CANDIDATE="$root_version"
-  echo "installing the candidate $CANDIDATE into the local repository (no tests)"
-  mvn -B -q install -DskipTests -DskipITs -Djacoco.skip=true
+  echo "installing the candidate $CANDIDATE into the private local repository $LOCAL_REPO (no tests)"
+  mvn -B -q "${REPO_ARGS[@]}" install -DskipTests -DskipITs -Djacoco.skip=true
 fi
 
 rm -rf "$OUT"
@@ -44,7 +56,7 @@ run() {
   local start end
   start="$(date -u +%s)"
   echo "$id: toolkit $version ${spring:+($spring)}"
-  mvn -B -Pcompat -pl tmf630-toolkit-compat clean verify \
+  mvn -B "${REPO_ARGS[@]}" -Pcompat -pl tmf630-toolkit-compat clean verify \
     -Dcompat.toolkit.version="$version" \
     -Dcompat.run="$id" \
     -Dcompat.out="$OUT" \
@@ -64,7 +76,7 @@ run R5 "$CANDIDATE" "opentmf.tmf630.jsonb.apply-regex-max-length=true"
 
 echo "comparing"
 status=0
-mvn -B -Pcompat -pl tmf630-toolkit-compat test \
+mvn -B "${REPO_ARGS[@]}" -Pcompat -pl tmf630-toolkit-compat test \
   -Dcompat.compare=true -Dcompat.out="$OUT" -Dtest=CompatComparatorTest \
   > "$OUT/compare.log" 2>&1 || status=$?
 echo "report: $OUT/report.md"

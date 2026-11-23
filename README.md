@@ -4119,6 +4119,13 @@ making them resolvable from downstream projects on the same machine. `verify` ru
 tests and integration tests but stops before installation, so a downstream project
 building against the current `-SNAPSHOT` would not find the artifacts.
 
+**Snapshot normalization is off** for every build of this repository: `.mvn/maven.config`
+carries `-Daether.artifactResolver.snapshotNormalization=false` (Maven 3.9.x, the enforcer's
+range). With it, a resolved timestamped snapshot stays its own file instead of being copied over
+the shared `<artifactId>-<base>-SNAPSHOT.jar`, which a second build on the same machine would
+rewrite under this one's running JVM. The enforcer stops every build at `validate` when the line
+is missing or overridden on the command line.
+
 ### JSONB combination suite
 
 `Tmf630JsonbCombinationIT` (module `tmf630-toolkit-jsonb`) is a generated suite of the JSONB
@@ -4171,6 +4178,13 @@ cells on a JPA twin and the samples of the 3.6.0 compatibility ledger. It record
 ```bash
 JAVA_HOME=/usr/lib64/openjdk-17 tmf630-toolkit-compat/run.sh   # COMPAT_RELEASE=3.5.2 by default
 ```
+
+Every Maven call of the script uses a private local repository, `target/compat-m2` unless
+`COMPAT_LOCAL_REPO` names another, with the shared `~/.m2/repository` as its read-only tail. The
+working tree's candidate is installed there and never into the shared repository, where another
+build on the machine that resolves the same `-SNAPSHOT` coordinates could replace it between two
+runs, and the report would compare the wrong jar. A gate that runs the script names its own
+`COMPAT_LOCAL_REPO`.
 
 Run R0 is the release and R1 the candidate under its defaults; R2 to R5 turn the JSONB opt-ins
 on. The gate compares R0 with R1. A request that answered 200 must answer the same rows, and one

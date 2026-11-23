@@ -213,6 +213,18 @@
                 <requireJavaVersion>
                   <version>[17,18)</version>
                 </requireJavaVersion>
+                <!-- Snapshot normalization off: .mvn/maven.config turns the resolver's snapshot
+                     normalization off, so a resolved timestamped snapshot stays its own file and
+                     is never copied over the shared <artifactId>-<base>-SNAPSHOT.jar that a
+                     second build beside this one rewrites. Every build of this repository - the
+                     gate, the compatibility report, the snapshot deploy, the release - stops here
+                     at validate when the line is missing or overridden. -->
+                <requireProperty>
+                  <property>aether.artifactResolver.snapshotNormalization</property>
+                  <regex>false</regex>
+                  <message>Snapshot normalization must be off: .mvn/maven.config must carry -Daether.artifactResolver.snapshotNormalization=false (and no -D on the command line may set it to true).</message>
+                  <regexMessage>Snapshot normalization must be off: .mvn/maven.config must carry -Daether.artifactResolver.snapshotNormalization=false (and no -D on the command line may set it to true).</regexMessage>
+                </requireProperty>
               </rules>
             </configuration>
           </execution>
