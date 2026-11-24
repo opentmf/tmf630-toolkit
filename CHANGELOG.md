@@ -2,7 +2,7 @@
 
 All notable changes to `tmf630-toolkit` are documented in this file.
 
-## [3.6.0] - 2026-11-12
+## [3.6.0] - 2026-11-24
 
 ### Fixed (JPA): case-insensitive filters no longer depend on the JVM's default locale
 
@@ -541,6 +541,8 @@ All notable changes to `tmf630-toolkit` are documented in this file.
 - Spring Boot 4.1.2 -> 4.2.0 (the imported BOM). With it, among others: Spring Framework 7.0.10 ->
   7.1.0, Spring Data JPA 4.1.2 -> 4.2.0, Spring Data MongoDB 5.1.2 -> 5.2.0, the MongoDB driver
   5.8.1 -> 5.13.0, Jackson 3.1.7 -> 3.1.8, Micrometer 1.17.2 -> 1.18.0.
+- Applications on Spring Boot 4.1.x keep working: the whole test suite passes with
+  `-Dspring-boot.version=4.1.2` as well. The README's requirements now read "4.1.x and 4.2.x".
 - Build only: sonar-maven-plugin 5.8.0.7211 -> 5.9.0.7382.
 
 ## [3.5.2] - 2026-11-04

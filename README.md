@@ -180,12 +180,13 @@ server-side.
 | -------------- | ------------------------------------------- | ----------------------------------------------- |
 | Java           | 17 (exact major; no 18+)                    | `maven-enforcer-plugin` — `[17,18)`             |
 | Maven          | 3.9.x                                       | `maven-enforcer-plugin` — `[3.9,3.10)`          |
-| Spring Boot    | 4.1.x (BOM-aligned)                         | Parent `pom.xml` `spring-boot.version=4.1.0`    |
+| Spring Boot    | 4.1.x and 4.2.x (BOM-aligned)               | Parent `pom.xml` `spring-boot.version=4.2.0`    |
 | Java persistence backend | JPA (any Hibernate-compatible dialect) **or** MongoDB 4.0+ | See [Prerequisites for attribute filtering](#prerequisites-for-attribute-filtering) |
 
 Consuming applications don't inherit the enforcer constraints — only the toolkit's own
 build is bounded to Java 17 and Maven 3.9.x. If you consume the released artifacts you
-just need Spring Boot 4.1.x on your classpath.
+just need Spring Boot 4.1.x or 4.2.x on your classpath: the toolkit is built against 4.2.0,
+and its whole test suite also passes against 4.1.2 (`-Dspring-boot.version=4.1.2`).
 
 ## Prerequisites for attribute filtering
 
